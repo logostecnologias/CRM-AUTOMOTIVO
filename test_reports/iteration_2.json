@@ -1,0 +1,62 @@
+{
+  "summary": "Iter 2 retest: ObjectId serialization bug fixed on POST /api/bots, duplicate_bot, and POST /api/contacts. Full bot->flow->publish->test chain now works. Publish correctly rejects invalid flow (0/2 start nodes) with 400. Frontend E2E (bot creation -> FlowEditor navigation -> palette visible -> Save toast -> Test panel -> WhatsApp pairing) all pass.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "Super admin login + create tenant (with admin_name field) 200",
+    "Tenant admin login (admin+iter2@iter2.com / iter2@123) 200",
+    "POST /api/bots 200 clean JSON with id + main_flow_id (ObjectId bug fixed)",
+    "GET /api/bots lists created bot",
+    "POST /api/bots/{id}/duplicate 200 returns new bot with (Cópia) suffix and new flow_id",
+    "PATCH /api/bots/{id} status 200 (rascunho -> pausado)",
+    "DELETE /api/bots/{id} 200",
+    "GET /api/flows/{flow_id} returns starter flow with 1 start node",
+    "PUT /api/flows/{flow_id} with [start,text,menu,end] + edges 200",
+    "POST /api/flows/{flow_id}/publish 200 for valid flow; version bumps to 2; bot status becomes 'ativo'",
+    "POST /api/flows/{flow_id}/publish 400 for invalid flow (0 or 2 start nodes) - validation enforced at publish",
+    "GET /api/flows/{flow_id}/versions returns saved history entries",
+    "POST /api/flows/{flow_id}/test {start:true} returns outputs [{type:text},{type:menu, options:[Um,Dois]}]",
+    "POST /api/contacts 200 clean JSON (ObjectId bug fixed)",
+    "Frontend: tenant login redirects to /app",
+    "Frontend: /app/bots -> click new-bot-btn -> fill name -> Criar navigates to /app/bots/{id}/flow/{flow_id}",
+    "Frontend: FlowEditor shows node-palette, palette-text, palette-menu, palette-end (all count=1)",
+    "Frontend: Salvar (save-flow-btn) shows 'Fluxo salvo com sucesso' toast",
+    "Frontend: Testar (test-flow-btn) opens test-chat simulation panel",
+    "Frontend: /app/whatsapp confirm-paired flow shows status 'conectado' with number vinculado"
+  ],
+  "failed": [
+    {
+      "area": "backend / flow execution engine",
+      "issue": "POST /api/flows/{id}/test outputs return empty text content field even though node data.message='Bem-vindo!' was saved. Engine seems to read a different field key. Menu options render correctly, but text node 'content' is empty string.",
+      "evidence": "Test start response: outputs=[{type:'text',content:''},{type:'menu',content:'',options:['Um','Dois']}] despite PUT saving data.message='Bem-vindo!' and menu prompt='Escolha:'",
+      "priority": "MEDIUM"
+    },
+    {
+      "area": "backend / flow execution engine",
+      "issue": "After menu, posting message='1' returns outputs=[] with status='ativa' instead of traversing option-1 branch to End node and setting status='finalizada'. Gibberish input also returns empty outputs (no fallback text or 'invalid message').",
+      "evidence": "Second POST /test with session_id and message='1' -> {outputs:[], status:'ativa'}",
+      "priority": "MEDIUM"
+    },
+    {
+      "area": "backend / flow validation",
+      "issue": "PUT /api/flows/{id} accepts flows with 0 or 2 start nodes (returns 200). Review request expected 400 on save. Validation is only enforced on publish, not on save.",
+      "evidence": "PUT with 0 start nodes -> 200; PUT with 2 start nodes -> 200; publish then correctly rejects with 400.",
+      "priority": "LOW"
+    },
+    {
+      "area": "backend / admin",
+      "issue": "POST /api/admin/tenants requires admin_name field (422 if missing). Not documented in test_credentials.md example.",
+      "evidence": "422 detail: {loc:[body,admin_name], msg:Field required} when omitted.",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "Fix flow test engine to emit text node message content in outputs (likely wrong field lookup: node.data.message vs node.data.text/label).",
+    "Fix flow test engine menu traversal: after user posts option value, should walk the outgoing edge (sourceHandle match) and emit next node's output; also finalize session on End node.",
+    "Add fallback/invalid-input handling when user posts non-matching value after a menu.",
+    "Optional: enforce start-node count validation on PUT /flows/{id} save (or at least warn). Currently only publish enforces.",
+    "Update /app/memory/test_credentials.md to include the admin_name field in the tenant creation example."
+  ],
+  "success_rate": {"backend": "~85% (bot CRUD, contacts, flow save/publish/versions all pass; flow execution engine has content+traversal issues)", "frontend": "100% for tested E2E flow"},
+  "retest_needed": true,
+  "full_testing_deferred": true
+}

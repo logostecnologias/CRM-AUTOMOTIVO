@@ -1,0 +1,51 @@
+{
+  "summary": "First-round smoke test of ZappZen backend + frontend. Auth (super admin + tenant admin), tenant CRUD, admin metrics, dashboard, whatsapp mock, contacts/sessions list, and multi-tenant isolation all work correctly. However, POST /api/bots returns HTTP 500 because it returns the dict after motor's insert_one mutated it with a raw ObjectId '_id', which FastAPI cannot serialize. This blocks the entire bot -> flow -> test/publish path, so no flow, flow-versions, publish or /flows/{id}/test tests could be executed. Frontend reproduces the same failure with an 'Uncaught runtime errors: Request failed with status code 500' overlay when clicking Criar on the Robôs page.",
+  "tested_scope": ["backend", "frontend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login (super_admin) returns 200 with role=super_admin",
+    "GET /api/auth/me returns current user",
+    "POST /api/admin/tenants creates tenant + tenant_admin user (200)",
+    "GET /api/admin/tenants lists tenants with bots_count/users_count",
+    "PATCH /api/admin/tenants/{id} suspend + reactivate",
+    "GET /api/admin/metrics returns global counts",
+    "POST /api/auth/login (tenant_admin) 200",
+    "Isolation: tenant_admin hitting GET /api/admin/tenants -> 403",
+    "GET /api/bots returns [] initially",
+    "GET /api/dashboard/metrics returns all 6 keys (active_conversations, awaiting_human, messages_month, active_bots, total_contacts, total_bots)",
+    "GET/POST /api/whatsapp/connection with start_pairing / confirm_paired / disconnect actions all 200 with correct status transitions and mock qrcode",
+    "GET /api/sessions and GET /api/sessions?status=aguardando_humano return 200",
+    "GET /api/contacts returns 200",
+    "Frontend: /login loads, super admin login redirects to /admin dashboard, Empresas page loads",
+    "Frontend: new-tenant modal + tenant creation + logout + tenant login all working",
+    "Frontend: tenant dashboard (/app) renders 6 metric cards; Robôs page loads and modal opens"
+  ],
+  "failed": [
+    {
+      "area": "backend / bots",
+      "issue": "POST /api/bots returns HTTP 500: 'ValueError: [TypeError(\"ObjectId object is not iterable\"), TypeError(vars() argument must have __dict__ attribute)]'. Root cause in /app/backend/routes/bots.py create_bot: motor's insert_one mutates the `bot` dict adding a bson ObjectId under `_id`, then the same dict is returned; FastAPI's jsonable_encoder crashes on ObjectId. Same pattern exists in duplicate_bot (lines 105-111).",
+      "evidence": "Backend log: File /root/.venv/.../fastapi/encoders.py raise ValueError(errors) — ObjectId not iterable. Reproduced on curl and in UI (screenshot shows red overlay 'Request failed with status code 500' when clicking Criar on Robôs).",
+      "priority": "HIGH"
+    },
+    {
+      "area": "backend / contacts",
+      "issue": "POST /api/contacts requires a bot_id field (422 if missing). Not documented in the review request example. Confirm intended schema.",
+      "evidence": "422 detail: {loc:[body,bot_id], msg:Field required}",
+      "priority": "LOW"
+    },
+    {
+      "area": "backend / validation",
+      "issue": "pydantic EmailStr rejects .test TLD (as in `admin@acme.test` from problem statement) with 'special-use or reserved name'. Consider allowing this in dev or updating docs; used .com instead.",
+      "evidence": "422 value_error on admin+xxx@acme.test",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "Fix POST /api/bots (and duplicate_bot) in /app/backend/routes/bots.py to not return the mutated insert dict — either strip `_id` before return, `bot.pop('_id', None)` after insert_one, or return a projected dict / fetch-back via find_one({...},{'_id':0}). Same fix needed in duplicate_bot.",
+    "Audit other insert_one call sites (contacts.py:42, messages_log:92, whatsapp:37/59, flow_versions:48) — some already return hand-built dicts; verify none return raw inserted dict.",
+    "Retest full flow chain: POST /api/bots -> GET /api/flows/{id} -> PUT save -> GET versions -> POST publish -> POST /test (start + follow-up messages) after fix.",
+    "Consider relaxing pydantic email validation for .test TLD or update docs to use .com."
+  ],
+  "success_rate": {"backend": "~85% (11/13 tested endpoint groups pass; bots + flows chain untested due to blocker)", "frontend": "~80% (auth, tenant creation, navigation OK; bot creation blocked by backend 500)"},
+  "retest_needed": true,
+  "full_testing_deferred": true
+}
