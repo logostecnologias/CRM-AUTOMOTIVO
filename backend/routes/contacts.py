@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from db import get_db
 from auth import require_tenant_admin
+from flow_runtime import send_human_message as _send_human
 
 router = APIRouter(prefix="/api", tags=["contacts"])
 
@@ -81,6 +82,10 @@ async def send_human_message(session_id: str, body: SendMessageIn, user=Depends(
     )
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    try:
+        await _send_human(user["tenant_id"], session_id, body.content)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar via WhatsApp: {e}")
     msg = {
         "id": str(uuid.uuid4()),
         "session_id": session_id,
@@ -90,11 +95,6 @@ async def send_human_message(session_id: str, body: SendMessageIn, user=Depends(
         "sent_by": user["email"],
         "timestamp": _now(),
     }
-    await db.messages_log.insert_one(msg)
-    await db.conversation_sessions.update_one(
-        {"id": session_id}, {"$set": {"updated_at": _now()}}
-    )
-    msg.pop("_id", None)
     return msg
 
 

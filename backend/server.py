@@ -17,6 +17,7 @@ from routes.flows import router as flows_router
 from routes.contacts import router as contacts_router
 from routes.whatsapp import router as whatsapp_router
 from routes.dashboard import router as dashboard_router
+from routes.webhooks import router as webhooks_router
 
 
 app = FastAPI(title="ZappZen API")
@@ -36,6 +37,7 @@ app.include_router(flows_router)
 app.include_router(contacts_router)
 app.include_router(whatsapp_router)
 app.include_router(dashboard_router)
+app.include_router(webhooks_router)
 
 
 @app.get("/api/health")
@@ -57,6 +59,8 @@ async def on_startup():
     await db.contacts.create_index([("tenant_id", 1)])
     await db.conversation_sessions.create_index([("tenant_id", 1), ("status", 1)])
     await db.messages_log.create_index([("session_id", 1), ("timestamp", 1)])
+    await db.processed_messages.create_index("message_id", unique=True)
+    await db.whatsapp_connections.create_index("tenant_id", unique=True)
     await seed_super_admin()
     logger.info("ZappZen backend started, super admin seeded.")
 

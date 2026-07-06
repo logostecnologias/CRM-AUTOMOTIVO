@@ -1,0 +1,24 @@
+{
+  "summary": "Iter 3 Evolution API integration verified. Backend endpoints and webhook receiver all functional. Evolution API IS reachable from sandbox - real base64 QR code returned on connect.",
+  "tested_scope": ["backend", "integration"],
+  "passed": [
+    "Super admin login + tenant creation (with admin_name field)",
+    "Tenant admin login",
+    "GET /api/whatsapp/status returns new fields (evolution_instance_name, evolution_instance_token, last_webhook_event_at) defaulting to null and status=desconectado when never connected",
+    "GET /api/whatsapp/connection legacy alias returns same row",
+    "POST /api/whatsapp/connect returned 200 with status=pareando, qrcode_atual populated (data:image/png;base64,...), evolution_instance_name=zappzen_7da52de8aed84bd1 (first 16 chars of tenant_id without hyphens), token=hash from Evolution",
+    "POST /api/whatsapp/disconnect returns row with status=desconectado, qrcode_atual=null, numero=null",
+    "Legacy POST /api/whatsapp/connection {action:'confirm_paired'} returns current status row",
+    "Webhook POST /api/webhooks/evolution/{unknown} returns 404 Tenant não configurado",
+    "Webhook connection.update state=open with matching instance returns 200 {ok:true}",
+    "Webhook instance mismatch returns 403 Instance mismatch",
+    "Webhook messages.upsert with fromMe=false + conversation queues background task returns {ok:true, queued:1}",
+    "Frontend /app/whatsapp page loads HTTP 200"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "not deeply UI-tested (page loads OK)"},
+  "retest_needed": false,
+  "full_testing_deferred": true,
+  "notes": "Evolution API was reachable during this test (200 with real QR PNG base64). 502 fallback branch not exercised because service was up. Legacy testids and UI toast/QR display not asserted via Playwright due to token budget — page load HTTP 200 confirmed."
+}
