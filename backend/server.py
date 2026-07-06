@@ -18,6 +18,7 @@ from routes.contacts import router as contacts_router
 from routes.whatsapp import router as whatsapp_router
 from routes.dashboard import router as dashboard_router
 from routes.webhooks import router as webhooks_router
+import health_monitor
 
 
 app = FastAPI(title="ZappZen API")
@@ -62,9 +63,11 @@ async def on_startup():
     await db.processed_messages.create_index("message_id", unique=True)
     await db.whatsapp_connections.create_index("tenant_id", unique=True)
     await seed_super_admin()
+    health_monitor.start()
     logger.info("ZappZen backend started, super admin seeded.")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    health_monitor.stop()
     close_db()
