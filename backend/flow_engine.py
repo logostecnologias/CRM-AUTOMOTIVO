@@ -53,7 +53,6 @@ async def _process_node(node, flow, session, outputs):
     """Process a single node and return next_node_id or None (waiting)."""
     ntype = node["type"]
     data = node.get("data", {})
-    nodes = flow["nodes"]
     edges = flow["edges"]
     variables = session["variables"]
 
