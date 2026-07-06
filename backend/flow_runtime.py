@@ -78,28 +78,31 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         return
     instance_name = conn.get("evolution_instance_name")
 
-    # Find active bot (first ativo)
-    bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo"})
-    if not bot:
-        return
-
-    # Contact
+    # Contact (needs to exist before session lookup)
     contact = await db.contacts.find_one({"tenant_id": tenant_id, "numero_whatsapp": from_number})
     if not contact:
         contact = {
             "id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
-            "bot_id": bot["id"],
             "numero_whatsapp": from_number,
             "nome": from_number,
             "created_at": _now(),
         }
         await db.contacts.insert_one(contact)
 
-    # Session
+    # If contact already has an active session, continue on THAT session's bot;
+    # otherwise pick the tenant's default bot (or first ativo).
     session = await db.conversation_sessions.find_one({
         "tenant_id": tenant_id, "contact_id": contact["id"], "status": {"$in": ["ativa", "aguardando_humano"]}
     })
+    if session:
+        bot = await db.bots.find_one({"id": session["bot_id"], "tenant_id": tenant_id})
+    else:
+        bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo", "is_default": True})
+        if not bot:
+            bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo"})
+    if not bot:
+        return
 
     flow = await db.flows.find_one({"id": bot["main_flow_id"]}, {"_id": 0})
     if not flow or not flow.get("published_at"):
@@ -176,9 +179,53 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "variables": session["variables"],
             "status": session["status"],
             "awaiting": session.get("awaiting"),
+            "bot_id": session.get("bot_id"),
+            "flow_id": session.get("flow_id"),
             "updated_at": _now(),
         }},
     )
+
+    # Handle bot-to-bot transfer: swap this session onto the target bot's flow
+    # and continue processing so the new bot's greeting fires immediately.
+    guard = 0
+    while session.get("status") == "transferindo" and guard < 5:
+        guard += 1
+        target_bot_id = session.get("transfer_target")
+        target_bot = await db.bots.find_one({"id": target_bot_id, "tenant_id": tenant_id, "status": "ativo"})
+        if not target_bot:
+            await _log_msg(db, session_id, tenant_id, "sistema",
+                           f"Bot de destino {target_bot_id} não existe ou está inativo", mtype="error")
+            await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"status": "finalizada"}})
+            break
+        target_flow = await db.flows.find_one({"id": target_bot["main_flow_id"]}, {"_id": 0})
+        if not target_flow or not target_flow.get("published_at"):
+            await _log_msg(db, session_id, tenant_id, "sistema",
+                           f"Fluxo do bot destino não publicado", mtype="error")
+            await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"status": "finalizada"}})
+            break
+        start = _find_start(target_flow["nodes"])
+        if not start:
+            break
+        session["bot_id"] = target_bot["id"]
+        session["flow_id"] = target_flow["id"]
+        session["status"] = "ativa"
+        session["awaiting"] = None
+        session["transfer_target"] = None
+        session["node_atual_id"] = start["id"]
+        await _run_from(start["id"], target_flow, session, outputs)
+        await db.conversation_sessions.update_one(
+            {"id": session_id},
+            {"$set": {
+                "bot_id": session["bot_id"],
+                "flow_id": session["flow_id"],
+                "node_atual_id": session["node_atual_id"],
+                "variables": session["variables"],
+                "status": session["status"],
+                "awaiting": session.get("awaiting"),
+                "updated_at": _now(),
+            }},
+        )
+        flow = target_flow  # for subsequent iterations if chained transfer
 
     # send outputs via Evolution
     if instance_name and outputs:

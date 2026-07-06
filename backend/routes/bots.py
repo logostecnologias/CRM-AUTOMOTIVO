@@ -113,6 +113,18 @@ async def duplicate_bot(bot_id: str, user=Depends(require_tenant_admin)):
     return new_bot
 
 
+@router.patch("/{bot_id}/default")
+async def set_default(bot_id: str, user=Depends(require_tenant_admin)):
+    db = get_db()
+    bot = await db.bots.find_one({"id": bot_id, "tenant_id": user["tenant_id"]})
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot não encontrado")
+    # Unset any existing default in this tenant, then set this one.
+    await db.bots.update_many({"tenant_id": user["tenant_id"]}, {"$set": {"is_default": False}})
+    await db.bots.update_one({"id": bot_id}, {"$set": {"is_default": True}})
+    return {"ok": True}
+
+
 @router.delete("/{bot_id}")
 async def delete_bot(bot_id: str, user=Depends(require_tenant_admin)):
     db = get_db()

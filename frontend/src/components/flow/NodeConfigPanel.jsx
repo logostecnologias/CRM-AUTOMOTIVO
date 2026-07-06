@@ -1,10 +1,17 @@
 import { useState, useEffect } from "react";
 import { X, Trash, Plus } from "@phosphor-icons/react";
+import api from "@/lib/api";
 import { NODE_TYPES } from "./nodeTypes";
 
 export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   const [data, setData] = useState(node?.data || {});
+  const [bots, setBots] = useState([]);
   useEffect(() => setData(node?.data || {}), [node?.id]);
+  useEffect(() => {
+    if (node?.type === "transfer_bot") {
+      api.get("/bots").then((r) => setBots(r.data)).catch(() => {});
+    }
+  }, [node?.type]);
 
   if (!node) return null;
   const meta = NODE_TYPES[node.type] || {};
@@ -199,6 +206,22 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
           <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 p-3">
             Este bloco não requer configuração adicional.
           </div>
+        )}
+
+        {node.type === "transfer_bot" && (
+          <Field label="Bot de destino" hint="A conversa continua no fluxo do bot selecionado.">
+            <select className="zz-input" value={data.target_bot_id || ""}
+              data-testid="config-target-bot"
+              onChange={(e) => {
+                const b = bots.find((x) => x.id === e.target.value);
+                update({ target_bot_id: e.target.value, target_bot_name: b?.name || "" });
+              }}>
+              <option value="">— selecione —</option>
+              {bots.map((b) => (
+                <option key={b.id} value={b.id}>{b.name} {b.status !== "ativo" ? `(${b.status})` : ""}</option>
+              ))}
+            </select>
+          </Field>
         )}
       </div>
 

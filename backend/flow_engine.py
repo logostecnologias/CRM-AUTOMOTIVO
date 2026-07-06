@@ -147,6 +147,19 @@ async def _process_node(node, flow, session, outputs):
         session["status"] = "aguardando_humano"
         return None
 
+    if ntype == "transfer_bot":
+        target = data.get("target_bot_id")
+        outputs.append({
+            "type": "transfer_bot",
+            "target_bot_id": target,
+            "content": f"Transferindo para outro bot ({target})",
+        })
+        # Signal the runtime to swap bots. The engine stops here; the runtime
+        # will pick up 'transfer_target' and re-run from the target bot's Start.
+        session["transfer_target"] = target
+        session["status"] = "transferindo"
+        return None
+
     if ntype == "end":
         outputs.append({"type": "system", "content": "Fluxo encerrado"})
         session["status"] = "finalizada"

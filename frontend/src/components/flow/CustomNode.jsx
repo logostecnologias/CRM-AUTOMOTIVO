@@ -84,6 +84,11 @@ function CustomNode({ id, data, selected, type }) {
         {type === "human_handoff" && (
           <div className="text-xs text-slate-700">A conversa será enviada à inbox de atendimento.</div>
         )}
+        {type === "transfer_bot" && (
+          <div className="text-xs text-slate-700">
+            Passa a conversa para: <span className="font-mono text-violet-700">{data.target_bot_name || data.target_bot_id || <span className="italic text-slate-400">selecione um bot</span>}</span>
+          </div>
+        )}
         {type === "end" && (
           <div className="text-xs text-slate-700">A sessão do contato é finalizada.</div>
         )}

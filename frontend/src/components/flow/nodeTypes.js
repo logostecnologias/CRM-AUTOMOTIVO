@@ -1,7 +1,7 @@
 // Node type metadata, colors, icons, default data
 import {
   Play, ChatText, ListNumbers, Database, GitBranch, Image,
-  Clock, Cloud, UserSwitch, StopCircle,
+  Clock, Cloud, UserSwitch, StopCircle, ArrowsLeftRight,
 } from "@phosphor-icons/react";
 
 export const NODE_TYPES = {
@@ -59,6 +59,11 @@ export const NODE_TYPES = {
     outputs: [],
     default: { label: "Transferir para Humano" },
   },
+  transfer_bot: {
+    label: "Transferir para Bot", color: "#8B5CF6", textColor: "#FFFFFF", icon: ArrowsLeftRight,
+    outputs: [],
+    default: { label: "Transferir para outro Bot", target_bot_id: "" },
+  },
   end: {
     label: "Fim", color: "#475569", textColor: "#FFFFFF", icon: StopCircle,
     outputs: [],
@@ -68,5 +73,5 @@ export const NODE_TYPES = {
 
 export const NODE_ORDER = [
   "start", "text", "menu", "save_variable", "condition",
-  "media", "delay", "webhook", "human_handoff", "end",
+  "media", "delay", "webhook", "human_handoff", "transfer_bot", "end",
 ];
