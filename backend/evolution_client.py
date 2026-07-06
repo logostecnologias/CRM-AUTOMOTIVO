@@ -12,8 +12,12 @@ Endpoint shape assumed (Evolution API v2):
   POST   /message/sendMedia/{instanceName}    — {number, mediatype, media, caption}
 """
 import os
+import asyncio
+import logging
 import httpx
 from typing import Any
+
+logger = logging.getLogger("zappzen.evo")
 
 
 class EvolutionError(Exception):
@@ -32,15 +36,38 @@ def _headers() -> dict:
     }
 
 
+# Retry config: try up to MAX_ATTEMPTS times, with exponential backoff.
+MAX_ATTEMPTS = 3
+BACKOFF_BASE = 0.5  # seconds — waits 0.5s, 1s, 2s between attempts
+RETRY_STATUS = {500, 502, 503, 504}
+
+
 async def _request(method: str, path: str, json: Any = None) -> dict:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.request(method, f"{_base()}{path}", json=json, headers=_headers())
-        if r.status_code >= 400:
-            raise EvolutionError(f"Evolution {method} {path} -> {r.status_code}: {r.text[:200]}")
+    last_err: Exception | None = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            return r.json()
-        except Exception:
-            return {"raw": r.text}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.request(method, f"{_base()}{path}", json=json, headers=_headers())
+            if r.status_code in RETRY_STATUS:
+                last_err = EvolutionError(f"Evolution {method} {path} -> {r.status_code}: {r.text[:200]}")
+                logger.warning("Evolution transient %s on attempt %d/%d: %s %s",
+                               r.status_code, attempt, MAX_ATTEMPTS, method, path)
+            elif r.status_code >= 400:
+                # Non-retriable client error — fail fast.
+                raise EvolutionError(f"Evolution {method} {path} -> {r.status_code}: {r.text[:200]}")
+            else:
+                try:
+                    return r.json()
+                except Exception:
+                    return {"raw": r.text}
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.RemoteProtocolError) as e:
+            last_err = EvolutionError(f"Evolution {method} {path} network error: {e}")
+            logger.warning("Evolution network error on attempt %d/%d: %s", attempt, MAX_ATTEMPTS, e)
+
+        if attempt < MAX_ATTEMPTS:
+            await asyncio.sleep(BACKOFF_BASE * (2 ** (attempt - 1)))
+
+    raise last_err or EvolutionError(f"Evolution {method} {path} failed after {MAX_ATTEMPTS} attempts")
 
 
 async def create_instance(instance_name: str, webhook_url: str) -> dict:
