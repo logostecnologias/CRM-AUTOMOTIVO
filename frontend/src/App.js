@@ -10,9 +10,15 @@ import ContactsPage from "@/pages/tenant/ContactsPage";
 import InboxPage from "@/pages/tenant/InboxPage";
 import WhatsAppPage from "@/pages/tenant/WhatsAppPage";
 import SettingsPage from "@/pages/tenant/SettingsPage";
+import AtendimentoPage from "@/pages/tenant/AtendimentoPage";
+import DepartamentosPage from "@/pages/tenant/DepartamentosPage";
+import UsersPage from "@/pages/tenant/UsersPage";
 import SuperAdminDashboard from "@/pages/superadmin/SuperAdminDashboard";
 import TenantsPage from "@/pages/superadmin/TenantsPage";
 import "@/App.css";
+
+const TENANT_ROLES = ["tenant_admin", "agent"];
+const ADMIN_ONLY = ["tenant_admin"];
 
 function App() {
   return (
@@ -21,38 +27,39 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Tenant admin routes */}
+          {/* Tenant + Agent shell */}
           <Route
             path="/app"
             element={
-              <ProtectedRoute role="tenant_admin">
+              <ProtectedRoute roles={TENANT_ROLES}>
                 <AppShell variant="tenant" />
               </ProtectedRoute>
             }
           >
             <Route index element={<TenantDashboard />} />
-            <Route path="bots" element={<BotsPage />} />
-            <Route path="whatsapp" element={<WhatsAppPage />} />
-            <Route path="contacts" element={<ContactsPage />} />
-            <Route path="inbox" element={<InboxPage />} />
+            <Route path="atendimento" element={<AtendimentoPage />} />
+            <Route path="bots" element={<ProtectedRoute roles={ADMIN_ONLY}><BotsPage /></ProtectedRoute>} />
+            <Route path="whatsapp" element={<ProtectedRoute roles={ADMIN_ONLY}><WhatsAppPage /></ProtectedRoute>} />
+            <Route path="departments" element={<ProtectedRoute roles={ADMIN_ONLY}><DepartamentosPage /></ProtectedRoute>} />
+            <Route path="users" element={<ProtectedRoute roles={ADMIN_ONLY}><UsersPage /></ProtectedRoute>} />
+            <Route path="contacts" element={<ProtectedRoute roles={ADMIN_ONLY}><ContactsPage /></ProtectedRoute>} />
+            <Route path="inbox" element={<ProtectedRoute roles={ADMIN_ONLY}><InboxPage /></ProtectedRoute>} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 
-          {/* Flow editor is fullscreen, outside the shell */}
           <Route
             path="/app/bots/:botId/flow/:flowId"
             element={
-              <ProtectedRoute role="tenant_admin">
+              <ProtectedRoute roles={ADMIN_ONLY}>
                 <FlowEditorPage />
               </ProtectedRoute>
             }
           />
 
-          {/* Super admin routes */}
           <Route
             path="/admin"
             element={
-              <ProtectedRoute role="super_admin">
+              <ProtectedRoute roles={["super_admin"]}>
                 <AppShell variant="admin" />
               </ProtectedRoute>
             }

@@ -18,6 +18,9 @@ from routes.contacts import router as contacts_router
 from routes.whatsapp import router as whatsapp_router
 from routes.dashboard import router as dashboard_router
 from routes.webhooks import router as webhooks_router
+from routes.departments import router as departments_router
+from routes.users import router as users_router
+from routes.atendimento import router as atendimento_router
 import health_monitor
 
 
@@ -39,6 +42,9 @@ app.include_router(contacts_router)
 app.include_router(whatsapp_router)
 app.include_router(dashboard_router)
 app.include_router(webhooks_router)
+app.include_router(departments_router)
+app.include_router(users_router)
+app.include_router(atendimento_router)
 
 
 @app.get("/api/health")

@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
-import { Plus, PauseCircle, PlayCircle, Trash } from "@phosphor-icons/react";
+import { Plus, PauseCircle, PlayCircle, Trash, SignIn } from "@phosphor-icons/react";
 import { toast, Toaster } from "sonner";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 
 export default function TenantsPage() {
   const [tenants, setTenants] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", plan: "starter", admin_name: "", admin_email: "", admin_password: "" });
   const [err, setErr] = useState("");
+  const nav = useNavigate();
+  const { refresh } = useAuth();
+
+  const impersonate = async (t) => {
+    await api.post(`/admin/tenants/${t.id}/impersonate`);
+    await refresh();
+    nav("/app");
+  };
 
   const load = () => api.get("/admin/tenants").then((r) => setTenants(r.data));
   useEffect(() => { load(); }, []);
@@ -88,6 +98,7 @@ export default function TenantsPage() {
             <div className="col-span-1 font-mono text-sm">{t.bots_count}</div>
             <div className="col-span-2 text-xs text-slate-500 font-mono">{new Date(t.created_at).toLocaleDateString("pt-BR")}</div>
             <div className="col-span-1 flex gap-1 justify-end">
+              <button onClick={() => impersonate(t)} className="p-1.5 hover:bg-blue-100 text-blue-600" title="Entrar na empresa" data-testid={`impersonate-${t.id}`}><SignIn size={16} weight="bold" /></button>
               <button onClick={() => toggle(t)} className="p-1.5 hover:bg-slate-200" title={t.status === "active" ? "Suspender" : "Reativar"}>
                 {t.status === "active" ? <PauseCircle size={16} weight="bold" /> : <PlayCircle size={16} weight="bold" />}
               </button>

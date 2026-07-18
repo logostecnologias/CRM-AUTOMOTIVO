@@ -1,7 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
-export default function ProtectedRoute({ children, role }) {
+export default function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
   if (loading) {
     return (
@@ -11,8 +11,8 @@ export default function ProtectedRoute({ children, role }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  if (role && user.role !== role) {
-    // send to the correct dashboard
+  const allowed = Array.isArray(roles) ? roles : (roles ? [roles] : null);
+  if (allowed && !allowed.includes(user.role)) {
     return <Navigate to={user.role === "super_admin" ? "/admin" : "/app"} replace />;
   }
   return children;

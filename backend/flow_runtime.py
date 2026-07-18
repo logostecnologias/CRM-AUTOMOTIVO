@@ -123,12 +123,20 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         start = _find_start(flow["nodes"])
         if not start:
             return
+        conn_id = conn.get("id") if conn else None
+        dept_id = conn.get("departamento_padrao_id") if conn else None
         session = {
             "id": session_id,
             "tenant_id": tenant_id,
             "contact_id": contact["id"],
             "bot_id": bot["id"],
             "flow_id": flow["id"],
+            "whatsapp_connection_id": conn_id,
+            "departamento_id": dept_id,
+            "atendente_id": None,
+            "status_atendimento": "bot",
+            "assumido_em": None,
+            "finalizado_em": None,
             "node_atual_id": start["id"],
             "variables": {"nome_contato": contact["nome"], "numero": from_number},
             "status": "ativa",
@@ -172,15 +180,24 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
                         await _run_from(next_id, flow, session, outputs)
 
     # persist session
+    # Mirror flow_engine's session.status → status_atendimento so kanban stays in sync.
+    if session.get("status") == "aguardando_humano" and session.get("status_atendimento") == "bot":
+        session["status_atendimento"] = "aguardando"
+    elif session.get("status") == "finalizada" and session.get("status_atendimento") in (None, "bot"):
+        session["status_atendimento"] = "finalizado"
+        session["finalizado_em"] = _now()
+
     await db.conversation_sessions.update_one(
         {"id": session_id},
         {"$set": {
             "node_atual_id": session["node_atual_id"],
             "variables": session["variables"],
             "status": session["status"],
+            "status_atendimento": session.get("status_atendimento", "bot"),
             "awaiting": session.get("awaiting"),
             "bot_id": session.get("bot_id"),
             "flow_id": session.get("flow_id"),
+            "finalizado_em": session.get("finalizado_em"),
             "updated_at": _now(),
         }},
     )

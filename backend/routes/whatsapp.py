@@ -131,6 +131,20 @@ class LegacyAction(BaseModel):
     action: str
 
 
+class ConnectionUpdate(BaseModel):
+    departamento_padrao_id: str | None = None
+
+
+@router.patch("/connection")
+async def update_connection_settings(body: ConnectionUpdate, user=Depends(require_tenant_admin)):
+    db = get_db()
+    upd = {k: v for k, v in body.model_dump(exclude_unset=True).items()}
+    if upd:
+        upd["updated_at"] = _now()
+        await db.whatsapp_connections.update_one({"tenant_id": user["tenant_id"]}, {"$set": upd})
+    return await db.whatsapp_connections.find_one({"tenant_id": user["tenant_id"]}, {"_id": 0})
+
+
 @router.post("/connection")
 async def legacy_connection(body: LegacyAction, user=Depends(require_tenant_admin)):
     if body.action == "start_pairing":

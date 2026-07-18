@@ -23,12 +23,13 @@ def _secret() -> str:
     return os.environ["JWT_SECRET"]
 
 
-def create_access_token(user_id: str, email: str, role: str, tenant_id: str | None) -> str:
+def create_access_token(user_id: str, email: str, role: str, tenant_id: str | None, impersonation_id: str | None = None) -> str:
     payload = {
         "sub": user_id,
         "email": email,
         "role": role,
         "tenant_id": tenant_id,
+        "impersonation_id": impersonation_id,
         "exp": datetime.now(timezone.utc) + timedelta(hours=12),
         "type": "access",
     }
@@ -69,6 +70,11 @@ async def get_current_user(request: Request) -> dict:
             raise HTTPException(status_code=401, detail="Usuário não encontrado")
         user.pop("_id", None)
         user.pop("password_hash", None)
+        # If impersonating, JWT claims override DB role/tenant.
+        if payload.get("impersonation_id"):
+            user["role"] = payload.get("role")
+            user["tenant_id"] = payload.get("tenant_id")
+            user["impersonation_id"] = payload.get("impersonation_id")
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")
@@ -142,6 +148,33 @@ async def me(user: dict = Depends(get_current_user)):
         "role": user["role"],
         "tenant_id": user.get("tenant_id"),
     }
+
+
+@router.post("/exit-impersonation")
+async def exit_impersonation(request: Request, response: Response):
+    """Encerra sessão de impersonation e restaura o Super Admin."""
+    from db import get_db
+    log_id = request.cookies.get("impersonation_id")
+    if not log_id:
+        raise HTTPException(status_code=400, detail="Não está em modo suporte")
+    db = get_db()
+    log = await db.impersonation_log.find_one({"id": log_id})
+    if not log:
+        raise HTTPException(status_code=404, detail="Log não encontrado")
+    await db.impersonation_log.update_one(
+        {"id": log_id},
+        {"$set": {"finalizado_em": datetime.now(timezone.utc).isoformat()}},
+    )
+    # Re-issue SA token
+    sa = await db.users.find_one({"id": log["super_admin_id"]})
+    if not sa or sa["role"] != "super_admin":
+        raise HTTPException(status_code=500, detail="Super admin ausente")
+    access = create_access_token(sa["id"], sa["email"], "super_admin", None)
+    refresh = create_refresh_token(sa["id"])
+    _set_auth_cookies(response, access, refresh)
+    response.delete_cookie("impersonation_id", path="/")
+    response.delete_cookie("impersonated_role", path="/")
+    return {"ok": True}
 
 
 async def seed_super_admin():

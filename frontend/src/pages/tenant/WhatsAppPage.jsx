@@ -5,10 +5,14 @@ import { toast, Toaster } from "sonner";
 
 export default function WhatsAppPage() {
   const [conn, setConn] = useState(null);
+  const [depts, setDepts] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const load = () => api.get("/whatsapp/status").then((r) => setConn(r.data));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.get("/departments").then((r) => setDepts(r.data)).catch(() => {});
+  }, []);
 
   // Poll while pairing to catch status update from webhook
   useEffect(() => {
@@ -36,6 +40,12 @@ export default function WhatsAppPage() {
       setConn(data);
       toast.info("Desconectado do WhatsApp");
     } finally { setLoading(false); }
+  };
+
+  const setDefaultDept = async (deptId) => {
+    const { data } = await api.patch("/whatsapp/connection", { departamento_padrao_id: deptId || null });
+    setConn(data);
+    toast.success("Departamento padrão atualizado");
   };
 
   const qrSrc = conn?.qrcode_atual
@@ -117,6 +127,20 @@ export default function WhatsAppPage() {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="mt-6 border border-slate-200 bg-white p-4" data-testid="dept-default-block">
+        <div className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Departamento padrão desta conexão</div>
+        <p className="text-xs text-slate-500 mb-2">Novas conversas iniciadas nesta conexão entrarão neste departamento por padrão.</p>
+        <select
+          className="zz-input" style={{ maxWidth: 340 }}
+          value={conn?.departamento_padrao_id || ""}
+          onChange={(e) => setDefaultDept(e.target.value)}
+          data-testid="default-dept-select"
+        >
+          <option value="">— nenhum —</option>
+          {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
+        </select>
       </div>
 
       <div className="mt-6 text-xs text-slate-500 border border-slate-200 bg-white p-4">
