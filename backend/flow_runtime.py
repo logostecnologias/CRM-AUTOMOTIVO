@@ -1,12 +1,12 @@
 """Real-conversation runtime. Uses the same node-processing logic as the
 simulator in flow_engine.py, but persists sessions in MongoDB and sends
-real messages via Evolution API.
+real messages via WuzAPI.
 """
 import uuid
 from datetime import datetime, timezone
 from db import get_db
 from flow_engine import _find_node, _find_next, _find_start, _interp, _process_node
-import evolution_client as evo
+import wuzapi_client as wuzapi
 
 
 def _now():
@@ -27,22 +27,22 @@ async def _log_msg(db, session_id, tenant_id, direction, content, mtype="text", 
     await db.messages_log.insert_one(doc)
 
 
-async def _send_outputs(db, tenant_id, instance_name, number, session_id, outputs):
+async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
     for o in outputs:
         try:
             if o["type"] == "text":
-                await evo.send_text(instance_name, number, o["content"])
+                await wuzapi.send_text(token, number, o["content"])
                 await _log_msg(db, session_id, tenant_id, "enviada", o["content"])
             elif o["type"] == "menu":
                 lines = [o["content"], ""]
                 for i, opt in enumerate(o["options"]):
                     lines.append(f"{i+1}. {opt}")
                 text = "\n".join(lines)
-                await evo.send_text(instance_name, number, text)
+                await wuzapi.send_text(token, number, text)
                 await _log_msg(db, session_id, tenant_id, "enviada", text, mtype="menu")
             elif o["type"] == "media":
-                await evo.send_media(instance_name, number, o.get("media_type", "image"),
-                                     o.get("url", ""), o.get("caption", ""))
+                await wuzapi.send_media(token, number, o.get("media_type", "image"),
+                                        o.get("url", ""), o.get("caption", ""))
                 await _log_msg(db, session_id, tenant_id, "enviada", o.get("url", ""),
                                mtype=o.get("media_type", "image"))
             elif o["type"] == "system":
@@ -64,8 +64,13 @@ async def _run_from(node_id, flow, session, outputs, guard=0):
         guard += 1
 
 
-async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str):
-    """Called from webhook. Advances the conversation for this contact."""
+async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None):
+    """Called from webhook. Advances the conversation for this contact.
+
+    `connection_id` identifies exactly which whatsapp_connection (and thus
+    which WuzAPI instance) the message came in on — required so the
+    right bot/instance is used when a tenant has more than one connection.
+    """
     db = get_db()
 
     # Idempotency
@@ -73,10 +78,13 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         return
     await db.processed_messages.insert_one({"message_id": message_id, "at": _now()})
 
-    conn = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
+    if connection_id:
+        conn = await db.whatsapp_connections.find_one({"id": connection_id, "tenant_id": tenant_id})
+    else:
+        conn = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
     if not conn:
         return
-    instance_name = conn.get("evolution_instance_name")
+    token = conn.get("wuzapi_token")
 
     # Contact (needs to exist before session lookup)
     contact = await db.contacts.find_one({"tenant_id": tenant_id, "numero_whatsapp": from_number})
@@ -91,14 +99,20 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         await db.contacts.insert_one(contact)
 
     # If contact already has an active session, continue on THAT session's bot;
-    # otherwise pick the tenant's default bot (or first ativo).
+    # otherwise pick the bot linked to this connection (default_bot_id), falling
+    # back to the tenant's global default bot, then any ativo bot.
     session = await db.conversation_sessions.find_one({
-        "tenant_id": tenant_id, "contact_id": contact["id"], "status": {"$in": ["ativa", "aguardando_humano"]}
+        "tenant_id": tenant_id, "contact_id": contact["id"],
+        "whatsapp_connection_id": conn["id"], "status": {"$in": ["ativa", "aguardando_humano"]}
     })
     if session:
         bot = await db.bots.find_one({"id": session["bot_id"], "tenant_id": tenant_id})
     else:
-        bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo", "is_default": True})
+        bot = None
+        if conn.get("default_bot_id"):
+            bot = await db.bots.find_one({"id": conn["default_bot_id"], "tenant_id": tenant_id, "status": "ativo"})
+        if not bot:
+            bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo", "is_default": True})
         if not bot:
             bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo"})
     if not bot:
@@ -244,23 +258,27 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         )
         flow = target_flow  # for subsequent iterations if chained transfer
 
-    # send outputs via Evolution
-    if instance_name and outputs:
-        await _send_outputs(db, tenant_id, instance_name, from_number, session_id, outputs)
+    # send outputs via WuzAPI
+    if token and outputs:
+        await _send_outputs(db, tenant_id, token, from_number, session_id, outputs)
 
 
 async def send_human_message(tenant_id: str, session_id: str, content: str):
-    """Sends a text from human agent (inbox) via Evolution API."""
+    """Sends a text from human agent (inbox) via WuzAPI."""
     db = get_db()
     session = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": tenant_id})
     if not session:
         return None
     contact = await db.contacts.find_one({"id": session["contact_id"]})
-    conn = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
-    instance = conn and conn.get("evolution_instance_name")
-    if instance and contact:
+    conn_id = session.get("whatsapp_connection_id")
+    if conn_id:
+        conn = await db.whatsapp_connections.find_one({"id": conn_id, "tenant_id": tenant_id})
+    else:
+        conn = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
+    token = conn and conn.get("wuzapi_token")
+    if token and contact:
         try:
-            await evo.send_text(instance, contact["numero_whatsapp"], content)
+            await wuzapi.send_text(token, contact["numero_whatsapp"], content)
         except Exception as e:
             await _log_msg(db, session_id, tenant_id, "erro", f"Falha envio humano: {e}", mtype="error")
             raise

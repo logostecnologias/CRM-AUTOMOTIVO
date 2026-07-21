@@ -14,7 +14,7 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **Banco de dados**: MongoDB (sem isolamento nativo de tenant — **todo filtro por `tenant_id` é responsabilidade da aplicação**, aplicado em toda query sensível, sem exceção)
 - **Frontend**: React + `@xyflow/react` (React Flow) para o editor visual
 - **Design**: Swiss Brutalist / Grid Borders, fontes Cabinet Grotesk + IBM Plex Sans, UI 100% em português, elementos com `data-testid`
-- **WhatsApp**: integração real via **Evolution API** (self-hosted, wrapper REST sobre Baileys/WhatsApp Web), rodando em uma instância própria na **Oracle Cloud (OCI)**, atrás de **Caddy** como proxy reverso com HTTPS automático (Let's Encrypt), em `https://evolution.atendimentoautomatizado.com.br`. A API key fica em variável de ambiente, nunca hardcoded.
+- **WhatsApp**: integração real via **WuzAPI** (self-hosted, wrapper REST sobre whatsmeow), sempre atrás de um **gateway próprio** (`zappzen-gateway`, porta 8090) que faz rate limiting, normalização de número e fila/retry de webhook — o backend nunca chama a WuzAPI diretamente. Autenticação em duas camadas: `WUZAPI_ADMIN_TOKEN` (só cria/apaga instância) e um token por instância (`wuzapi_token`, guardado em `whatsapp_connections`), usado em toda outra chamada. Credenciais sempre em variável de ambiente, nunca hardcoded.
 
 ---
 
@@ -35,10 +35,10 @@ O desenvolvimento continua localmente via **Claude Code**.
 - Motor de execução de fluxos, reaproveitado tanto no modo "Testar" (simulado) quanto no fluxo real via webhook do WhatsApp
 - Painel Super Admin com CRUD de tenants
 
-### Integração WhatsApp real (Evolution API)
-- `/api/whatsapp/connect`, `/status`, `/disconnect` conectados à instância real (substituindo o mock)
-- Endpoint receptor `POST /api/webhooks/evolution/{tenant_id}` recebendo eventos (mensagem recebida, status de conexão), alimentando o motor de execução
-- Função `send_whatsapp_message(tenant_id, numero, tipo, conteudo)` reutilizável, chamada tanto pelo motor de fluxos quanto pelo módulo de atendimento humano
+### Integração WhatsApp real (WuzAPI)
+- `/api/whatsapp/connections/{id}/connect`, `/disconnect`, CRUD de conexões — cada uma com sua própria instância/token na WuzAPI
+- Endpoint receptor `POST /api/webhooks/wuzapi/{tenant_id}/{connection_id}` recebendo eventos via o gateway (mensagem recebida, QR, status de conexão), validados por HMAC (`WUZAPI_GLOBAL_HMAC_KEY`), alimentando o motor de execução
+- Funções `_send_outputs`/`send_human_message` em `flow_runtime.py` reutilizáveis, chamadas tanto pelo motor de fluxos quanto pelo módulo de atendimento humano — ambas usam `wuzapi_token` (não um "nome de instância") como credencial de envio
 
 ### Central de Atendimento (mais recente)
 - Toda conversa nasce com `status_atendimento = 'bot'`; nó de Atendimento Humano no fluxo transiciona pra `aguardando`; nó Fim transiciona pra `finalizado`

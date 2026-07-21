@@ -1,12 +1,21 @@
-"""Evolution API webhook receiver.
+"""WuzAPI (whatsmeow) webhook receiver, reached via the zappzen-gateway.
 
-Evolution v2 posts a JSON body with `event`, `instance`, `data`.
-We validate via the `apikey` header (shared secret) and by matching the
-tenant's own instance name — a call for tenant A can't be spoofed
-without also knowing A's instance name.
+The gateway is the only thing that should call this — it already validated
+the WuzAPI HMAC signature once and forwards the same x-hmac-signature header
+unchanged (payload bytes are identical), so we re-check it here too rather
+than trust the network blindly. It also durably queues + retries delivery
+with backoff, so we don't need our own retry here — just process fast and
+return 200.
+
+Routing is per-connection by URL (/wuzapi/{tenant_id}/{connection_id}),
+set when the connection is created (see whatsapp.py's _webhook_url()) — no
+legacy "resolve by instance name in payload" fallback is needed like the
+old Evolution version had, since every connection created from here on
+always carries its IDs in the URL.
 """
+import hmac
+import hashlib
 import os
-import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 
@@ -20,14 +29,20 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-@router.post("/evolution/{tenant_id}")
-async def evolution_webhook(tenant_id: str, request: Request, bg: BackgroundTasks):
-    # Shared-secret validation
-    provided = request.headers.get("apikey") or request.headers.get("Apikey")
-    expected = os.environ.get("EVOLUTION_API_KEY")
-    if expected and provided and provided != expected:
-        raise HTTPException(status_code=401, detail="Invalid apikey")
-    # If Evolution can't send apikey header, we still bind by instance name below.
+def _validate_hmac(body: bytes, request: Request):
+    key = os.environ.get("WUZAPI_GLOBAL_HMAC_KEY")
+    if not key:
+        return
+    provided = request.headers.get("x-hmac-signature", "")
+    expected = hmac.new(key.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+
+@router.post("/wuzapi/{tenant_id}/{connection_id}")
+async def wuzapi_webhook(tenant_id: str, connection_id: str, request: Request, bg: BackgroundTasks):
+    body = await request.body()
+    _validate_hmac(body, request)
 
     try:
         payload = await request.json()
@@ -35,77 +50,64 @@ async def evolution_webhook(tenant_id: str, request: Request, bg: BackgroundTask
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     db = get_db()
-    row = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
-    if not row:
-        raise HTTPException(status_code=404, detail="Tenant não configurado")
-
-    event = payload.get("event") or ""
-    instance = payload.get("instance") or {}
-    inst_name = instance.get("instanceName") if isinstance(instance, dict) else instance
-    expected_inst = row.get("evolution_instance_name")
-    if expected_inst and inst_name and inst_name != expected_inst:
-        raise HTTPException(status_code=403, detail="Instance mismatch")
-
-    data = payload.get("data") or {}
+    conn = await db.whatsapp_connections.find_one({"id": connection_id, "tenant_id": tenant_id})
+    if not conn:
+        raise HTTPException(status_code=404, detail="Conexão não encontrada")
 
     await db.whatsapp_connections.update_one(
-        {"tenant_id": tenant_id},
-        {"$set": {"last_webhook_event_at": _now()}},
+        {"id": connection_id}, {"$set": {"last_webhook_event_at": _now()}}
     )
 
-    event_norm = event.lower().replace(".", "_")
+    etype = payload.get("type", "")
+    event = payload.get("event") or {}
 
-    # QR Code updated
-    if event_norm in ("qrcode_updated",):
-        b64 = data.get("qrcode", {}).get("base64") if isinstance(data.get("qrcode"), dict) else data.get("base64")
+    if etype == "QR":
+        b64 = payload.get("qrCodeBase64")
         if b64:
             await db.whatsapp_connections.update_one(
-                {"tenant_id": tenant_id},
+                {"id": connection_id},
                 {"$set": {"qrcode_atual": b64, "status": "pareando", "updated_at": _now()}},
             )
         return {"ok": True}
 
-    # Connection state
-    if event_norm in ("connection_update",):
-        state = (data.get("state") or data.get("status") or "").lower()
-        if state == "open":
-            wid = data.get("wuid") or data.get("wid") or data.get("id") or ""
-            numero = wid.split("@")[0] if isinstance(wid, str) else None
-            await db.whatsapp_connections.update_one(
-                {"tenant_id": tenant_id},
-                {"$set": {"status": "conectado", "qrcode_atual": None, "numero": numero, "updated_at": _now()}},
-            )
-        elif state in ("close", "connecting"):
-            new_status = "desconectado" if state == "close" else "pareando"
-            await db.whatsapp_connections.update_one(
-                {"tenant_id": tenant_id},
-                {"$set": {"status": new_status, "updated_at": _now()}},
-            )
+    if etype == "PairSuccess":
+        raw_id = event.get("ID", "")
+        numero = raw_id.split(":")[0].split("@")[0] if raw_id else None
+        await db.whatsapp_connections.update_one(
+            {"id": connection_id},
+            {"$set": {"status": "conectado", "qrcode_atual": None, "numero": numero, "updated_at": _now()}},
+        )
         return {"ok": True}
 
-    # Incoming message
-    if event_norm in ("messages_upsert", "message_upsert"):
-        msgs = data.get("messages") or ([data] if data.get("key") else [])
-        for m in msgs:
-            key = m.get("key", {}) if isinstance(m, dict) else {}
-            if key.get("fromMe"):
-                continue
-            remote = key.get("remoteJid", "")
-            if "@g.us" in remote:  # skip groups
-                continue
-            number = remote.split("@")[0]
-            message_id = key.get("id") or f"noid_{_now()}"
-            msg_content = m.get("message", {}) if isinstance(m, dict) else {}
-            text = (
-                msg_content.get("conversation")
-                or (msg_content.get("extendedTextMessage") or {}).get("text")
-                or (msg_content.get("imageMessage") or {}).get("caption")
-                or ""
-            )
-            if not text:
-                continue
-            # Fire-and-forget processing so we return 200 fast to Evolution
-            bg.add_task(handle_incoming_message, tenant_id, number, text, message_id)
-        return {"ok": True, "queued": len(msgs)}
+    if etype == "Connected":
+        await db.whatsapp_connections.update_one(
+            {"id": connection_id}, {"$set": {"status": "conectado", "updated_at": _now()}}
+        )
+        return {"ok": True}
 
-    return {"ok": True, "ignored": event}
+    if etype in ("Disconnected", "LoggedOut"):
+        await db.whatsapp_connections.update_one(
+            {"id": connection_id}, {"$set": {"status": "desconectado", "updated_at": _now()}}
+        )
+        return {"ok": True}
+
+    if etype == "Message":
+        info = event.get("Info", {})
+        if info.get("IsFromMe") or info.get("IsGroup"):
+            return {"ok": True}
+        chat = info.get("Chat", "")
+        number = chat.split("@")[0]
+        message_id = info.get("ID") or f"noid_{_now()}"
+        msg = event.get("Message", {})
+        text = (
+            msg.get("conversation")
+            or (msg.get("extendedTextMessage") or {}).get("text")
+            or (msg.get("imageMessage") or {}).get("caption")
+            or ""
+        )
+        if not text:
+            return {"ok": True}
+        bg.add_task(handle_incoming_message, tenant_id, number, text, message_id, connection_id)
+        return {"ok": True, "queued": True}
+
+    return {"ok": True, "ignored": etype}

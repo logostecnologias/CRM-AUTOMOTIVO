@@ -31,13 +31,18 @@ async def _enrich(db, sessions: list[dict]):
     contact_ids = list({s["contact_id"] for s in sessions if s.get("contact_id")})
     dept_ids = list({s["departamento_id"] for s in sessions if s.get("departamento_id")})
     agent_ids = list({s["atendente_id"] for s in sessions if s.get("atendente_id")})
+    conn_ids = list({s["whatsapp_connection_id"] for s in sessions if s.get("whatsapp_connection_id")})
     contacts = {c["id"]: c async for c in db.contacts.find({"id": {"$in": contact_ids}}, {"_id": 0})}
     depts = {d["id"]: d async for d in db.departments.find({"id": {"$in": dept_ids}}, {"_id": 0})}
     agents = {u["id"]: u async for u in db.users.find({"id": {"$in": agent_ids}}, {"_id": 0, "password_hash": 0})}
+    conns = {c["id"]: c async for c in db.whatsapp_connections.find(
+        {"id": {"$in": conn_ids}}, {"_id": 0, "id": 1, "nome": 1, "numero": 1}
+    )}
     for s in sessions:
         s["contact"] = contacts.get(s.get("contact_id"))
         s["department"] = depts.get(s.get("departamento_id"))
         s["agent"] = agents.get(s.get("atendente_id"))
+        s["connection"] = conns.get(s.get("whatsapp_connection_id"))
         # last message
         last = await db.messages_log.find_one({"session_id": s["id"]}, {"_id": 0}, sort=[("timestamp", -1)])
         s["last_message"] = last
@@ -60,12 +65,14 @@ async def list_sessions(
         q["status_atendimento"] = status
     if department_id:
         q["departamento_id"] = department_id
-    if connection_id:
-        q["whatsapp_connection_id"] = connection_id
 
     accessible = await _accessible_connection_ids(db, user)
     if accessible is not None:
-        q["whatsapp_connection_id"] = {"$in": accessible} if not connection_id else connection_id
+        if connection_id and connection_id not in accessible:
+            raise HTTPException(status_code=403, detail="Sem acesso a esta conexão")
+        q["whatsapp_connection_id"] = connection_id if connection_id else {"$in": accessible}
+    elif connection_id:
+        q["whatsapp_connection_id"] = connection_id
 
     sessions = await db.conversation_sessions.find(q, {"_id": 0}).sort("updated_at", -1).limit(limit).to_list(limit)
     return await _enrich(db, sessions)
@@ -176,7 +183,7 @@ class SendIn(BaseModel):
 
 @router.post("/sessions/{session_id}/send")
 async def send(session_id: str, body: SendIn, user: dict = Depends(get_current_user)):
-    """Human agent sends a message via Evolution API."""
+    """Human agent sends a message via WuzAPI."""
     db = get_db()
     s = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": user["tenant_id"]})
     if not s:
