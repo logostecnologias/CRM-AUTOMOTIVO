@@ -5,14 +5,14 @@ import { toast, Toaster } from "sonner";
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
-  const [conn, setConn] = useState(null);
+  const [connections, setConnections] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "agent", connection_ids: [] });
 
   const load = async () => {
-    const [u, c] = await Promise.all([api.get("/users"), api.get("/whatsapp/status")]);
+    const [u, c] = await Promise.all([api.get("/users"), api.get("/whatsapp/connections")]);
     setUsers(u.data);
-    setConn(c.data);
+    setConnections(c.data);
   };
   useEffect(() => { load(); }, []);
 
@@ -55,8 +55,6 @@ export default function UsersPage() {
     load();
   };
 
-  const connections = conn ? [conn] : []; // only 1 for now — future: list
-
   return (
     <div className="p-8 max-w-5xl" data-testid="users-page">
       <div className="flex items-end justify-between mb-8">
@@ -90,7 +88,7 @@ export default function UsersPage() {
                 {connections.map((c) => (
                   <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" checked={form.connection_ids.includes(c.id)} onChange={() => toggleConn(c.id)} data-testid={`conn-check-${c.id}`} />
-                    {c.evolution_instance_name || c.id.slice(0, 8)} · <span className="font-mono text-slate-500">{c.status}</span>
+                    {c.nome} · <span className="font-mono text-slate-500">{c.status}</span>
                   </label>
                 ))}
               </div>

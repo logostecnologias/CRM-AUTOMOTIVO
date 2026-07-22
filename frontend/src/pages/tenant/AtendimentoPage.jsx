@@ -17,16 +17,19 @@ export default function AtendimentoPage() {
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [depts, setDepts] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [active, setActive] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
+  const [connFilter, setConnFilter] = useState("");
   const chatEnd = useRef(null);
 
   const loadSessions = () => {
     const params = {};
     if (deptFilter) params.department_id = deptFilter;
+    if (connFilter) params.connection_id = connFilter;
     return api.get("/atendimento/sessions", { params }).then((r) => setSessions(r.data));
   };
   const loadActive = async (id) => {
@@ -36,8 +39,12 @@ export default function AtendimentoPage() {
     setMessages(data.messages);
   };
 
-  useEffect(() => { loadSessions(); api.get("/departments").then((r) => setDepts(r.data)); }, []);
-  useEffect(() => { loadSessions(); /* eslint-disable-next-line */ }, [deptFilter]);
+  useEffect(() => {
+    loadSessions();
+    api.get("/departments").then((r) => setDepts(r.data));
+    api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
+  }, []);
+  useEffect(() => { loadSessions(); /* eslint-disable-next-line */ }, [deptFilter, connFilter]);
   useEffect(() => {
     const t = setInterval(() => {
       loadSessions();
@@ -45,7 +52,7 @@ export default function AtendimentoPage() {
     }, 3000);
     return () => clearInterval(t);
     // eslint-disable-next-line
-  }, [activeId, deptFilter]);
+  }, [activeId, deptFilter, connFilter]);
   useEffect(() => {
     if (activeId) loadActive(activeId);
     else { setActive(null); setMessages([]); }
@@ -94,12 +101,21 @@ export default function AtendimentoPage() {
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500">Central</div>
           <h1 className="font-heading text-2xl font-black tracking-tighter">Atendimento</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Depto:</label>
-          <select data-testid="dept-filter" className="zz-input" style={{ width: "auto" }} value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
-            <option value="">Todos</option>
-            {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
-          </select>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Conexão:</label>
+            <select data-testid="connection-filter" className="zz-input" style={{ width: "auto" }} value={connFilter} onChange={(e) => setConnFilter(e.target.value)}>
+              <option value="">Todas</option>
+              {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Depto:</label>
+            <select data-testid="dept-filter" className="zz-input" style={{ width: "auto" }} value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
+              <option value="">Todos</option>
+              {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -140,6 +156,7 @@ export default function AtendimentoPage() {
                 <div className="text-xs font-mono text-slate-500 truncate">{active.contact?.numero_whatsapp}</div>
                 <div className="mt-2 flex items-center gap-2 flex-wrap">
                   <StatusBadge status={active.status_atendimento} />
+                  {active.connection && <ConnectionBadge connection={active.connection} />}
                   {active.department && (
                     <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-900 text-white" style={{ background: active.department.cor }}>
                       {active.department.nome}
@@ -205,7 +222,7 @@ function SessionCard({ session, active, onClick }) {
       data-testid={`session-card-${session.id}`}
       className={`w-full text-left p-2.5 border ${active ? "border-slate-900 shadow-[2px_2px_0_rgba(15,23,42,0.15)]" : "border-slate-200 bg-white hover:border-slate-400"}`}
     >
-      <div className="flex items-center justify-between mb-1">
+      <div className="flex items-center justify-between mb-1 gap-1">
         <div className="text-sm font-semibold truncate">{session.contact?.nome || session.contact?.numero_whatsapp || "—"}</div>
         {session.department && (
           <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 border border-slate-900 text-white shrink-0" style={{ background: session.department.cor }}>
@@ -213,6 +230,9 @@ function SessionCard({ session, active, onClick }) {
           </span>
         )}
       </div>
+      {session.connection && (
+        <div className="mb-1"><ConnectionBadge connection={session.connection} /></div>
+      )}
       <div className="text-xs text-slate-500 truncate">{last?.content || "—"}</div>
       <div className="text-[10px] text-slate-400 mt-1 font-mono">{new Date(session.updated_at).toLocaleString("pt-BR")}</div>
       {session.agent && <div className="text-[10px] text-slate-600 mt-0.5">👤 {session.agent.name}</div>}
@@ -241,6 +261,14 @@ function StatusBadge({ status }) {
   return (
     <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-900 text-white" style={{ background: s.color }}>
       {s.label}
+    </span>
+  );
+}
+
+function ConnectionBadge({ connection }) {
+  return (
+    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-300 bg-slate-50 text-slate-700">
+      {connection.nome}
     </span>
   );
 }
