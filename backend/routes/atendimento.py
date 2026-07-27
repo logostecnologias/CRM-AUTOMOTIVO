@@ -38,13 +38,23 @@ async def _enrich(db, sessions: list[dict]):
     conns = {c["id"]: c async for c in db.whatsapp_connections.find(
         {"id": {"$in": conn_ids}}, {"_id": 0, "id": 1, "nome": 1, "numero": 1}
     )}
+    session_ids = [s["id"] for s in sessions]
+    last_messages = {
+        row["_id"]: row["last"]
+        async for row in db.messages_log.aggregate([
+            {"$match": {"session_id": {"$in": session_ids}}},
+            {"$sort": {"timestamp": -1}},
+            {"$group": {"_id": "$session_id", "last": {"$first": "$$ROOT"}}},
+        ])
+    }
     for s in sessions:
         s["contact"] = contacts.get(s.get("contact_id"))
         s["department"] = depts.get(s.get("departamento_id"))
         s["agent"] = agents.get(s.get("atendente_id"))
         s["connection"] = conns.get(s.get("whatsapp_connection_id"))
-        # last message
-        last = await db.messages_log.find_one({"session_id": s["id"]}, {"_id": 0}, sort=[("timestamp", -1)])
+        last = last_messages.get(s["id"])
+        if last:
+            last.pop("_id", None)
         s["last_message"] = last
     return sessions
 
@@ -78,6 +88,23 @@ async def list_sessions(
     return await _enrich(db, sessions)
 
 
+@router.get("/unread-count")
+async def unread_count(user: dict = Depends(get_current_user)):
+    """Soma leve de unread_count, sem o enrich caro de /sessions — usada pelo
+    polling do sino/som de notificação, que roda a cada poucos segundos."""
+    if not user.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="Sem tenant")
+    db = get_db()
+    q: dict = {"tenant_id": user["tenant_id"], "unread_count": {"$gt": 0}}
+    accessible = await _accessible_connection_ids(db, user)
+    if accessible is not None:
+        q["whatsapp_connection_id"] = {"$in": accessible}
+    total = 0
+    async for s in db.conversation_sessions.find(q, {"_id": 0, "unread_count": 1}):
+        total += s.get("unread_count") or 0
+    return {"total": total}
+
+
 @router.get("/sessions/{session_id}")
 async def get_session(session_id: str, user: dict = Depends(get_current_user)):
     db = get_db()
@@ -90,6 +117,9 @@ async def get_session(session_id: str, user: dict = Depends(get_current_user)):
     if accessible is not None and s.get("whatsapp_connection_id") not in accessible:
         raise HTTPException(status_code=403, detail="Sem acesso a esta conexão")
     msgs = await db.messages_log.find({"session_id": session_id}, {"_id": 0}).sort("timestamp", 1).to_list(2000)
+    if s.get("unread_count"):
+        await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"unread_count": 0}})
+        s["unread_count"] = 0
     (await _enrich(db, [s]))
     return {"session": s, "messages": msgs}
 

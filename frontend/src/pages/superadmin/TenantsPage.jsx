@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Plus, PauseCircle, PlayCircle, Trash, SignIn } from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
+import { confirmToast } from "@/lib/confirm-toast";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
@@ -14,9 +15,13 @@ export default function TenantsPage() {
   const { refresh } = useAuth();
 
   const impersonate = async (t) => {
-    await api.post(`/admin/tenants/${t.id}/impersonate`);
-    await refresh();
-    nav("/app");
+    try {
+      await api.post(`/admin/tenants/${t.id}/impersonate`);
+      await refresh();
+      nav("/app");
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Erro ao entrar na empresa");
+    }
   };
 
   const load = () => api.get("/admin/tenants").then((r) => setTenants(r.data));
@@ -42,8 +47,9 @@ export default function TenantsPage() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Excluir empresa e TODOS os dados vinculados?")) return;
+    if (!(await confirmToast("Excluir empresa e TODOS os dados vinculados?", { confirmLabel: "Excluir tudo" }))) return;
     await api.delete(`/admin/tenants/${id}`);
+    toast.success("Empresa excluída");
     load();
   };
 
@@ -107,7 +113,6 @@ export default function TenantsPage() {
           </div>
         ))}
       </div>
-      <Toaster position="bottom-right" />
     </div>
   );
 }

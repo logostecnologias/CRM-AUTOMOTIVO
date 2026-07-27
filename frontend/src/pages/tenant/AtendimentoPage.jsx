@@ -1,17 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import {
-  Robot, Timer, Headset, CheckCircle, PaperPlaneRight, Hand, X, ArrowRight,
-} from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
-
-const STATUS = [
-  { key: "bot", label: "Bot", icon: Robot, color: "#2563EB" },
-  { key: "aguardando", label: "Aguardando", icon: Timer, color: "#F59E0B" },
-  { key: "em_atendimento", label: "Em Atendimento", icon: Headset, color: "#10B981" },
-  { key: "finalizado", label: "Finalizado", icon: CheckCircle, color: "#475569" },
-];
+import { PaperPlaneRight, Hand, CheckCircle, X } from "@phosphor-icons/react";
+import { toast } from "sonner";
+import { STATUS, SessionCard, MessageBubble, StatusBadge, ConnectionBadge } from "@/components/atendimento/shared";
 
 export default function AtendimentoPage() {
   const { user } = useAuth();
@@ -99,7 +91,7 @@ export default function AtendimentoPage() {
       <div className="border-b border-slate-900 bg-white px-6 py-4 flex items-center justify-between">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500">Central</div>
-          <h1 className="font-heading text-2xl font-black tracking-tighter">Atendimento</h1>
+          <h1 className="font-heading text-2xl font-black tracking-tighter">CRM</h1>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -209,66 +201,6 @@ export default function AtendimentoPage() {
           </div>
         )}
       </div>
-      <Toaster position="bottom-right" />
     </div>
-  );
-}
-
-function SessionCard({ session, active, onClick }) {
-  const last = session.last_message;
-  return (
-    <button
-      onClick={onClick}
-      data-testid={`session-card-${session.id}`}
-      className={`w-full text-left p-2.5 border ${active ? "border-slate-900 shadow-[2px_2px_0_rgba(15,23,42,0.15)]" : "border-slate-200 bg-white hover:border-slate-400"}`}
-    >
-      <div className="flex items-center justify-between mb-1 gap-1">
-        <div className="text-sm font-semibold truncate">{session.contact?.nome || session.contact?.numero_whatsapp || "—"}</div>
-        {session.department && (
-          <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 border border-slate-900 text-white shrink-0" style={{ background: session.department.cor }}>
-            {session.department.nome.slice(0, 6)}
-          </span>
-        )}
-      </div>
-      {session.connection && (
-        <div className="mb-1"><ConnectionBadge connection={session.connection} /></div>
-      )}
-      <div className="text-xs text-slate-500 truncate">{last?.content || "—"}</div>
-      <div className="text-[10px] text-slate-400 mt-1 font-mono">{new Date(session.updated_at).toLocaleString("pt-BR")}</div>
-      {session.agent && <div className="text-[10px] text-slate-600 mt-0.5">👤 {session.agent.name}</div>}
-    </button>
-  );
-}
-
-function MessageBubble({ m }) {
-  if (m.direction === "sistema" || m.type === "system") {
-    return <div className="text-[11px] text-slate-500 italic text-center py-1">— {m.content} —</div>;
-  }
-  const isOut = m.direction === "enviada";
-  return (
-    <div className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[80%] px-3 py-2 text-sm border ${isOut ? "bg-green-100 border-green-600" : "bg-white border-slate-300"}`}>
-        <div className="whitespace-pre-wrap">{m.content}</div>
-        <div className="text-[9px] text-slate-500 mt-1 font-mono">{new Date(m.timestamp).toLocaleTimeString("pt-BR")}</div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const s = STATUS.find((x) => x.key === status);
-  if (!s) return null;
-  return (
-    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-900 text-white" style={{ background: s.color }}>
-      {s.label}
-    </span>
-  );
-}
-
-function ConnectionBadge({ connection }) {
-  return (
-    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-300 bg-slate-50 text-slate-700">
-      {connection.nome}
-    </span>
   );
 }

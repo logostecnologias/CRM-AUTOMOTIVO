@@ -114,6 +114,37 @@ body {
   border: 1px solid #0F172A; padding: 1px 5px; font-size: 10px; font-weight: 700;
 }
 
+/* Toasts (Sonner) */
+.zz-toast {
+  border-radius: 0 !important;
+  border: 1px solid var(--border-heavy) !important;
+  box-shadow: 4px 4px 0 rgba(15, 23, 42, 1) !important;
+  background: var(--surface) !important;
+  padding: 0.9rem 1rem !important;
+}
+.zz-toast-title { font-weight: 700 !important; font-size: 0.875rem !important; color: var(--text) !important; }
+.zz-toast-desc { color: var(--text-2) !important; font-size: 0.8rem !important; }
+.zz-toast-success { border-left: 4px solid var(--success) !important; }
+.zz-toast-error { border-left: 4px solid var(--danger) !important; }
+.zz-toast-warning { border-left: 4px solid var(--warning) !important; }
+.zz-toast-info { border-left: 4px solid var(--brand-2) !important; }
+.zz-toast-action {
+  border-radius: 0 !important; font-weight: 600 !important; font-size: 0.8rem !important;
+  background: var(--brand) !important; border: 1px solid var(--brand) !important; color: #fff !important;
+}
+.zz-toast-action:hover { background: #1e293b !important; }
+.zz-toast-action-danger { background: var(--danger) !important; border-color: var(--danger) !important; }
+.zz-toast-action-danger:hover { background: #dc2626 !important; }
+.zz-toast-cancel {
+  border-radius: 0 !important; font-weight: 600 !important; font-size: 0.8rem !important;
+  background: #fff !important; border: 1px solid #cbd5e1 !important; color: var(--text) !important;
+}
+.zz-toast-cancel:hover { background: #f1f5f9 !important; }
+.zz-toast-close {
+  border-radius: 0 !important; border: 1px solid var(--border-heavy) !important;
+  background: #fff !important; color: var(--text) !important;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }

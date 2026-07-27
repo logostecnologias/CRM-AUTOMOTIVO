@@ -11,9 +11,9 @@ import NodeConfigPanel from "@/components/flow/NodeConfigPanel";
 import TestChat from "@/components/flow/TestChat";
 import { NODE_TYPES } from "@/components/flow/nodeTypes";
 import { ArrowLeft, FloppyDisk, Play, Rocket, CheckCircle } from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
 
-function EditorInner({ flow, reload }) {
+function EditorInner({ flow }) {
   const rf = useReactFlow();
   const nav = useNavigate();
   const wrapperRef = useRef(null);
@@ -74,7 +74,7 @@ function EditorInner({ flow, reload }) {
       await api.put(`/flows/${flow.id}`, { nodes, edges });
       await api.post(`/flows/${flow.id}/publish`);
       toast.success("Fluxo publicado! O bot está ativo.");
-      reload?.();
+      nav("/app/bots");
     } catch (e) {
       toast.error(e.response?.data?.detail || "Erro ao publicar");
     }
@@ -149,7 +149,6 @@ function EditorInner({ flow, reload }) {
           <TestChat flowId={flow.id} onClose={() => setShowTest(false)} />
         )}
       </div>
-      <Toaster position="bottom-right" />
     </div>
   );
 }
@@ -167,7 +166,7 @@ export default function FlowEditorPage() {
 
   return (
     <ReactFlowProvider>
-      <EditorInner flow={flow} reload={load} />
+      <EditorInner flow={flow} />
     </ReactFlowProvider>
   );
 }

@@ -15,7 +15,23 @@ const items = [
 export default function TenantDashboard() {
   const { user } = useAuth();
   const [metrics, setMetrics] = useState(null);
-  useEffect(() => { api.get("/dashboard/metrics").then((r) => setMetrics(r.data)); }, []);
+  const isAdmin = user?.role === "tenant_admin";
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get("/dashboard/metrics").then((r) => setMetrics(r.data)).catch(() => {});
+  }, [isAdmin]);
+
+  if (!isAdmin) {
+    return (
+      <div className="p-8" data-testid="tenant-dashboard">
+        <div className="mb-8">
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Painel</div>
+          <h1 className="font-heading text-4xl font-black tracking-tighter">Olá, {user?.name}.</h1>
+          <p className="text-slate-600 mt-2">Suas conversas estão na Central de Atendimento.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8" data-testid="tenant-dashboard">

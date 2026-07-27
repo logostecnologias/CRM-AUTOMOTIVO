@@ -3,7 +3,8 @@ import api from "@/lib/api";
 import {
   WhatsappLogo, CheckCircle, QrCode, XCircle, ArrowClockwise, Plus, Trash,
 } from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
+import { confirmToast } from "@/lib/confirm-toast";
 
 export default function WhatsAppPage() {
   const [connections, setConnections] = useState([]);
@@ -69,7 +70,7 @@ export default function WhatsAppPage() {
   };
 
   const removeConnection = async (id) => {
-    if (!window.confirm("Excluir esta conexão? Isso desconecta o número e apaga o vínculo.")) return;
+    if (!(await confirmToast("Excluir esta conexão? Isso desconecta o número e apaga o vínculo.", { confirmLabel: "Excluir" }))) return;
     setBusyId(id);
     try {
       await api.delete(`/whatsapp/connections/${id}`);
@@ -154,8 +155,6 @@ export default function WhatsAppPage() {
           />
         ))}
       </div>
-
-      <Toaster position="bottom-right" />
     </div>
   );
 }

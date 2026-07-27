@@ -108,7 +108,8 @@ async def delete_instance(wuzapi_id: str) -> dict:
 
 
 async def connect(token: str) -> dict:
-    return await _request("POST", "/session/connect", _token_headers(token))
+    body = {"Subscribe": ["Message", "ReadReceipt"], "Immediate": True}
+    return await _request("POST", "/session/connect", _token_headers(token), body)
 
 
 async def fetch_qr(token: str) -> str | None:
@@ -127,6 +128,17 @@ async def disconnect_instance(token: str) -> dict:
 
 async def logout_instance(token: str) -> dict:
     return await _request("POST", "/session/logout", _token_headers(token))
+
+
+async def get_avatar(token: str, phone: str) -> str | None:
+    """Profile picture URL for a contact, or None if they hide it (WuzAPI
+    returns a 500 for that case — a normal, expected outcome here, not a
+    real server error)."""
+    try:
+        resp = await _request("POST", "/user/avatar", _token_headers(token), {"Phone": phone})
+    except WuzapiError:
+        return None
+    return (resp.get("data") or {}).get("URL") or None
 
 
 async def send_text(token: str, number: str, text: str) -> dict:

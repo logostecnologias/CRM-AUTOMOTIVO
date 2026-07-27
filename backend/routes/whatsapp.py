@@ -26,7 +26,14 @@ def _webhook_url(tenant_id: str, conn_id: str) -> str:
     # que chama essa URL diretamente, e o gateway é quem protege contra o
     # zappzen estar fora do ar (fila + retry). O gateway repassa pro
     # PUBLIC_BASE_URL de verdade por conta própria (configuração dele, não daqui).
-    base = os.environ.get("WUZAPI_GATEWAY_URL", "").rstrip("/")
+    #
+    # Importante: essa URL é chamada pelo container da WuzAPI, não por nós —
+    # por isso usa WUZAPI_GATEWAY_INTERNAL_URL (endereço da WuzAPI enxerga o
+    # gateway dentro da rede docker do servidor, ex: http://gateway:8090),
+    # nunca WUZAPI_GATEWAY_URL (que é o endereço que NÓS usamos pra alcançar
+    # o gateway, normalmente via túnel SSH em 127.0.0.1 — um "127.0.0.1"
+    # aqui apontaria a WuzAPI pra ela mesma, não pro gateway).
+    base = os.environ.get("WUZAPI_GATEWAY_INTERNAL_URL", os.environ.get("WUZAPI_GATEWAY_URL", "")).rstrip("/")
     return f"{base}/webhook/{tenant_id}/{conn_id}"
 
 

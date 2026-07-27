@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
+import { confirmToast } from "@/lib/confirm-toast";
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -50,8 +51,9 @@ export default function UsersPage() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Excluir usuário?")) return;
+    if (!(await confirmToast("Excluir usuário?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/users/${id}`);
+    toast.success("Usuário excluído");
     load();
   };
 
@@ -126,7 +128,6 @@ export default function UsersPage() {
           </div>
         ))}
       </div>
-      <Toaster position="bottom-right" />
     </div>
   );
 }

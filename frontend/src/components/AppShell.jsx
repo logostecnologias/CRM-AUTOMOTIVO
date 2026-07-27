@@ -1,7 +1,8 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import {
-  ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Tray, Gear,
+  ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
   ArrowUUpLeft,
 } from "@phosphor-icons/react";
@@ -13,17 +14,17 @@ const adminNav = [
 
 function tenantNav(role) {
   const base = [
-    { to: "/app", icon: House, label: "Painel", end: true },
-    { to: "/app/atendimento", icon: Headset, label: "Atendimento" },
+    { to: "/app/inbox", icon: Headset, label: "Atendimento" },
+    { to: "/app/atendimento", icon: Kanban, label: "CRM" },
   ];
   if (role === "tenant_admin") {
+    base.unshift({ to: "/app", icon: House, label: "Painel", end: true });
     base.push(
       { to: "/app/bots", icon: Robot, label: "Robôs" },
       { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
       { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
       { to: "/app/users", icon: Users, label: "Usuários" },
       { to: "/app/contacts", icon: UsersThree, label: "Contatos" },
-      { to: "/app/inbox", icon: Tray, label: "Handoff (legado)" },
       { to: "/app/settings", icon: Gear, label: "Configurações" },
     );
   }
@@ -34,6 +35,7 @@ export default function AppShell({ variant = "tenant" }) {
   const { user, logout, impersonatedFrom, exitImpersonation } = useAuth();
   const navigate = useNavigate();
   const nav = variant === "admin" ? adminNav : tenantNav(user?.role);
+  useUnreadNotifier(variant === "tenant");
 
   const handleLogout = async () => {
     await logout();

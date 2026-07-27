@@ -17,7 +17,9 @@ export default function LoginPage() {
     setErr(""); setLoading(true);
     try {
       const u = await login(email, password);
-      nav(u.role === "super_admin" ? "/admin" : "/app");
+      if (u.role === "super_admin") nav("/admin");
+      else if (u.role === "agent") nav("/app/inbox");
+      else nav("/app");
     } catch (ex) {
       setErr(formatApiErrorDetail(ex.response?.data?.detail) || ex.message);
     } finally { setLoading(false); }

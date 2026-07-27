@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { Toaster } from "@/components/ui/sonner";
 import AppShell from "@/components/AppShell";
 import LoginPage from "@/pages/Login";
 import TenantDashboard from "@/pages/tenant/TenantDashboard";
@@ -43,7 +44,7 @@ function App() {
             <Route path="departments" element={<ProtectedRoute roles={ADMIN_ONLY}><DepartamentosPage /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute roles={ADMIN_ONLY}><UsersPage /></ProtectedRoute>} />
             <Route path="contacts" element={<ProtectedRoute roles={ADMIN_ONLY}><ContactsPage /></ProtectedRoute>} />
-            <Route path="inbox" element={<ProtectedRoute roles={ADMIN_ONLY}><InboxPage /></ProtectedRoute>} />
+            <Route path="inbox" element={<InboxPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 
@@ -72,6 +73,7 @@ function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
+      <Toaster />
     </AuthProvider>
   );
 }

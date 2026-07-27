@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { Plus, PencilSimple, Copy, Trash, Pause, Play, Star } from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
+import { confirmToast } from "@/lib/confirm-toast";
 
 export default function BotsPage() {
   const [bots, setBots] = useState([]);
@@ -41,8 +42,9 @@ export default function BotsPage() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Excluir este robô?")) return;
+    if (!(await confirmToast("Excluir este robô?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/bots/${id}`);
+    toast.success("Robô excluído");
     load();
   };
 
@@ -113,7 +115,6 @@ export default function BotsPage() {
           ))}
         </div>
       )}
-      <Toaster position="bottom-right" />
     </div>
   );
 }

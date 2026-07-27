@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
-import { toast, Toaster } from "sonner";
+import { toast } from "sonner";
+import { confirmToast } from "@/lib/confirm-toast";
 
 const DEFAULT_COLORS = ["#2563EB", "#10B981", "#F97316", "#EC4899", "#8B5CF6", "#EF4444", "#0F172A", "#F59E0B"];
 
@@ -30,8 +31,9 @@ export default function DepartamentosPage() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Excluir departamento?")) return;
+    if (!(await confirmToast("Excluir departamento?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/departments/${id}`);
+    toast.success("Departamento excluído");
     load();
   };
 
@@ -83,7 +85,6 @@ export default function DepartamentosPage() {
           </div>
         ))}
       </div>
-      <Toaster position="bottom-right" />
     </div>
   );
 }

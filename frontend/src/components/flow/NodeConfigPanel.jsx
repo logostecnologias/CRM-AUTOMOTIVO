@@ -60,14 +60,31 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
         </Field>
 
         {node.type === "start" && (
-          <Field label="Gatilho de Disparo">
-            <select className="zz-input" value={data.trigger || "first_message"}
-              onChange={(e) => update({ trigger: e.target.value })}>
-              <option value="first_message">Primeira mensagem do contato</option>
-              <option value="keyword">Palavra-chave específica</option>
-              <option value="no_response">Sem resposta há X tempo</option>
-            </select>
-          </Field>
+          <>
+            <Field label="Gatilho de Disparo">
+              <select className="zz-input" value={data.trigger || "first_message"}
+                onChange={(e) => update({ trigger: e.target.value })}>
+                <option value="first_message">Primeira mensagem do contato</option>
+                <option value="keyword">Palavra-chave específica</option>
+                <option value="no_response">Sem resposta há X tempo</option>
+              </select>
+            </Field>
+            {data.trigger === "keyword" && (
+              <Field label="Palavra ou Frase-chave" hint="O fluxo só inicia se a mensagem do contato contiver este texto">
+                <input className="zz-input" value={data.trigger_keyword || ""}
+                  onChange={(e) => update({ trigger_keyword: e.target.value })}
+                  placeholder="ex: promoção" data-testid="config-trigger-keyword" />
+              </Field>
+            )}
+            {data.trigger === "no_response" && (
+              <Field label="Tempo sem resposta (minutos)">
+                <input type="number" min="1" className="zz-input font-mono"
+                  value={data.trigger_delay_minutes || 30}
+                  onChange={(e) => update({ trigger_delay_minutes: parseInt(e.target.value) || 0 })}
+                  data-testid="config-trigger-delay" />
+              </Field>
+            )}
+          </>
         )}
 
         {node.type === "text" && (
