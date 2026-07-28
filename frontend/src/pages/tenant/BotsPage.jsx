@@ -7,19 +7,24 @@ import { confirmToast } from "@/lib/confirm-toast";
 
 export default function BotsPage() {
   const [bots, setBots] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [connectionId, setConnectionId] = useState("");
   const nav = useNavigate();
 
   const load = () => api.get("/bots").then((r) => setBots(r.data));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
+  }, []);
 
   const create = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     try {
-      const { data } = await api.post("/bots", { name });
-      setName(""); setCreating(false);
+      const { data } = await api.post("/bots", { name, connection_id: connectionId || null });
+      setName(""); setConnectionId(""); setCreating(false);
       toast.success("Robô criado");
       nav(`/app/bots/${data.id}/flow/${data.main_flow_id}`);
     } catch (ex) {
@@ -68,6 +73,14 @@ export default function BotsPage() {
             <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Nome do Robô</label>
             <input autoFocus data-testid="new-bot-name" className="zz-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Robô de Vendas" />
           </div>
+          <div className="w-56">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Conexão</label>
+            <select className="zz-input" data-testid="new-bot-connection" value={connectionId}
+              onChange={(e) => setConnectionId(e.target.value)}>
+              <option value="">— nenhuma —</option>
+              {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
           <button type="submit" className="zz-btn" data-testid="new-bot-submit">Criar</button>
           <button type="button" onClick={() => setCreating(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
         </form>
@@ -82,9 +95,9 @@ export default function BotsPage() {
         <div className="border border-slate-200 bg-white">
           <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
             <div className="col-span-4">Nome</div>
-            <div className="col-span-3">Gatilho</div>
+            <div className="col-span-2">Gatilho</div>
+            <div className="col-span-2">Conexão</div>
             <div className="col-span-2">Status</div>
-            <div className="col-span-1">Criado</div>
             <div className="col-span-2 text-right">Ações</div>
           </div>
           {bots.map((b) => (
@@ -92,14 +105,17 @@ export default function BotsPage() {
               <div className="col-span-4 font-semibold text-slate-900 cursor-pointer" onClick={() => nav(`/app/bots/${b.id}/flow/${b.main_flow_id}`)}>
                 {b.name}
               </div>
-              <div className="col-span-3 text-xs" data-testid={`bot-trigger-${b.id}`}>
+              <div className="col-span-2 text-xs" data-testid={`bot-trigger-${b.id}`}>
                 {b.trigger === "keyword" ? (
-                  <>Palavra-chave <span className="font-mono text-slate-500">"{b.trigger_keyword || "?"}"</span></>
+                  "Palavra-chave"
                 ) : b.trigger === "no_response" ? (
                   <span className="text-slate-500">Sem resposta</span>
                 ) : (
                   "Primeira mensagem"
                 )}
+              </div>
+              <div className="col-span-2 text-xs" data-testid={`bot-connection-${b.id}`}>
+                {b.connection?.nome || <span className="italic text-amber-700">sem conexão</span>}
               </div>
               <div className="col-span-2">
                 <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${
@@ -108,7 +124,6 @@ export default function BotsPage() {
                   "bg-slate-50 border-slate-300 text-slate-600"
                 }`}>{b.status}</span>
               </div>
-              <div className="col-span-1 text-xs text-slate-500 font-mono">{new Date(b.created_at).toLocaleDateString("pt-BR")}</div>
               <div className="col-span-2 flex gap-1 justify-end">
                 <button onClick={() => nav(`/app/bots/${b.id}/flow/${b.main_flow_id}`)} className="p-1.5 hover:bg-slate-200" title="Editar" data-testid={`bot-edit-${b.id}`}><PencilSimple size={14} weight="bold" /></button>
                 <button onClick={() => toggleStatus(b)} className="p-1.5 hover:bg-slate-200" title={b.status === "ativo" ? "Pausar" : "Ativar"}>

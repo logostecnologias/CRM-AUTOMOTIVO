@@ -13,7 +13,7 @@ import { NODE_TYPES } from "@/components/flow/nodeTypes";
 import { ArrowLeft, FloppyDisk, Play, Rocket, CheckCircle } from "@phosphor-icons/react";
 import { toast } from "sonner";
 
-function EditorInner({ flow }) {
+function EditorInner({ flow, bot, connections, onBotChange }) {
   const rf = useReactFlow();
   const nav = useNavigate();
   const wrapperRef = useRef(null);
@@ -22,6 +22,16 @@ function EditorInner({ flow }) {
   const [selectedId, setSelectedId] = useState(null);
   const [showTest, setShowTest] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const changeConnection = async (connectionId) => {
+    try {
+      const { data } = await api.patch(`/bots/${bot.id}`, { connection_id: connectionId || null });
+      onBotChange(data);
+      toast.success(connectionId ? "Conexão vinculada" : "Conexão desvinculada");
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Erro ao vincular conexão");
+    }
+  };
 
   const nodeTypes = useMemo(() => {
     const map = {};
@@ -65,7 +75,9 @@ function EditorInner({ flow }) {
       await api.put(`/flows/${flow.id}`, { nodes, edges });
       toast.success("Fluxo salvo com sucesso");
     } catch (e) {
-      toast.error("Erro ao salvar");
+      // Pode ser conflito de gatilho: a conexão do bot já tem outro do mesmo
+      // tipo. O motivo vem no detail e precisa aparecer.
+      toast.error(e.response?.data?.detail || "Erro ao salvar");
     } finally { setSaving(false); }
   };
 
@@ -81,8 +93,12 @@ function EditorInner({ flow }) {
   };
 
   const openTest = async () => {
-    await api.put(`/flows/${flow.id}`, { nodes, edges });
-    setShowTest(true);
+    try {
+      await api.put(`/flows/${flow.id}`, { nodes, edges });
+      setShowTest(true);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Erro ao salvar antes de testar");
+    }
   };
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
@@ -104,7 +120,20 @@ function EditorInner({ flow }) {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Conexão</label>
+            <select
+              className="zz-input"
+              style={{ padding: "0.35rem 0.6rem", minWidth: "170px" }}
+              value={bot?.connection_id || ""}
+              onChange={(e) => changeConnection(e.target.value)}
+              data-testid="bot-connection-select"
+            >
+              <option value="">— nenhuma —</option>
+              {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+            </select>
+          </div>
           <button data-testid="test-flow-btn" onClick={openTest} className="zz-btn zz-btn-secondary">
             <Play size={14} weight="bold" /> Testar
           </button>
@@ -154,19 +183,26 @@ function EditorInner({ flow }) {
 }
 
 export default function FlowEditorPage() {
-  const { flowId } = useParams();
+  const { flowId, botId } = useParams();
   const [flow, setFlow] = useState(null);
+  const [bot, setBot] = useState(null);
+  const [connections, setConnections] = useState([]);
   const [err, setErr] = useState("");
 
-  const load = () => api.get(`/flows/${flowId}`).then((r) => setFlow(r.data)).catch((e) => setErr(e.response?.data?.detail || "Erro"));
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [flowId]);
+  useEffect(() => {
+    api.get(`/flows/${flowId}`).then((r) => setFlow(r.data)).catch((e) => setErr(e.response?.data?.detail || "Erro"));
+  }, [flowId]);
+  useEffect(() => {
+    api.get(`/bots/${botId}`).then((r) => setBot(r.data)).catch(() => {});
+    api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
+  }, [botId]);
 
   if (err) return <div className="p-8 text-red-600">{err}</div>;
   if (!flow) return <div className="p-8 text-slate-500">Carregando fluxo...</div>;
 
   return (
     <ReactFlowProvider>
-      <EditorInner flow={flow} />
+      <EditorInner flow={flow} bot={bot} connections={connections} onBotChange={setBot} />
     </ReactFlowProvider>
   );
 }

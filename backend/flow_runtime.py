@@ -102,12 +102,6 @@ async def _load_bot_flow(db, tenant_id: str, bot_id: str | None, require_active:
     return bot, flow, start
 
 
-def _trigger_of(start: dict) -> str:
-    # Fluxos criados antes dos gatilhos existirem não têm o campo — valem como
-    # "primeira mensagem", que era o comportamento único da época.
-    return start.get("data", {}).get("trigger", "first_message")
-
-
 def _keyword_matches(start: dict, text: str) -> bool:
     keyword = (start.get("data", {}).get("trigger_keyword") or "").strip().lower()
     if not keyword:
@@ -132,16 +126,23 @@ async def _pick_bot_for_new_session(db, tenant_id: str, conn: dict, text: str):
     bot de palavra-chave só rodava se fosse justamente o padrão da conexão, e
     nesse caso o de primeira mensagem nunca rodava.
     """
-    keyword_bot = await _load_bot_flow(db, tenant_id, conn.get("bot_keyword_id"))
+    async def slot(trigger: str):
+        # O gatilho fica espelhado no documento do bot justamente pra esta
+        # busca: sem isso, seria preciso abrir o fluxo de cada bot da conexão
+        # a cada mensagem só pra descobrir o tipo de cada um.
+        b = await db.bots.find_one({
+            "tenant_id": tenant_id,
+            "connection_id": conn["id"],
+            "trigger": trigger,
+            "status": "ativo",
+        })
+        return await _load_bot_flow(db, tenant_id, b["id"]) if b else None
+
+    keyword_bot = await slot("keyword")
     if keyword_bot and _keyword_matches(keyword_bot[2], text):
         return keyword_bot
 
-    # Slot de primeira mensagem. `default_bot_id` é o nome histórico desse
-    # campo, mantido pra não migrar as conexões que já existem.
-    first = await _load_bot_flow(db, tenant_id, conn.get("default_bot_id"))
-    if first and _trigger_of(first[2]) == "first_message":
-        return first
-    return None
+    return await slot("first_message")
 
 
 async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None):
@@ -220,6 +221,7 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             await db.conversation_sessions.update_one(
                 {"id": session_id},
                 {"$set": {"status": "aguardando_humano", "status_atendimento": "aguardando",
+                          "aguardando_desde": session.get("aguardando_desde") or _now(),
                           "updated_at": _now()},
                  "$inc": {"unread_count": 1}},
             )
@@ -280,6 +282,7 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "departamento_id": dept_id,
             "atendente_id": None,
             "status_atendimento": "bot",
+            "aguardando_desde": None,
             "assumido_em": None,
             "finalizado_em": None,
             "node_atual_id": start["id"] if start else None,
@@ -303,6 +306,8 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
     # Mirror flow_engine's session.status → status_atendimento so kanban stays in sync.
     if session.get("status") == "aguardando_humano" and session.get("status_atendimento") == "bot":
         session["status_atendimento"] = "aguardando"
+        # Marca o início da espera para a UI mostrar "aguardando há X min".
+        session["aguardando_desde"] = _now()
     elif session.get("status") == "finalizada" and session.get("status_atendimento") in (None, "bot"):
         session["status_atendimento"] = "finalizado"
         session["finalizado_em"] = _now()
@@ -314,6 +319,7 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "variables": session["variables"],
             "status": session["status"],
             "status_atendimento": session.get("status_atendimento", "bot"),
+            "aguardando_desde": session.get("aguardando_desde"),
             "awaiting": session.get("awaiting"),
             "bot_id": session.get("bot_id"),
             "flow_id": session.get("flow_id"),

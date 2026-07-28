@@ -7,6 +7,7 @@ from typing import Any
 from db import get_db
 from auth import require_tenant_admin
 from flow_engine import run_test_message
+from bot_binding import sync_bot_trigger
 
 router = APIRouter(prefix="/api/flows", tags=["flows"])
 
@@ -43,6 +44,9 @@ async def save_flow(flow_id: str, body: FlowSave, user=Depends(require_tenant_ad
     }
     if body.name is not None:
         update["name"] = body.name
+    # Antes de gravar: se o gatilho mudou no nó de início e a conexão do bot já
+    # tem outro bot desse tipo, a edição é recusada em vez de criar o conflito.
+    await sync_bot_trigger(db, user["tenant_id"], flow["bot_id"], {"nodes": body.nodes})
     await db.flows.update_one({"id": flow_id}, {"$set": update})
     # Save history entry
     await db.flow_versions.insert_one({

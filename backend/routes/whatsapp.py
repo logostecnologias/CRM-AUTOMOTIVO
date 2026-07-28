@@ -40,22 +40,17 @@ def _webhook_url(tenant_id: str, conn_id: str) -> str:
 
 # ---------- CRUD ----------
 
-# Cada conexão tem no máximo um bot de cada tipo de gatilho. `default_bot_id` é
-# o slot de "primeira mensagem" — nome histórico, mantido pra não migrar as
-# conexões que já existem. O de palavra-chave tem preferência na hora de
-# escolher quem responde (ver _pick_bot_for_new_session em flow_runtime).
+# O vínculo com bots mora no bot (`bots.connection_id`), não aqui: é lá que se
+# escolhe a conexão, e a regra de um bot de cada tipo por conexão é validada em
+# bot_binding.
 class ConnectionIn(BaseModel):
     nome: str
     departamento_padrao_id: str | None = None
-    default_bot_id: str | None = None
-    bot_keyword_id: str | None = None
 
 
 class ConnectionPatch(BaseModel):
     nome: str | None = None
     departamento_padrao_id: str | None = None
-    default_bot_id: str | None = None
-    bot_keyword_id: str | None = None
 
 
 @router.get("/connections")
@@ -82,8 +77,6 @@ async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admi
         "tenant_id": user["tenant_id"],
         "nome": body.nome,
         "departamento_padrao_id": body.departamento_padrao_id,
-        "default_bot_id": body.default_bot_id,
-        "bot_keyword_id": body.bot_keyword_id,
         "wuzapi_user_id": None,
         "wuzapi_token": None,
         "numero": None,
