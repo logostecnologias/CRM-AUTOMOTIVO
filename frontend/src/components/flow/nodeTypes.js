@@ -57,7 +57,7 @@ export const NODE_TYPES = {
   human_handoff: {
     label: "Atendimento Humano", color: "#EF4444", textColor: "#FFFFFF", icon: UserSwitch,
     outputs: [],
-    default: { label: "Transferir para Humano" },
+    default: { label: "Transferir para Humano", department_id: "", department_name: "" },
   },
   transfer_bot: {
     label: "Transferir para Bot", color: "#8B5CF6", textColor: "#FFFFFF", icon: ArrowsLeftRight,

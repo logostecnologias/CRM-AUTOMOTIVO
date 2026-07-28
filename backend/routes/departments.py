@@ -68,4 +68,11 @@ async def delete_department(dept_id: str, user=Depends(require_tenant_admin)):
         {"tenant_id": user["tenant_id"], "departamento_id": dept_id},
         {"$set": {"departamento_id": None}},
     )
+    # Nós de Atendimento Humano que mandavam pra esse departamento voltam a
+    # cair no padrão da conexão, em vez de apontar pra um id que não existe.
+    await db.flows.update_many(
+        {"tenant_id": user["tenant_id"], "nodes.data.department_id": dept_id},
+        {"$set": {"nodes.$[n].data.department_id": "", "nodes.$[n].data.department_name": ""}},
+        array_filters=[{"n.data.department_id": dept_id}],
+    )
     return {"ok": True}

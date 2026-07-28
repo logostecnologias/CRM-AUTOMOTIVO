@@ -5,13 +5,14 @@ from pydantic import BaseModel, EmailStr
 
 from db import get_db
 from auth import require_super_admin, hash_password, create_access_token, create_refresh_token, _set_auth_cookies
+from plan_limits import plan_excess
 
 router = APIRouter(prefix="/api/admin", tags=["super_admin"])
 
 
 class TenantCreate(BaseModel):
     name: str
-    plan: str = "starter"
+    plan_id: str | None = None
     admin_name: str
     admin_email: EmailStr
     admin_password: str
@@ -19,8 +20,16 @@ class TenantCreate(BaseModel):
 
 class TenantUpdate(BaseModel):
     name: str | None = None
-    plan: str | None = None
+    plan_id: str | None = None
     status: str | None = None
+
+
+async def _enrich_plan(db, tenants: list[dict]):
+    plan_ids = list({t["plan_id"] for t in tenants if t.get("plan_id")})
+    plans = {p["id"]: p async for p in db.plans.find({"id": {"$in": plan_ids}}, {"_id": 0})}
+    for t in tenants:
+        t["plan"] = plans.get(t.get("plan_id"))
+    return tenants
 
 
 @router.get("/tenants")
@@ -33,7 +42,7 @@ async def list_tenants(_=Depends(require_super_admin)):
         bots = await db.bots.count_documents({"tenant_id": t["id"]})
         users = await db.users.count_documents({"tenant_id": t["id"]})
         result.append({**t, "bots_count": bots, "users_count": users})
-    return result
+    return await _enrich_plan(db, result)
 
 
 @router.post("/tenants")
@@ -42,15 +51,18 @@ async def create_tenant(body: TenantCreate, _=Depends(require_super_admin)):
     email = body.admin_email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email já cadastrado")
+    if body.plan_id and not await db.plans.find_one({"id": body.plan_id}):
+        raise HTTPException(status_code=400, detail="Plano inválido")
     tenant_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    await db.tenants.insert_one({
+    tenant = {
         "id": tenant_id,
         "name": body.name,
-        "plan": body.plan,
+        "plan_id": body.plan_id,
         "status": "active",
         "created_at": now,
-    })
+    }
+    await db.tenants.insert_one(tenant)
     await db.users.insert_one({
         "id": str(uuid.uuid4()),
         "tenant_id": tenant_id,
@@ -61,7 +73,9 @@ async def create_tenant(body: TenantCreate, _=Depends(require_super_admin)):
         "password_hash": hash_password(body.admin_password),
         "created_at": now,
     })
-    return {"id": tenant_id, "name": body.name, "plan": body.plan, "status": "active", "created_at": now}
+    tenant.pop("_id", None)
+    (await _enrich_plan(db, [tenant]))
+    return tenant
 
 
 @router.patch("/tenants/{tenant_id}")
@@ -70,10 +84,19 @@ async def update_tenant(tenant_id: str, body: TenantUpdate, _=Depends(require_su
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
         return {"ok": True}
+    novo_plano = None
+    if "plan_id" in update:
+        novo_plano = await db.plans.find_one({"id": update["plan_id"]}, {"_id": 0})
+        if not novo_plano:
+            raise HTTPException(status_code=400, detail="Plano inválido")
     res = await db.tenants.update_one({"id": tenant_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Tenant não encontrado")
     tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+    (await _enrich_plan(db, [tenant]))
+    if novo_plano:
+        # Downgrade não remove nada retroativamente — só avisa quem trocou.
+        tenant["plan_warnings"] = await plan_excess(db, tenant_id, novo_plano)
     return tenant
 
 

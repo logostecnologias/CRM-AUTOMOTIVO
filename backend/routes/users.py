@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr
 
 from db import get_db
 from auth import require_tenant_admin, hash_password
+from plan_limits import enforce_plan_limit
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -56,6 +57,7 @@ async def create_user(body: UserIn, admin=Depends(require_tenant_admin)):
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     if body.role not in ("agent", "tenant_admin"):
         raise HTTPException(status_code=400, detail="Papel inválido")
+    await enforce_plan_limit(db, admin["tenant_id"], "users", "max_usuarios", "usuários")
     user_id = str(uuid.uuid4())
     doc = {
         "id": user_id,

@@ -4,12 +4,13 @@ import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import {
   ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
-  ArrowUUpLeft,
+  ArrowUUpLeft, Sparkle, CreditCard,
 } from "@phosphor-icons/react";
 
 const adminNav = [
   { to: "/admin", icon: ChartLine, label: "Métricas Globais", end: true },
   { to: "/admin/tenants", icon: Buildings, label: "Empresas" },
+  { to: "/admin/plans", icon: CreditCard, label: "Planos" },
 ];
 
 function tenantNav(role) {
@@ -21,6 +22,7 @@ function tenantNav(role) {
     base.unshift({ to: "/app", icon: House, label: "Painel", end: true });
     base.push(
       { to: "/app/bots", icon: Robot, label: "Robôs" },
+      { to: "/app/ai-agents", icon: Sparkle, label: "Agentes de IA" },
       { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
       { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
       { to: "/app/users", icon: Users, label: "Usuários" },

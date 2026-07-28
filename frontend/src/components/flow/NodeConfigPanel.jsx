@@ -6,10 +6,14 @@ import { NODE_TYPES } from "./nodeTypes";
 export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   const [data, setData] = useState(node?.data || {});
   const [bots, setBots] = useState([]);
+  const [depts, setDepts] = useState([]);
   useEffect(() => setData(node?.data || {}), [node?.id]);
   useEffect(() => {
     if (node?.type === "transfer_bot") {
       api.get("/bots").then((r) => setBots(r.data)).catch(() => {});
+    }
+    if (node?.type === "human_handoff") {
+      api.get("/departments").then((r) => setDepts(r.data)).catch(() => {});
     }
   }, [node?.type]);
 
@@ -219,7 +223,23 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
           </>
         )}
 
-        {(node.type === "human_handoff" || node.type === "end") && (
+        {node.type === "human_handoff" && (
+          <Field label="Departamento" hint="Deixe em branco para usar o departamento padrão da conexão de WhatsApp.">
+            <select className="zz-input" value={data.department_id || ""}
+              data-testid="config-handoff-department"
+              onChange={(e) => {
+                const d = depts.find((x) => x.id === e.target.value);
+                update({ department_id: e.target.value, department_name: d?.nome || "" });
+              }}>
+              <option value="">— padrão da conexão —</option>
+              {depts.map((d) => (
+                <option key={d.id} value={d.id}>{d.nome}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        {node.type === "end" && (
           <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 p-3">
             Este bloco não requer configuração adicional.
           </div>

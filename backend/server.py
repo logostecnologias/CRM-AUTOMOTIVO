@@ -21,6 +21,7 @@ from routes.webhooks import router as webhooks_router
 from routes.departments import router as departments_router
 from routes.users import router as users_router
 from routes.atendimento import router as atendimento_router
+from routes.plans import router as plans_router
 import health_monitor
 
 
@@ -45,6 +46,7 @@ app.include_router(webhooks_router)
 app.include_router(departments_router)
 app.include_router(users_router)
 app.include_router(atendimento_router)
+app.include_router(plans_router)
 
 
 @app.get("/api/health")

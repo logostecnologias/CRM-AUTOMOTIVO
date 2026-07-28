@@ -17,16 +17,24 @@ export default function BotsPage() {
   const create = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    const { data } = await api.post("/bots", { name });
-    setName(""); setCreating(false);
-    toast.success("Robô criado");
-    nav(`/app/bots/${data.id}/flow/${data.main_flow_id}`);
+    try {
+      const { data } = await api.post("/bots", { name });
+      setName(""); setCreating(false);
+      toast.success("Robô criado");
+      nav(`/app/bots/${data.id}/flow/${data.main_flow_id}`);
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Erro ao criar robô");
+    }
   };
 
   const duplicate = async (id) => {
-    await api.post(`/bots/${id}/duplicate`);
-    toast.success("Robô duplicado");
-    load();
+    try {
+      await api.post(`/bots/${id}/duplicate`);
+      toast.success("Robô duplicado");
+      load();
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Erro ao duplicar robô");
+    }
   };
 
   const toggleStatus = async (bot) => {

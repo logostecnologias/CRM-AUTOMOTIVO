@@ -266,6 +266,7 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "awaiting": session.get("awaiting"),
             "bot_id": session.get("bot_id"),
             "flow_id": session.get("flow_id"),
+            "departamento_id": session.get("departamento_id"),
             "finalizado_em": session.get("finalizado_em"),
             "updated_at": _now(),
         }, "$inc": {"unread_count": 1}},

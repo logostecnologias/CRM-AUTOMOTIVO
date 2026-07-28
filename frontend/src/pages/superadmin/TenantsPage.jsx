@@ -3,13 +3,15 @@ import api from "@/lib/api";
 import { Plus, PauseCircle, PlayCircle, Trash, SignIn } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
+import { formatBRL } from "@/lib/currency";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 
 export default function TenantsPage() {
   const [tenants, setTenants] = useState([]);
+  const [plans, setPlans] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", plan: "starter", admin_name: "", admin_email: "", admin_password: "" });
+  const [form, setForm] = useState({ name: "", plan_id: "", admin_name: "", admin_email: "", admin_password: "" });
   const [err, setErr] = useState("");
   const nav = useNavigate();
   const { refresh } = useAuth();
@@ -25,18 +27,34 @@ export default function TenantsPage() {
   };
 
   const load = () => api.get("/admin/tenants").then((r) => setTenants(r.data));
-  useEffect(() => { load(); }, []);
+  const loadPlans = () => api.get("/admin/plans").then((r) => setPlans(r.data));
+  useEffect(() => { load(); loadPlans(); }, []);
 
   const create = async (e) => {
     e.preventDefault(); setErr("");
     try {
       await api.post("/admin/tenants", form);
       setShowForm(false);
-      setForm({ name: "", plan: "starter", admin_name: "", admin_email: "", admin_password: "" });
+      setForm({ name: "", plan_id: "", admin_name: "", admin_email: "", admin_password: "" });
       toast.success("Empresa criada com sucesso");
       load();
     } catch (ex) {
       setErr(ex.response?.data?.detail || "Erro ao criar empresa");
+    }
+  };
+
+  const changePlan = async (t, planId) => {
+    if (!planId || planId === t.plan_id) return;
+    try {
+      const { data } = await api.patch(`/admin/tenants/${t.id}`, { plan_id: planId });
+      if (data.plan_warnings?.length) {
+        toast.warning(`Plano alterado, mas a empresa está acima do limite: ${data.plan_warnings.join(" · ")}`, { duration: 8000 });
+      } else {
+        toast.success("Plano atualizado");
+      }
+      load();
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Erro ao atualizar plano");
     }
   };
 
@@ -69,9 +87,16 @@ export default function TenantsPage() {
         <form onSubmit={create} className="border border-slate-900 bg-white p-6 mb-6 grid grid-cols-2 gap-4 zz-panel-hard">
           <Field label="Nome da Empresa"><input required data-testid="tenant-name" className="zz-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Plano">
-            <select className="zz-input" value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
-              <option>starter</option><option>pro</option><option>enterprise</option>
-            </select>
+            {plans.length === 0 ? (
+              <div className="text-xs text-slate-500 italic py-2">Nenhum plano cadastrado — crie um em "Planos" primeiro.</div>
+            ) : (
+              <select required data-testid="tenant-plan" className="zz-input" value={form.plan_id} onChange={(e) => setForm({ ...form, plan_id: e.target.value })}>
+                <option value="" disabled>Selecione um plano</option>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nome} — {formatBRL(p.preco_mensal)}/mês</option>
+                ))}
+              </select>
+            )}
           </Field>
           <Field label="Nome do Admin"><input required data-testid="admin-name" className="zz-input" value={form.admin_name} onChange={(e) => setForm({ ...form, admin_name: e.target.value })} /></Field>
           <Field label="Email do Admin"><input required type="email" data-testid="admin-email" className="zz-input" value={form.admin_email} onChange={(e) => setForm({ ...form, admin_email: e.target.value })} /></Field>
@@ -86,8 +111,8 @@ export default function TenantsPage() {
 
       <div className="border border-slate-200 bg-white">
         <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-          <div className="col-span-4">Nome</div>
-          <div className="col-span-2">Plano</div>
+          <div className="col-span-3">Nome</div>
+          <div className="col-span-3">Plano</div>
           <div className="col-span-2">Status</div>
           <div className="col-span-1">Robôs</div>
           <div className="col-span-2">Criado em</div>
@@ -96,8 +121,24 @@ export default function TenantsPage() {
         {tenants.length === 0 && <div className="p-6 text-center text-sm text-slate-500">Nenhuma empresa cadastrada.</div>}
         {tenants.map((t) => (
           <div key={t.id} className="grid grid-cols-12 px-4 py-3 border-b border-slate-100 items-center hover:bg-slate-50" data-testid={`tenant-row-${t.id}`}>
-            <div className="col-span-4 font-semibold">{t.name}</div>
-            <div className="col-span-2 text-xs font-mono">{t.plan}</div>
+            <div className="col-span-3 font-semibold">{t.name}</div>
+            <div className="col-span-3 pr-3">
+              {plans.length === 0 ? (
+                <span className="text-xs italic text-slate-400">nenhum plano cadastrado</span>
+              ) : (
+                <select
+                  className="zz-input text-xs py-1"
+                  data-testid={`tenant-plan-${t.id}`}
+                  value={t.plan_id || ""}
+                  onChange={(e) => changePlan(t, e.target.value)}
+                >
+                  {!t.plan_id && <option value="" disabled>sem plano</option>}
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nome} — {formatBRL(p.preco_mensal)}</option>
+                  ))}
+                </select>
+              )}
+            </div>
             <div className="col-span-2">
               <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${t.status === "active" ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700"}`}>{t.status}</span>
             </div>

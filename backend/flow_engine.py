@@ -145,6 +145,10 @@ async def _process_node(node, flow, session, outputs):
     if ntype == "human_handoff":
         outputs.append({"type": "system", "content": "Conversa transferida para atendimento humano"})
         session["status"] = "aguardando_humano"
+        # Sem departamento configurado no nó, mantém o que a conversa já tem
+        # (o padrão da conexão, definido na criação da sessão).
+        if data.get("department_id"):
+            session["departamento_id"] = data["department_id"]
         return None
 
     if ntype == "transfer_bot":

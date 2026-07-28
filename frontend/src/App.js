@@ -6,6 +6,7 @@ import AppShell from "@/components/AppShell";
 import LoginPage from "@/pages/Login";
 import TenantDashboard from "@/pages/tenant/TenantDashboard";
 import BotsPage from "@/pages/tenant/BotsPage";
+import AIAgentsPage from "@/pages/tenant/AIAgentsPage";
 import FlowEditorPage from "@/pages/tenant/FlowEditorPage";
 import ContactsPage from "@/pages/tenant/ContactsPage";
 import InboxPage from "@/pages/tenant/InboxPage";
@@ -16,6 +17,7 @@ import DepartamentosPage from "@/pages/tenant/DepartamentosPage";
 import UsersPage from "@/pages/tenant/UsersPage";
 import SuperAdminDashboard from "@/pages/superadmin/SuperAdminDashboard";
 import TenantsPage from "@/pages/superadmin/TenantsPage";
+import PlansPage from "@/pages/superadmin/PlansPage";
 import "@/App.css";
 
 const TENANT_ROLES = ["tenant_admin", "agent"];
@@ -40,6 +42,7 @@ function App() {
             <Route index element={<TenantDashboard />} />
             <Route path="atendimento" element={<AtendimentoPage />} />
             <Route path="bots" element={<ProtectedRoute roles={ADMIN_ONLY}><BotsPage /></ProtectedRoute>} />
+            <Route path="ai-agents" element={<ProtectedRoute roles={ADMIN_ONLY}><AIAgentsPage /></ProtectedRoute>} />
             <Route path="whatsapp" element={<ProtectedRoute roles={ADMIN_ONLY}><WhatsAppPage /></ProtectedRoute>} />
             <Route path="departments" element={<ProtectedRoute roles={ADMIN_ONLY}><DepartamentosPage /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute roles={ADMIN_ONLY}><UsersPage /></ProtectedRoute>} />
@@ -67,6 +70,7 @@ function App() {
           >
             <Route index element={<SuperAdminDashboard />} />
             <Route path="tenants" element={<TenantsPage />} />
+            <Route path="plans" element={<PlansPage />} />
           </Route>
 
           <Route path="/" element={<Navigate to="/login" replace />} />

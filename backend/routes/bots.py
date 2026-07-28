@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from db import get_db
 from auth import require_tenant_admin
+from plan_limits import enforce_plan_limit
 
 router = APIRouter(prefix="/api/bots", tags=["bots"])
 
@@ -32,6 +33,7 @@ async def list_bots(user=Depends(require_tenant_admin)):
 @router.post("")
 async def create_bot(body: BotIn, user=Depends(require_tenant_admin)):
     db = get_db()
+    await enforce_plan_limit(db, user["tenant_id"], "bots", "max_bots", "robôs")
     bot_id = str(uuid.uuid4())
     flow_id = str(uuid.uuid4())
     now = _now()
@@ -96,6 +98,7 @@ async def update_bot(bot_id: str, body: BotUpdate, user=Depends(require_tenant_a
 @router.post("/{bot_id}/duplicate")
 async def duplicate_bot(bot_id: str, user=Depends(require_tenant_admin)):
     db = get_db()
+    await enforce_plan_limit(db, user["tenant_id"], "bots", "max_bots", "robôs")
     bot = await db.bots.find_one({"id": bot_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
     if not bot:
         raise HTTPException(status_code=404, detail="Bot não encontrado")

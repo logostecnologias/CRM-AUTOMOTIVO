@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from db import get_db
 from auth import require_tenant_admin, get_current_user
+from plan_limits import enforce_plan_limit
 import wuzapi_client as wuzapi
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
@@ -69,6 +70,7 @@ async def list_connections(user: dict = Depends(get_current_user)):
 @router.post("/connections")
 async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admin)):
     db = get_db()
+    await enforce_plan_limit(db, user["tenant_id"], "whatsapp_connections", "max_conexoes", "conexões WhatsApp")
     conn = {
         "id": str(uuid.uuid4()),
         "tenant_id": user["tenant_id"],

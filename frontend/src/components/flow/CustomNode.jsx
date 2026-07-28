@@ -82,7 +82,12 @@ function CustomNode({ id, data, selected, type }) {
           </div>
         )}
         {type === "human_handoff" && (
-          <div className="text-xs text-slate-700">A conversa será enviada à inbox de atendimento.</div>
+          <div className="text-xs text-slate-700">
+            Vai para a fila de{" "}
+            {data.department_id
+              ? <span className="font-mono text-red-700">{data.department_name || data.department_id}</span>
+              : <span className="italic text-slate-500">departamento padrão da conexão</span>}
+          </div>
         )}
         {type === "transfer_bot" && (
           <div className="text-xs text-slate-700">
