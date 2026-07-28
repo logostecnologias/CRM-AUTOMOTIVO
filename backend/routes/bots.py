@@ -27,6 +27,21 @@ def _now():
 async def list_bots(user=Depends(require_tenant_admin)):
     db = get_db()
     bots = await db.bots.find({"tenant_id": user["tenant_id"]}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # O tipo do bot mora no nó de início do fluxo, não no documento do bot.
+    # Exposto aqui pra tela de WhatsApp conseguir oferecer só os bots do tipo
+    # certo em cada slot da conexão, e pra listagem mostrar o gatilho.
+    flow_ids = [b["main_flow_id"] for b in bots if b.get("main_flow_id")]
+    flows = {
+        f["id"]: f
+        async for f in db.flows.find({"id": {"$in": flow_ids}}, {"_id": 0, "id": 1, "nodes": 1, "published_at": 1})
+    }
+    for b in bots:
+        flow = flows.get(b.get("main_flow_id"))
+        start = next((n for n in (flow or {}).get("nodes", []) if n.get("type") == "start"), None)
+        data = (start or {}).get("data", {})
+        b["trigger"] = data.get("trigger", "first_message")
+        b["trigger_keyword"] = data.get("trigger_keyword") or ""
+        b["publicado"] = bool(flow and flow.get("published_at"))
     return bots
 
 
@@ -114,18 +129,6 @@ async def duplicate_bot(bot_id: str, user=Depends(require_tenant_admin)):
     await db.flows.insert_one(new_flow)
     new_bot.pop("_id", None)
     return new_bot
-
-
-@router.patch("/{bot_id}/default")
-async def set_default(bot_id: str, user=Depends(require_tenant_admin)):
-    db = get_db()
-    bot = await db.bots.find_one({"id": bot_id, "tenant_id": user["tenant_id"]})
-    if not bot:
-        raise HTTPException(status_code=404, detail="Bot não encontrado")
-    # Unset any existing default in this tenant, then set this one.
-    await db.bots.update_many({"tenant_id": user["tenant_id"]}, {"$set": {"is_default": False}})
-    await db.bots.update_one({"id": bot_id}, {"$set": {"is_default": True}})
-    return {"ok": True}
 
 
 @router.delete("/{bot_id}")

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
-import { Plus, PencilSimple, Copy, Trash, Pause, Play, Star } from "@phosphor-icons/react";
+import { Plus, PencilSimple, Copy, Trash, Pause, Play } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 
@@ -43,12 +43,6 @@ export default function BotsPage() {
     load();
   };
 
-  const setDefault = async (id) => {
-    await api.patch(`/bots/${id}/default`);
-    toast.success("Bot padrão atualizado");
-    load();
-  };
-
   const remove = async (id) => {
     if (!(await confirmToast("Excluir este robô?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/bots/${id}`);
@@ -87,17 +81,24 @@ export default function BotsPage() {
       ) : (
         <div className="border border-slate-200 bg-white">
           <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-            <div className="col-span-5">Nome</div>
+            <div className="col-span-4">Nome</div>
+            <div className="col-span-3">Gatilho</div>
             <div className="col-span-2">Status</div>
-            <div className="col-span-3">Criado em</div>
+            <div className="col-span-1">Criado</div>
             <div className="col-span-2 text-right">Ações</div>
           </div>
           {bots.map((b) => (
             <div key={b.id} className="grid grid-cols-12 px-4 py-3 border-b border-slate-100 items-center hover:bg-slate-50" data-testid={`bot-row-${b.id}`}>
-              <div className="col-span-5 font-semibold text-slate-900 cursor-pointer flex items-center gap-2" onClick={() => nav(`/app/bots/${b.id}/flow/${b.main_flow_id}`)}>
+              <div className="col-span-4 font-semibold text-slate-900 cursor-pointer" onClick={() => nav(`/app/bots/${b.id}/flow/${b.main_flow_id}`)}>
                 {b.name}
-                {b.is_default && (
-                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-amber-100 border border-amber-500 text-amber-800" data-testid={`default-badge-${b.id}`}>Padrão</span>
+              </div>
+              <div className="col-span-3 text-xs" data-testid={`bot-trigger-${b.id}`}>
+                {b.trigger === "keyword" ? (
+                  <>Palavra-chave <span className="font-mono text-slate-500">"{b.trigger_keyword || "?"}"</span></>
+                ) : b.trigger === "no_response" ? (
+                  <span className="text-slate-500">Sem resposta</span>
+                ) : (
+                  "Primeira mensagem"
                 )}
               </div>
               <div className="col-span-2">
@@ -107,12 +108,9 @@ export default function BotsPage() {
                   "bg-slate-50 border-slate-300 text-slate-600"
                 }`}>{b.status}</span>
               </div>
-              <div className="col-span-3 text-xs text-slate-500 font-mono">{new Date(b.created_at).toLocaleDateString("pt-BR")}</div>
+              <div className="col-span-1 text-xs text-slate-500 font-mono">{new Date(b.created_at).toLocaleDateString("pt-BR")}</div>
               <div className="col-span-2 flex gap-1 justify-end">
                 <button onClick={() => nav(`/app/bots/${b.id}/flow/${b.main_flow_id}`)} className="p-1.5 hover:bg-slate-200" title="Editar" data-testid={`bot-edit-${b.id}`}><PencilSimple size={14} weight="bold" /></button>
-                <button onClick={() => setDefault(b.id)} className={`p-1.5 hover:bg-amber-100 ${b.is_default ? "text-amber-600" : "text-slate-400"}`} title="Definir como padrão" data-testid={`bot-default-${b.id}`}>
-                  <Star size={14} weight={b.is_default ? "fill" : "bold"} />
-                </button>
                 <button onClick={() => toggleStatus(b)} className="p-1.5 hover:bg-slate-200" title={b.status === "ativo" ? "Pausar" : "Ativar"}>
                   {b.status === "ativo" ? <Pause size={14} weight="bold" /> : <Play size={14} weight="bold" />}
                 </button>

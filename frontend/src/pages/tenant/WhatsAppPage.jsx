@@ -6,12 +6,29 @@ import {
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 
+// Cada conexão aceita no máximo um bot de cada gatilho, então cada slot só
+// oferece os bots daquele tipo — assim não dá pra configurar uma combinação
+// que o motor não saberia resolver.
+const byTrigger = (bots, trigger) => bots.filter((b) => (b.trigger || "first_message") === trigger);
+
+// Mesmas condições que o motor aplica em _load_bot_flow: bot pausado ou com
+// fluxo não publicado simplesmente não roda.
+const usavel = (b) => b && b.status === "ativo" && b.publicado;
+const rotuloBot = (b) => `${b.name}${b.status !== "ativo" ? " (pausado)" : !b.publicado ? " (não publicado)" : ""}`;
+
+// Espelha _pick_bot_for_new_session: só o slot DESTA conexão vale — não existe
+// fallback pro bot padrão do tenant.
+const temBotPrimeiraMensagem = (conn, bots) => {
+  const slot = bots.find((b) => b.id === conn.default_bot_id);
+  return usavel(slot) && (slot.trigger || "first_message") === "first_message";
+};
+
 export default function WhatsAppPage() {
   const [connections, setConnections] = useState([]);
   const [depts, setDepts] = useState([]);
   const [bots, setBots] = useState([]);
   const [creating, setCreating] = useState(false);
-  const [newForm, setNewForm] = useState({ nome: "", departamento_padrao_id: "", default_bot_id: "" });
+  const [newForm, setNewForm] = useState({ nome: "", departamento_padrao_id: "", default_bot_id: "", bot_keyword_id: "" });
   const [busyId, setBusyId] = useState(null);
   const [expandedQrId, setExpandedQrId] = useState(null);
 
@@ -38,9 +55,10 @@ export default function WhatsAppPage() {
         nome: newForm.nome,
         departamento_padrao_id: newForm.departamento_padrao_id || null,
         default_bot_id: newForm.default_bot_id || null,
+        bot_keyword_id: newForm.bot_keyword_id || null,
       });
       setConnections((cs) => [...cs, data]);
-      setNewForm({ nome: "", departamento_padrao_id: "", default_bot_id: "" });
+      setNewForm({ nome: "", departamento_padrao_id: "", default_bot_id: "", bot_keyword_id: "" });
       setCreating(false);
       toast.success("Conexão criada. Clique em Conectar para gerar o QR Code.");
     } catch (ex) {
@@ -117,11 +135,21 @@ export default function WhatsAppPage() {
             </select>
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Bot vinculado</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Bot de palavra-chave</label>
+            <select className="zz-input" value={newForm.bot_keyword_id}
+              onChange={(e) => setNewForm({ ...newForm, bot_keyword_id: e.target.value })}>
+              <option value="">— nenhum —</option>
+              {byTrigger(bots, "keyword").map((b) => (
+                <option key={b.id} value={b.id}>{rotuloBot(b)}{b.trigger_keyword ? ` — "${b.trigger_keyword}"` : ""}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Bot de primeira mensagem</label>
             <select className="zz-input" value={newForm.default_bot_id}
               onChange={(e) => setNewForm({ ...newForm, default_bot_id: e.target.value })}>
-              <option value="">— usar bot padrão do tenant —</option>
-              {bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              <option value="">— nenhum —</option>
+              {byTrigger(bots, "first_message").map((b) => <option key={b.id} value={b.id}>{rotuloBot(b)}</option>)}
             </select>
           </div>
           <div className="col-span-3 flex gap-2 justify-end">
@@ -222,7 +250,7 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
         </div>
       )}
 
-      <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-2 gap-4">
+      <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-3 gap-4">
         <div>
           <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Departamento padrão</label>
           <select className="zz-input" style={{ padding: "0.4rem 0.6rem" }}
@@ -234,16 +262,35 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
           </select>
         </div>
         <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Bot vinculado</label>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Bot de palavra-chave</label>
+          <select className="zz-input" style={{ padding: "0.4rem 0.6rem" }}
+            value={conn.bot_keyword_id || ""}
+            onChange={(e) => onUpdateField({ bot_keyword_id: e.target.value || null })}
+            data-testid={`bot-keyword-select-${conn.id}`}>
+            <option value="">— nenhum —</option>
+            {byTrigger(bots, "keyword").map((b) => (
+              <option key={b.id} value={b.id}>{rotuloBot(b)}{b.trigger_keyword ? ` — "${b.trigger_keyword}"` : ""}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Bot de primeira mensagem</label>
           <select className="zz-input" style={{ padding: "0.4rem 0.6rem" }}
             value={conn.default_bot_id || ""}
             onChange={(e) => onUpdateField({ default_bot_id: e.target.value || null })}
             data-testid={`bot-select-${conn.id}`}>
-            <option value="">— usar bot padrão do tenant —</option>
-            {bots.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="">— nenhum —</option>
+            {byTrigger(bots, "first_message").map((b) => <option key={b.id} value={b.id}>{rotuloBot(b)}</option>)}
           </select>
         </div>
       </div>
+
+      {!temBotPrimeiraMensagem(conn, bots) && (
+        <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-500 p-2" data-testid={`no-first-bot-warning-${conn.id}`}>
+          <strong>Sem bot de primeira mensagem.</strong> Mensagens que não casarem com a palavra-chave vão
+          direto para a fila de atendimento humano, sem nenhuma resposta automática para o contato.
+        </div>
+      )}
     </div>
   );
 }

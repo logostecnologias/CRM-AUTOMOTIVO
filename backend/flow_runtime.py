@@ -81,6 +81,69 @@ async def _run_from(node_id, flow, session, outputs, guard=0):
         guard += 1
 
 
+async def _load_bot_flow(db, tenant_id: str, bot_id: str | None, require_active: bool = True):
+    """Carrega bot + fluxo publicado + nó de início. Devolve None se qualquer
+    peça faltar (bot inexistente/pausado, fluxo não publicado, fluxo sem
+    início) — quem chama decide o que fazer com a ausência."""
+    if not bot_id:
+        return None
+    q = {"id": bot_id, "tenant_id": tenant_id}
+    if require_active:
+        q["status"] = "ativo"
+    bot = await db.bots.find_one(q)
+    if not bot:
+        return None
+    flow = await db.flows.find_one({"id": bot["main_flow_id"]}, {"_id": 0})
+    if not flow or not flow.get("published_at"):
+        return None
+    start = _find_start(flow["nodes"])
+    if not start:
+        return None
+    return bot, flow, start
+
+
+def _trigger_of(start: dict) -> str:
+    # Fluxos criados antes dos gatilhos existirem não têm o campo — valem como
+    # "primeira mensagem", que era o comportamento único da época.
+    return start.get("data", {}).get("trigger", "first_message")
+
+
+def _keyword_matches(start: dict, text: str) -> bool:
+    keyword = (start.get("data", {}).get("trigger_keyword") or "").strip().lower()
+    if not keyword:
+        return False
+    return keyword in (text or "").strip().lower()
+
+
+async def _pick_bot_for_new_session(db, tenant_id: str, conn: dict, text: str):
+    """Escolhe quem atende uma conversa nova.
+
+    Isolamento por conexão é total: só os bots encaixados nos slots DESTA
+    conexão podem responder. Não existe fallback pro bot padrão do tenant nem
+    varredura por bots soltos — se o slot está vazio, ninguém responde e a
+    conversa nasce direto em "aguardando", pra um humano assumir.
+
+    Cada conexão tem no máximo um bot de cada tipo. O de palavra-chave tem
+    preferência: se a mensagem contiver a palavra configurada, ele responde.
+    Não contendo, entra o de primeira mensagem.
+
+    Antes desta função o bot era escolhido ANTES do gatilho ser avaliado, então
+    o gatilho só conseguia vetar o bot já escolhido, nunca convocar outro: um
+    bot de palavra-chave só rodava se fosse justamente o padrão da conexão, e
+    nesse caso o de primeira mensagem nunca rodava.
+    """
+    keyword_bot = await _load_bot_flow(db, tenant_id, conn.get("bot_keyword_id"))
+    if keyword_bot and _keyword_matches(keyword_bot[2], text):
+        return keyword_bot
+
+    # Slot de primeira mensagem. `default_bot_id` é o nome histórico desse
+    # campo, mantido pra não migrar as conexões que já existem.
+    first = await _load_bot_flow(db, tenant_id, conn.get("default_bot_id"))
+    if first and _trigger_of(first[2]) == "first_message":
+        return first
+    return None
+
+
 async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None):
     """Called from webhook. Advances the conversation for this contact.
 
@@ -128,31 +191,15 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         if token and not contact.get("foto_url"):
             asyncio.create_task(_fetch_avatar_bg(contact["id"], token, from_number))
 
-    # If contact already has an active session, continue on THAT session's bot;
-    # otherwise pick the bot linked to this connection (default_bot_id), falling
-    # back to the tenant's global default bot, then any ativo bot.
+    # Conversa já em andamento continua no bot dela (mesmo que ele tenha sido
+    # pausado depois — trocar de bot no meio confundiria o contato).
     session = await db.conversation_sessions.find_one({
         "tenant_id": tenant_id, "contact_id": contact["id"],
         "whatsapp_connection_id": conn["id"], "status": {"$in": ["ativa", "aguardando_humano"]}
     })
-    if session:
-        bot = await db.bots.find_one({"id": session["bot_id"], "tenant_id": tenant_id})
-    else:
-        bot = None
-        if conn.get("default_bot_id"):
-            bot = await db.bots.find_one({"id": conn["default_bot_id"], "tenant_id": tenant_id, "status": "ativo"})
-        if not bot:
-            bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo", "is_default": True})
-        if not bot:
-            bot = await db.bots.find_one({"tenant_id": tenant_id, "status": "ativo"})
-    if not bot:
-        return
 
-    flow = await db.flows.find_one({"id": bot["main_flow_id"]}, {"_id": 0})
-    if not flow or not flow.get("published_at"):
-        return
-
-    # Log incoming
+    # Loga a mensagem antes de qualquer decisão: mesmo sem bot capaz de
+    # atender, ela precisa aparecer no histórico da conversa.
     session_id = session["id"] if session else str(uuid.uuid4())
     await _log_msg(db, session_id, tenant_id, "recebida", text)
 
@@ -165,58 +212,22 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         )
         return
 
-    if not session:
-        start = _find_start(flow["nodes"])
-        if not start:
-            return
-
-        # Gate on the start node's trigger before running the bot flow.
-        # "first_message" (default) always starts. "keyword" only starts
-        # when the incoming text contains the configured phrase. "no_response"
-        # is a proactive/inactivity trigger with no scheduler wired up yet, so
-        # it never starts from an inbound message. Either way, a message that
-        # doesn't match never just vanishes — it still opens a session and
-        # goes straight to "aguardando" so a human sees it in the inbox,
-        # instead of the bot silently swallowing it.
-        trigger = start.get("data", {}).get("trigger", "first_message")
-        run_bot_flow = True
-        if trigger == "keyword":
-            keyword = (start.get("data", {}).get("trigger_keyword") or "").strip().lower()
-            if keyword and keyword not in (text or "").strip().lower():
-                run_bot_flow = False
-        elif trigger == "no_response":
-            run_bot_flow = False
-
-        conn_id = conn.get("id") if conn else None
-        dept_id = conn.get("departamento_padrao_id") if conn else None
-        session = {
-            "id": session_id,
-            "tenant_id": tenant_id,
-            "contact_id": contact["id"],
-            "bot_id": bot["id"],
-            "flow_id": flow["id"],
-            "whatsapp_connection_id": conn_id,
-            "departamento_id": dept_id,
-            "atendente_id": None,
-            "status_atendimento": "bot",
-            "assumido_em": None,
-            "finalizado_em": None,
-            "node_atual_id": start["id"],
-            "variables": {"nome_contato": contact["nome"], "numero": from_number},
-            "status": "ativa",
-            "awaiting": None,
-            "last_user_message": text,
-            "created_at": _now(),
-            "updated_at": _now(),
-        }
-        await db.conversation_sessions.insert_one(session)
-        if run_bot_flow:
-            await _run_from(start["id"], flow, session, outputs)
-        else:
-            session["status"] = "aguardando_humano"
+    if session:
+        loaded = await _load_bot_flow(db, tenant_id, session.get("bot_id"), require_active=False)
+        if not loaded:
+            # Bot da conversa sumiu ou teve o fluxo despublicado: manda pra
+            # fila humana em vez de engolir a mensagem.
+            await db.conversation_sessions.update_one(
+                {"id": session_id},
+                {"$set": {"status": "aguardando_humano", "status_atendimento": "aguardando",
+                          "updated_at": _now()},
+                 "$inc": {"unread_count": 1}},
+            )
             await _log_msg(db, session_id, tenant_id, "sistema",
-                           "Mensagem fora do gatilho configurado do bot — encaminhada para atendimento humano")
-    else:
+                           "Bot da conversa indisponível — encaminhada para atendimento humano")
+            return
+        bot, flow, _start = loaded
+
         session["last_user_message"] = text
         awaiting = session.get("awaiting")
         if awaiting and awaiting.get("node_id"):
@@ -247,6 +258,46 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
                     session["awaiting"] = None
                     if next_id:
                         await _run_from(next_id, flow, session, outputs)
+    else:
+        picked = await _pick_bot_for_new_session(db, tenant_id, conn, text)
+        run_bot_flow = picked is not None
+        if picked:
+            bot, flow, start = picked
+        else:
+            # Nenhum bot atende: a conversa ainda nasce, direto em "aguardando",
+            # pra um humano ver na inbox em vez de a mensagem sumir.
+            bot, flow, start = None, None, None
+
+        conn_id = conn.get("id") if conn else None
+        dept_id = conn.get("departamento_padrao_id") if conn else None
+        session = {
+            "id": session_id,
+            "tenant_id": tenant_id,
+            "contact_id": contact["id"],
+            "bot_id": bot["id"] if bot else None,
+            "flow_id": flow["id"] if flow else None,
+            "whatsapp_connection_id": conn_id,
+            "departamento_id": dept_id,
+            "atendente_id": None,
+            "status_atendimento": "bot",
+            "assumido_em": None,
+            "finalizado_em": None,
+            "node_atual_id": start["id"] if start else None,
+            "variables": {"nome_contato": contact["nome"], "numero": from_number},
+            "status": "ativa",
+            "awaiting": None,
+            "last_user_message": text,
+            "created_at": _now(),
+            "updated_at": _now(),
+        }
+        await db.conversation_sessions.insert_one(session)
+        if run_bot_flow:
+            await _run_from(start["id"], flow, session, outputs)
+        else:
+            session["status"] = "aguardando_humano"
+            await _log_msg(db, session_id, tenant_id, "sistema",
+                           "Nenhum bot configurado para atender esta mensagem — "
+                           "encaminhada para atendimento humano")
 
     # persist session
     # Mirror flow_engine's session.status → status_atendimento so kanban stays in sync.
