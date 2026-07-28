@@ -40,6 +40,63 @@ def _validate_hmac(body: bytes, request: Request):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
 
+# Cada tipo de mídia vira um nó próprio dentro de Message. Figurinha entra
+# como imagem: é webp, o chat exibe igual e o download usa o mesmo endpoint.
+_MEDIA_NODES = [
+    ("imageMessage", "image"),
+    ("videoMessage", "video"),
+    ("audioMessage", "audio"),
+    ("documentMessage", "document"),
+    ("stickerMessage", "image"),
+]
+
+
+def _pick(d: dict, *names):
+    """Primeiro nome presente no dict.
+
+    A serialização do whatsmeow não é estável entre versões quanto à caixa das
+    chaves (`URL` x `url`, `fileSha256` x `fileSHA256`), e errar a chave aqui
+    faria o download falhar silenciosamente — então cada campo é procurado por
+    todas as grafias plausíveis.
+    """
+    for n in names:
+        v = d.get(n)
+        if v not in (None, ""):
+            return v
+    return None
+
+
+def _extract_media(payload: dict, msg: dict) -> dict | None:
+    for key, kind in _MEDIA_NODES:
+        node = msg.get(key)
+        # `{}` conta como presente: quando a WuzAPI já baixou a mídia sozinha,
+        # ela pode esvaziar o nó e mandar o binário na raiz do evento — tratar
+        # como "sem mídia" jogaria o anexo fora.
+        if not isinstance(node, dict):
+            continue
+        mime = _pick(node, "mimetype", "mimeType", "Mimetype") or payload.get("mimeType")
+        length = _pick(node, "fileLength", "FileLength") or 0
+        return {
+            "kind": kind,
+            "mime": mime,
+            "filename": _pick(node, "fileName", "filename", "FileName") or payload.get("fileName"),
+            "caption": node.get("caption") or "",
+            # Sem -skipmedia a WuzAPI já baixa e manda o binário junto do
+            # evento; aí não é preciso pedir de novo.
+            "base64": payload.get("base64") or None,
+            "download": {
+                "Url": _pick(node, "URL", "url", "Url"),
+                "DirectPath": _pick(node, "directPath", "DirectPath"),
+                "MediaKey": _pick(node, "mediaKey", "MediaKey"),
+                "Mimetype": mime,
+                "FileSHA256": _pick(node, "fileSha256", "fileSHA256", "FileSHA256"),
+                "FileEncSHA256": _pick(node, "fileEncSha256", "fileEncSHA256", "FileEncSHA256"),
+                "FileLength": int(length) if str(length).isdigit() else 0,
+            },
+        }
+    return None
+
+
 @router.post("/wuzapi")
 async def wuzapi_webhook_unrouted(request: Request, bg: BackgroundTasks):
     """Some WuzAPI events (observed for real incoming 'Message' events, even
@@ -146,16 +203,18 @@ async def _process_webhook_event(tenant_id: str, connection_id: str, payload: di
         number = number.split(":")[0]
         message_id = info.get("ID") or f"noid_{_now()}"
         msg = event.get("Message", {})
+        media = _extract_media(payload, msg)
         text = (
             msg.get("conversation")
             or (msg.get("extendedTextMessage") or {}).get("text")
-            or (msg.get("imageMessage") or {}).get("caption")
+            or (media or {}).get("caption")
             or ""
         )
-        if not text:
+        if not text and not media:
             return {"ok": True}
         push_name = info.get("PushName") or None
-        bg.add_task(handle_incoming_message, tenant_id, number, text, message_id, connection_id, push_name)
+        bg.add_task(handle_incoming_message, tenant_id, number, text, message_id,
+                    connection_id, push_name, media)
         return {"ok": True, "queued": True}
 
     return {"ok": True, "ignored": etype}

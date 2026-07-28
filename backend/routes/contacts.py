@@ -63,9 +63,11 @@ async def session_messages(session_id: str, user=Depends(require_tenant_admin)):
     )
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    # Mesmo desempate por `_id` da Central: mensagens da mesma rajada
+    # compartilham o timestamp, e sem ele a ordem do histórico é indefinida.
     messages = await db.messages_log.find(
         {"session_id": session_id}, {"_id": 0}
-    ).sort("timestamp", 1).to_list(1000)
+    ).sort([("timestamp", 1), ("_id", 1)]).to_list(1000)
     return {"session": session, "messages": messages}
 
 

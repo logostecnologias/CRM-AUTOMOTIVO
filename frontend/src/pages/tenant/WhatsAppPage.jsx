@@ -6,14 +6,9 @@ import {
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 
-// O vínculo é escolhido no bot (tela de Robôs / editor de fluxo). Aqui a
-// conexão só mostra, em leitura, quem está apontando pra ela.
-const LABEL_GATILHO = {
-  first_message: "primeira mensagem",
-  keyword: "palavra-chave",
-  no_response: "sem resposta",
-};
-
+// O vínculo bot ↔ conexão é escolhido no bot (tela de Robôs / editor de fluxo).
+// Aqui os bots só servem pra saber se a conexão tem quem atenda.
+//
 // Mesmas condições que o motor aplica em _load_bot_flow: bot pausado ou com
 // fluxo não publicado simplesmente não roda.
 const usavel = (b) => b && b.status === "ativo" && b.publicado;
@@ -241,14 +236,6 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
             <option value="">— nenhum —</option>
             {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
           </select>
-        </div>
-        <div className="col-span-2">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Robôs desta conexão</label>
-          <div className="text-sm text-slate-700" data-testid={`conn-bots-${conn.id}`}>
-            {botsDaConexao.length === 0
-              ? <span className="italic text-slate-400">nenhum — vincule na tela de Robôs</span>
-              : botsDaConexao.map((b) => `${b.name} (${LABEL_GATILHO[b.trigger] || b.trigger})`).join(" · ")}
-          </div>
         </div>
       </div>
 

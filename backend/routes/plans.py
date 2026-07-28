@@ -15,6 +15,9 @@ class PlanIn(BaseModel):
     max_bots: int = 1
     max_conexoes: int = 1
     max_usuarios: int = 1
+    # Dias que a mídia das conversas fica guardada. None = usa o default do
+    # servidor (MEDIA_RETENTION_DAYS); 0 = nunca apaga. Ver media_retention.py.
+    retencao_midia_dias: int | None = None
     status: str = "active"
 
 

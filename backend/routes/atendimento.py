@@ -1,12 +1,12 @@
 """Central de Atendimento — lista de conversas + ações."""
-import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+import media_store
 from db import get_db
 from auth import get_current_user
-from flow_runtime import send_human_message
+from flow_runtime import log_message, send_human_message, send_human_media
 
 router = APIRouter(prefix="/api/atendimento", tags=["atendimento"])
 
@@ -38,24 +38,17 @@ async def _enrich(db, sessions: list[dict]):
     conns = {c["id"]: c async for c in db.whatsapp_connections.find(
         {"id": {"$in": conn_ids}}, {"_id": 0, "id": 1, "nome": 1, "numero": 1}
     )}
-    session_ids = [s["id"] for s in sessions]
-    last_messages = {
-        row["_id"]: row["last"]
-        async for row in db.messages_log.aggregate([
-            {"$match": {"session_id": {"$in": session_ids}}},
-            {"$sort": {"timestamp": -1}},
-            {"$group": {"_id": "$session_id", "last": {"$first": "$$ROOT"}}},
-        ])
-    }
+    # `last_message` não é buscado aqui: ele vem desnormalizado no próprio
+    # documento da sessão, gravado por flow_runtime.log_message. Antes era um
+    # aggregate que ordenava todas as mensagens das até 200 conversas da tela
+    # para pegar a primeira de cada — dezenas de milhares de documentos
+    # ordenados em memória, a cada atualização, por atendente conectado.
     for s in sessions:
         s["contact"] = contacts.get(s.get("contact_id"))
         s["department"] = depts.get(s.get("departamento_id"))
         s["agent"] = agents.get(s.get("atendente_id"))
         s["connection"] = conns.get(s.get("whatsapp_connection_id"))
-        last = last_messages.get(s["id"])
-        if last:
-            last.pop("_id", None)
-        s["last_message"] = last
+        s.setdefault("last_message", None)
     return sessions
 
 
@@ -111,8 +104,27 @@ async def unread_count(user: dict = Depends(get_current_user)):
     return {"total": total, "aguardando": aguardando}
 
 
+MESSAGES_PAGE = 2000
+
+
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: str, user: dict = Depends(get_current_user)):
+async def get_session(
+    session_id: str,
+    since: str | None = None,
+    user: dict = Depends(get_current_user),
+):
+    """Conversa aberta e suas mensagens.
+
+    `since` (timestamp ISO da última mensagem já em tela) devolve só o que
+    chegou depois — a tela se atualiza de poucos em poucos segundos, e sem o
+    recorte cada ciclo rebaixava o histórico inteiro, anexos inclusive.
+
+    O corte é `$gte`, e não `$gt`, porque timestamp igual é comum e não raro:
+    o relógio do Windows anda de ~15ms em ~15ms, então mensagens gravadas na
+    mesma rajada (as várias falas de um menu, por exemplo) saem com o mesmo
+    valor. Com `$gt` toda a rajada seguinte à mensagem do cursor sumiria da
+    tela; com `$gte` ela volta repetida, e o front reconcilia por id.
+    """
     db = get_db()
     s = await db.conversation_sessions.find_one(
         {"id": session_id, "tenant_id": user["tenant_id"]}, {"_id": 0}
@@ -122,12 +134,26 @@ async def get_session(session_id: str, user: dict = Depends(get_current_user)):
     accessible = await _accessible_connection_ids(db, user)
     if accessible is not None and s.get("whatsapp_connection_id") not in accessible:
         raise HTTPException(status_code=403, detail="Sem acesso a esta conexão")
-    msgs = await db.messages_log.find({"session_id": session_id}, {"_id": 0}).sort("timestamp", 1).to_list(2000)
+
+    q: dict = {"session_id": session_id}
+    if since:
+        q["timestamp"] = {"$gte": since}
+    # Desempate por `_id`: ordenar só por timestamp deixa a ordem das mensagens
+    # de uma mesma rajada indefinida — elas compartilham o timestamp, e o chat
+    # podia exibi-las em ordem diferente a cada atualização. O ObjectId cresce
+    # a cada inserção, então ele devolve a ordem real de gravação.
+    msgs = await db.messages_log.find(q, {"_id": 0}).sort(
+        [("timestamp", 1), ("_id", 1)]
+    ).to_list(MESSAGES_PAGE)
+
     if s.get("unread_count"):
         await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"unread_count": 0}})
         s["unread_count"] = 0
     (await _enrich(db, [s]))
-    return {"session": s, "messages": msgs}
+    # `partial` diz ao front se `messages` completa a lista em tela ou a
+    # substitui — sem isso ele não sabe distinguir "nada novo" de "conversa
+    # vazia".
+    return {"session": s, "messages": msgs, "partial": bool(since)}
 
 
 @router.post("/sessions/{session_id}/assume")
@@ -152,15 +178,8 @@ async def assume(session_id: str, user: dict = Depends(get_current_user)):
             "updated_at": _now(),
         }},
     )
-    await db.messages_log.insert_one({
-        "id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "tenant_id": user["tenant_id"],
-        "direction": "sistema",
-        "type": "system",
-        "content": f"{user['name']} assumiu a conversa",
-        "timestamp": _now(),
-    })
+    await log_message(db, session_id, user["tenant_id"], "sistema",
+                      f"{user['name']} assumiu a conversa", mtype="system")
     return {"ok": True}
 
 
@@ -181,15 +200,8 @@ async def finalize(session_id: str, user: dict = Depends(get_current_user)):
             "updated_at": _now(),
         }},
     )
-    await db.messages_log.insert_one({
-        "id": str(uuid.uuid4()),
-        "session_id": session_id,
-        "tenant_id": user["tenant_id"],
-        "direction": "sistema",
-        "type": "system",
-        "content": f"{user['name']} finalizou o atendimento",
-        "timestamp": _now(),
-    })
+    await log_message(db, session_id, user["tenant_id"], "sistema",
+                      f"{user['name']} finalizou o atendimento", mtype="system")
     return {"ok": True}
 
 
@@ -214,14 +226,9 @@ async def reassign_department(session_id: str, body: ReassignIn, user: dict = De
     return {"ok": True}
 
 
-class SendIn(BaseModel):
-    content: str
-
-
-@router.post("/sessions/{session_id}/send")
-async def send(session_id: str, body: SendIn, user: dict = Depends(get_current_user)):
-    """Human agent sends a message via WuzAPI."""
-    db = get_db()
+async def _authorize_send(db, session_id: str, user: dict) -> dict:
+    """Regra de quem pode responder nesta conversa, compartilhada por texto e
+    mídia. Admin que responde sem ter assumido assume na hora."""
     s = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": user["tenant_id"]})
     if not s:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
@@ -241,11 +248,67 @@ async def send(session_id: str, body: SendIn, user: dict = Depends(get_current_u
             )
         else:
             raise HTTPException(status_code=400, detail="Conversa não está em atendimento")
+    return s
+
+
+class SendIn(BaseModel):
+    content: str
+
+
+@router.post("/sessions/{session_id}/send")
+async def send(session_id: str, body: SendIn, user: dict = Depends(get_current_user)):
+    """Human agent sends a message via WuzAPI."""
+    db = get_db()
+    await _authorize_send(db, session_id, user)
     try:
         await send_human_message(user["tenant_id"], session_id, body.content)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha ao enviar: {e}")
     return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/send-media")
+async def send_media(
+    session_id: str,
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+    user: dict = Depends(get_current_user),
+):
+    """Human agent sends an image/video/audio/document via WuzAPI.
+
+    The file is stored first and only then sent: if the send fails the upload
+    is discarded, so nothing shows in the panel that the contact never got.
+    """
+    db = get_db()
+    await _authorize_send(db, session_id, user)
+
+    # Lê em blocos com teto: um upload gigante não pode inflar a memória do
+    # processo só para ser rejeitado depois.
+    chunks, total = [], 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > media_store.HARD_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Arquivo muito grande")
+        chunks.append(chunk)
+
+    try:
+        doc = await media_store.store_upload(
+            db, user["tenant_id"], session_id, user["id"],
+            file.filename, file.content_type, b"".join(chunks),
+        )
+    except media_store.MediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        await send_human_media(user["tenant_id"], session_id, doc, caption)
+    except Exception as e:
+        await db.media_files.delete_one({"id": doc["id"]})
+        media_store.file_path(doc).unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=f"Falha ao enviar: {e}")
+    return {"ok": True, "media": media_store.public_payload(doc)}
 
 
 @router.get("/summary")

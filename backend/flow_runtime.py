@@ -3,11 +3,13 @@ simulator in flow_engine.py, but persists sessions in MongoDB and sends
 real messages via WuzAPI.
 """
 import asyncio
+import base64
 import logging
 import uuid
 from datetime import datetime, timezone
 from db import get_db
 from flow_engine import _find_node, _find_next, _find_start, _interp, _process_node
+import media_store
 import wuzapi_client as wuzapi
 
 logger = logging.getLogger("zappzen.flow_runtime")
@@ -30,7 +32,61 @@ async def _fetch_avatar_bg(contact_id: str, token: str, number: str):
         logger.warning("Failed to fetch avatar for contact %s: %s", contact_id, e)
 
 
-async def _log_msg(db, session_id, tenant_id, direction, content, mtype="text", meta=None):
+async def _ingest_incoming_media(db, tenant_id, session_id, token, media: dict) -> dict | None:
+    """Traz para o nosso armazenamento a mídia que o contato mandou.
+
+    O arquivo fica cifrado nos servidores do WhatsApp e a URL expira, então
+    guardar a URL não serviria de nada: o binário tem que ser baixado agora e
+    virar arquivo nosso, servido por /api/media como qualquer outro.
+
+    Falha aqui não derruba a mensagem — devolve None e o texto/legenda ainda
+    entra no histórico, só sem o anexo.
+    """
+    try:
+        if media.get("base64"):
+            raw = base64.b64decode(media["base64"])
+        elif token:
+            raw = await wuzapi.download_media(token, media["kind"], media["download"])
+        else:
+            return None
+        doc = await media_store.store_upload(
+            db, tenant_id, session_id, None, media.get("filename"), media.get("mime"), raw,
+            kind=media["kind"], limit=media_store.HARD_MAX_BYTES,
+        )
+        return media_store.public_payload(doc)
+    except Exception as e:
+        logger.warning("Falha ao baixar mídia recebida na sessão %s: %s", session_id, e)
+        return None
+
+
+def last_message_preview(doc: dict) -> dict:
+    """Recorte da mensagem que fica espelhado na sessão para a lista de
+    conversas — só o que o card mostra.
+
+    Guardar o documento inteiro faria a sessão carregar um anexo de metadados
+    a cada mensagem; guardar nada obrigava a Central a redescobrir a última
+    mensagem de cada conversa a cada atualização de tela.
+    """
+    media = (doc.get("meta") or {}).get("media") or None
+    return {
+        "content": doc.get("content"),
+        "type": doc.get("type"),
+        "direction": doc.get("direction"),
+        "timestamp": doc.get("timestamp"),
+        # Só o `kind`: é o único campo do anexo que a prévia usa, para dizer
+        # "📷 Imagem" quando a mensagem não tem legenda.
+        "meta": {"media": {"kind": media.get("kind")}} if media else {},
+    }
+
+
+async def log_message(db, session_id, tenant_id, direction, content, mtype="text", meta=None) -> dict:
+    """Grava a mensagem e atualiza a prévia na sessão, sempre juntas.
+
+    Todo caminho que escreve em `messages_log` passa por aqui justamente para
+    que os dois lados não possam divergir. Devolve o documento gravado; quando
+    a sessão ainda não existe (primeira mensagem de uma conversa nova), o
+    update não casa nada e quem cria a sessão embute a prévia no insert.
+    """
     doc = {
         "id": str(uuid.uuid4()),
         "session_id": session_id,
@@ -42,6 +98,16 @@ async def _log_msg(db, session_id, tenant_id, direction, content, mtype="text", 
         "timestamp": _now(),
     }
     await db.messages_log.insert_one(doc)
+    doc.pop("_id", None)
+    await db.conversation_sessions.update_one(
+        {"id": session_id, "tenant_id": tenant_id},
+        {"$set": {"last_message": last_message_preview(doc)}},
+    )
+    return doc
+
+
+async def _log_msg(db, session_id, tenant_id, direction, content, mtype="text", meta=None):
+    return await log_message(db, session_id, tenant_id, direction, content, mtype, meta)
 
 
 async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
@@ -58,10 +124,18 @@ async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
                 await wuzapi.send_text(token, number, text)
                 await _log_msg(db, session_id, tenant_id, "enviada", text, mtype="menu")
             elif o["type"] == "media":
+                # O nó de Mídia guarda uma URL pública; a WuzAPI só aceita o
+                # arquivo embutido, então ele é baixado e convertido aqui.
+                url = o.get("url", "")
+                data_uri = await media_store.ensure_data_uri(url)
                 await wuzapi.send_media(token, number, o.get("media_type", "image"),
-                                        o.get("url", ""), o.get("caption", ""))
-                await _log_msg(db, session_id, tenant_id, "enviada", o.get("url", ""),
-                               mtype=o.get("media_type", "image"))
+                                        data_uri, o.get("caption", ""),
+                                        filename=url.split("/")[-1].split("?")[0] or None)
+                await _log_msg(db, session_id, tenant_id, "enviada",
+                               o.get("caption") or o.get("url", ""),
+                               mtype=o.get("media_type", "image"),
+                               meta={"media": {"kind": o.get("media_type", "image"),
+                                               "url": o.get("url", "")}})
             elif o["type"] == "system":
                 await _log_msg(db, session_id, tenant_id, "sistema", o["content"], mtype="system")
         except Exception as e:
@@ -145,7 +219,7 @@ async def _pick_bot_for_new_session(db, tenant_id: str, conn: dict, text: str):
     return await slot("first_message")
 
 
-async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None):
+async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None):
     """Called from webhook. Advances the conversation for this contact.
 
     `connection_id` identifies exactly which whatsapp_connection (and thus
@@ -153,13 +227,20 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
     right bot/instance is used when a tenant has more than one connection.
     `push_name` is the sender's WhatsApp display name (Info.PushName on the
     webhook payload) — free, no extra API call needed.
+    `media` descreve o anexo, quando houver (ver _extract_media no webhook);
+    `text` é a legenda dele nesse caso.
     """
     db = get_db()
 
     # Idempotency
     if await db.processed_messages.find_one({"message_id": message_id}):
         return
-    await db.processed_messages.insert_one({"message_id": message_id, "at": _now()})
+    # `at` vai como datetime nativo, e não como string ISO igual ao resto do
+    # sistema, porque é o campo do índice TTL que expira estes registros — e o
+    # TTL do Mongo só age sobre campos do tipo Date.
+    await db.processed_messages.insert_one(
+        {"message_id": message_id, "at": datetime.now(timezone.utc)}
+    )
 
     if connection_id:
         conn = await db.whatsapp_connections.find_one({"id": connection_id, "tenant_id": tenant_id})
@@ -202,7 +283,16 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
     # Loga a mensagem antes de qualquer decisão: mesmo sem bot capaz de
     # atender, ela precisa aparecer no histórico da conversa.
     session_id = session["id"] if session else str(uuid.uuid4())
-    await _log_msg(db, session_id, tenant_id, "recebida", text)
+    msg_type, msg_meta = "text", None
+    if media:
+        stored = await _ingest_incoming_media(db, tenant_id, session_id, token, media)
+        msg_type = media["kind"]
+        msg_meta = {"media": stored} if stored else None
+        if not stored and not text:
+            # Sem o arquivo e sem legenda a bolha ficaria vazia; melhor dizer
+            # o que chegou do que deixar um buraco no histórico.
+            text = f"[{media['kind']} não pôde ser baixado]"
+    incoming = await _log_msg(db, session_id, tenant_id, "recebida", text, mtype=msg_type, meta=msg_meta)
 
     outputs: list[dict] = []
 
@@ -290,6 +380,10 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "status": "ativa",
             "awaiting": None,
             "last_user_message": text,
+            # A mensagem que abriu a conversa foi gravada antes de a sessão
+            # existir, então o update de log_message não teve o que casar — a
+            # prévia entra aqui para o card não nascer vazio.
+            "last_message": last_message_preview(incoming),
             "created_at": _now(),
             "updated_at": _now(),
         }
@@ -376,16 +470,9 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         await _send_outputs(db, tenant_id, token, from_number, session_id, outputs)
 
 
-async def send_human_message(tenant_id: str, session_id: str, content: str):
-    """Sends a text from human agent (inbox) via WuzAPI.
-
-    The agent's name is prepended (WhatsApp bold syntax) to the text that
-    actually goes out over WhatsApp, so the customer sees who's answering —
-    not just an internal-only label. The clean `content` (without the
-    prefix) is what's stored/shown in our own chat panel, with the agent
-    name kept separately in `meta` for the bold label above the bubble.
-    """
-    db = get_db()
+async def _outgoing_context(db, tenant_id: str, session_id: str):
+    """Peças comuns de todo envio humano: sessão, contato, token da conexão e
+    nome do atendente. Devolve None se a sessão não existir."""
     session = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": tenant_id})
     if not session:
         return None
@@ -404,7 +491,23 @@ async def send_human_message(tenant_id: str, session_id: str, content: str):
         # tenant_id=None (they belong to no tenant) — filtering by tenant_id
         # would silently fail to find them and drop the name.
         agent = await db.users.find_one({"id": session["atendente_id"]})
-    agent_name = agent.get("name") if agent else None
+    return session, contact, token, (agent.get("name") if agent else None)
+
+
+async def send_human_message(tenant_id: str, session_id: str, content: str):
+    """Sends a text from human agent (inbox) via WuzAPI.
+
+    The agent's name is prepended (WhatsApp bold syntax) to the text that
+    actually goes out over WhatsApp, so the customer sees who's answering —
+    not just an internal-only label. The clean `content` (without the
+    prefix) is what's stored/shown in our own chat panel, with the agent
+    name kept separately in `meta` for the bold label above the bubble.
+    """
+    db = get_db()
+    ctx = await _outgoing_context(db, tenant_id, session_id)
+    if not ctx:
+        return None
+    _session, contact, token, agent_name = ctx
     outgoing_text = f"*{agent_name}:*\n{content}" if agent_name else content
 
     if token and contact:
@@ -415,5 +518,44 @@ async def send_human_message(tenant_id: str, session_id: str, content: str):
             raise
     await _log_msg(db, session_id, tenant_id, "enviada", content,
                     meta={"agent_name": agent_name} if agent_name else None)
+    await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"updated_at": _now()}})
+    return True
+
+
+async def send_human_media(tenant_id: str, session_id: str, media_doc: dict, caption: str = ""):
+    """Sends a stored file from the human agent (inbox) via WuzAPI.
+
+    Same convention as send_human_message: the agent's name is prepended to
+    what actually leaves for WhatsApp (here, to the caption), while the chat
+    panel keeps the clean caption plus `meta.media` — the pointer the bubble
+    uses to render the image/video/audio/document from /api/media.
+
+    Sending fails loudly (raises): a file the contact never received must not
+    show up as delivered in the panel.
+    """
+    db = get_db()
+    ctx = await _outgoing_context(db, tenant_id, session_id)
+    if not ctx:
+        return None
+    _session, contact, token, agent_name = ctx
+    if not token or not contact:
+        raise RuntimeError("Conexão de WhatsApp indisponível para esta conversa")
+
+    outgoing_caption = f"*{agent_name}:*\n{caption}" if agent_name and caption else (
+        f"*{agent_name}:*" if agent_name else caption
+    )
+    try:
+        data_uri = media_store.to_data_uri(media_doc["mime"], media_store.read_bytes(media_doc))
+        await wuzapi.send_media(token, contact["numero_whatsapp"], media_doc["kind"],
+                                data_uri, outgoing_caption, filename=media_doc["filename"])
+    except Exception as e:
+        await _log_msg(db, session_id, tenant_id, "erro", f"Falha envio de mídia: {e}", mtype="error")
+        raise
+
+    meta = {"media": media_store.public_payload(media_doc)}
+    if agent_name:
+        meta["agent_name"] = agent_name
+    await _log_msg(db, session_id, tenant_id, "enviada", caption,
+                   mtype=media_doc["kind"], meta=meta)
     await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"updated_at": _now()}})
     return True

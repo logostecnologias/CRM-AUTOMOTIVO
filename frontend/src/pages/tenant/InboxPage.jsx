@@ -1,44 +1,32 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { PaperPlaneRight, Hand, CheckCircle, X, Warning } from "@phosphor-icons/react";
+import { useActiveSession } from "@/hooks/useActiveSession";
+import { Hand, CheckCircle, X, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { STATUS, SessionListItem, MessageBubble, Avatar } from "@/components/atendimento/shared";
+import { STATUS, SessionListItem, MessageBubble, Avatar, ChatComposer } from "@/components/atendimento/shared";
 
 export default function InboxPage() {
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [stage, setStage] = useState("aguardando");
   const [activeId, setActiveId] = useState(null);
-  const [active, setActive] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
   const chatEnd = useRef(null);
+  const { active, messages, refresh: refreshActive } = useActiveSession(activeId);
 
-  const loadSessions = () => api.get("/atendimento/sessions").then((r) => setSessions(r.data));
-  const loadActive = async (id) => {
-    if (!id) return;
-    const { data } = await api.get(`/atendimento/sessions/${id}`);
-    setActive(data.session);
-    setMessages(data.messages);
-  };
+  const loadSessions = useCallback(
+    () => api.get("/atendimento/sessions").then((r) => setSessions(r.data)),
+    [],
+  );
 
-  useEffect(() => {
-    loadSessions();
-  }, []);
+  useEffect(() => { loadSessions(); }, [loadSessions]);
   useEffect(() => {
     const t = setInterval(() => {
       loadSessions();
-      if (activeId) loadActive(activeId);
+      refreshActive();
     }, 3000);
     return () => clearInterval(t);
-    // eslint-disable-next-line
-  }, [activeId]);
-  useEffect(() => {
-    if (activeId) loadActive(activeId);
-    else { setActive(null); setMessages([]); }
-    // eslint-disable-next-line
-  }, [activeId]);
+  }, [loadSessions, refreshActive]);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
 
   const counts = STATUS.reduce((acc, s) => {
@@ -51,24 +39,13 @@ export default function InboxPage() {
     await api.post(`/atendimento/sessions/${activeId}/assume`);
     toast.success("Conversa assumida");
     setStage("em_atendimento");
-    await loadActive(activeId); loadSessions();
+    await refreshActive(); loadSessions();
   };
   const finalize = async () => {
     await api.post(`/atendimento/sessions/${activeId}/finalize`);
     toast.success("Atendimento finalizado");
-    await loadActive(activeId); loadSessions();
+    await refreshActive(); loadSessions();
   };
-  const send = async () => {
-    if (!input.trim()) return;
-    try {
-      await api.post(`/atendimento/sessions/${activeId}/send`, { content: input });
-      setInput("");
-      await loadActive(activeId);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Falha ao enviar");
-    }
-  };
-
   const canSend = active?.status_atendimento === "em_atendimento" &&
     (user?.role !== "agent" || active?.atendente_id === user?.id);
 
@@ -173,16 +150,7 @@ export default function InboxPage() {
               <div ref={chatEnd} />
             </div>
 
-            <div className="p-2 border-t border-slate-200 flex gap-2">
-              <input value={input} onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && canSend && send()}
-                className="zz-input"
-                placeholder={canSend ? "Digite uma mensagem..." : "Assuma a conversa para responder"}
-                disabled={!canSend} data-testid="chat-input" />
-              <button onClick={send} disabled={!canSend || !input.trim()} className="zz-btn" data-testid="chat-send">
-                <PaperPlaneRight size={14} weight="bold" />
-              </button>
-            </div>
+            <ChatComposer sessionId={activeId} canSend={canSend} onSent={refreshActive} />
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-500 bg-white">

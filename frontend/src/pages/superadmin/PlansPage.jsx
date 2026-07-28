@@ -5,7 +5,13 @@ import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 
-const EMPTY = { nome: "", preco_mensal: 0, max_bots: 1, max_conexoes: 1, max_usuarios: 1, status: "active" };
+const EMPTY = { nome: "", preco_mensal: 0, max_bots: 1, max_conexoes: 1, max_usuarios: 1, retencao_midia_dias: "", status: "active" };
+
+// Campo vazio = herda o default do servidor; 0 = guarda pra sempre.
+function retentionLabel(dias) {
+  if (dias === null || dias === undefined || dias === "") return "padrão";
+  return Number(dias) === 0 ? "sempre" : `${dias}d`;
+}
 
 export default function PlansPage() {
   const [plans, setPlans] = useState([]);
@@ -19,16 +25,23 @@ export default function PlansPage() {
   const openEdit = (p) => {
     setForm({
       nome: p.nome, preco_mensal: p.preco_mensal, max_bots: p.max_bots,
-      max_conexoes: p.max_conexoes, max_usuarios: p.max_usuarios, status: p.status,
+      max_conexoes: p.max_conexoes, max_usuarios: p.max_usuarios,
+      retencao_midia_dias: p.retencao_midia_dias ?? "", status: p.status,
     });
     setEditing(p);
   };
 
   const save = async (e) => {
     e.preventDefault();
+    // Campo em branco vira null de propósito: é o que diz "herda o default do
+    // servidor", diferente de 0, que manda guardar pra sempre.
+    const payload = {
+      ...form,
+      retencao_midia_dias: form.retencao_midia_dias === "" ? null : Number(form.retencao_midia_dias),
+    };
     try {
-      if (editing?.id) await api.patch(`/admin/plans/${editing.id}`, form);
-      else await api.post("/admin/plans", form);
+      if (editing?.id) await api.patch(`/admin/plans/${editing.id}`, payload);
+      else await api.post("/admin/plans", payload);
       setEditing(null);
       toast.success("Plano salvo");
       load();
@@ -86,6 +99,12 @@ export default function PlansPage() {
             <input required type="number" min="0" data-testid="plan-max-usuarios" className="zz-input" value={form.max_usuarios}
               onChange={(e) => setForm({ ...form, max_usuarios: num(e.target.value) })} />
           </Field>
+          <Field label="Retenção de mídia (dias)">
+            <input type="number" min="0" data-testid="plan-retencao-midia" className="zz-input"
+              placeholder="padrão do servidor" value={form.retencao_midia_dias}
+              onChange={(e) => setForm({ ...form, retencao_midia_dias: e.target.value })} />
+            <div className="text-[10px] text-slate-500 mt-1">Vazio = padrão do servidor · 0 = nunca apaga</div>
+          </Field>
           <div className="col-span-3 flex gap-2 justify-end">
             <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
             <button type="submit" data-testid="plan-submit" className="zz-btn">Salvar</button>
@@ -97,9 +116,10 @@ export default function PlansPage() {
         <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
           <div className="col-span-3">Nome</div>
           <div className="col-span-2">Preço/mês</div>
-          <div className="col-span-2">Robôs</div>
-          <div className="col-span-2">Conexões</div>
+          <div className="col-span-1">Robôs</div>
+          <div className="col-span-1">Conexões</div>
           <div className="col-span-1">Usuários</div>
+          <div className="col-span-2">Mídia</div>
           <div className="col-span-1">Status</div>
           <div className="col-span-1 text-right">Ações</div>
         </div>
@@ -108,9 +128,10 @@ export default function PlansPage() {
           <div key={p.id} className="grid grid-cols-12 px-4 py-3 border-b border-slate-100 items-center hover:bg-slate-50" data-testid={`plan-row-${p.id}`}>
             <div className="col-span-3 font-semibold">{p.nome}</div>
             <div className="col-span-2 text-sm font-mono">{formatBRL(p.preco_mensal)}</div>
-            <div className="col-span-2 text-sm font-mono">{p.max_bots}</div>
-            <div className="col-span-2 text-sm font-mono">{p.max_conexoes}</div>
+            <div className="col-span-1 text-sm font-mono">{p.max_bots}</div>
+            <div className="col-span-1 text-sm font-mono">{p.max_conexoes}</div>
             <div className="col-span-1 text-sm font-mono">{p.max_usuarios}</div>
+            <div className="col-span-2 text-sm font-mono text-slate-600">{retentionLabel(p.retencao_midia_dias)}</div>
             <div className="col-span-1">
               <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${p.status === "active" ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700"}`}>
                 {p.status === "active" ? "ativo" : "inativo"}

@@ -27,11 +27,19 @@ Endpoint shape (WuzAPI, via gateway):
   POST   /chat/send/document        — {Phone, Document, FileName, Caption}
   POST   /chat/send/video           — {Phone, Video, Caption}
   POST   /chat/send/sticker         — {Phone, Sticker}
+  POST   /chat/downloadimage        — mídia recebida: {Url, DirectPath, MediaKey,
+                                       Mimetype, FileSHA256, FileEncSHA256, FileLength}
+  POST   /chat/downloadvideo        — idem
+  POST   /chat/downloadaudio        — idem
+  POST   /chat/downloaddocument     — idem
 
-NOTE: not yet verified whether Image/Audio/Document/Video accept a plain
-http(s) URL (like Evolution's `media` field did) or require base64/data-URI.
-Test this against a real send before relying on it in send_media().
+Media fields (Image/Audio/Document/Video/Sticker) carry the file itself as a
+base64 data URI ("data:image/png;base64,..."), not a URL — WuzAPI does not
+fetch remote files on its own. Callers pass an already-built data URI here;
+media_store.ensure_data_uri() is what turns a stored file or a public URL
+into one.
 """
+import base64
 import os
 import secrets
 import asyncio
@@ -69,13 +77,40 @@ MAX_ATTEMPTS = 3
 BACKOFF_BASE = 0.5  # waits 0.5s, 1s, 2s between attempts
 RETRY_STATUS = {500, 502, 503, 504}
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    """Client único do processo, com keep-alive.
+
+    Um client por chamada pagava handshake TCP (e TLS, quando o gateway está
+    atrás de HTTPS) em cada mensagem enviada, em cada probe do health monitor
+    e em cada tentativa de retry. Aqui as conexões ficam abertas e são
+    reaproveitadas. Criado sob demanda de propósito: precisa nascer dentro do
+    event loop que vai usá-lo.
+    """
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            timeout=15.0,
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
+        )
+    return _client
+
+
+async def close_client():
+    """Fecha o pool no shutdown. Sem isto o encerramento deixa sockets abertos."""
+    global _client
+    if _client is not None and not _client.is_closed:
+        await _client.aclose()
+    _client = None
+
 
 async def _request(method: str, path: str, headers: dict, json: Any = None) -> dict:
     last_err: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                r = await client.request(method, f"{_base()}{path}", json=json, headers=headers)
+            r = await _get_client().request(method, f"{_base()}{path}", json=json, headers=headers)
             if r.status_code in RETRY_STATUS:
                 last_err = WuzapiError(f"WuzAPI {method} {path} -> {r.status_code}: {r.text[:200]}")
                 logger.warning("WuzAPI transient %s on attempt %d/%d: %s %s",
@@ -154,6 +189,51 @@ _MEDIA_ENDPOINTS = {
 }
 
 
-async def send_media(token: str, number: str, mediatype: str, media: str, caption: str = "") -> dict:
+_DOWNLOAD_ENDPOINTS = {
+    "image": "/chat/downloadimage",
+    "video": "/chat/downloadvideo",
+    "audio": "/chat/downloadaudio",
+    "document": "/chat/downloaddocument",
+}
+
+
+async def download_media(token: str, mediatype: str, media_info: dict) -> bytes:
+    """Fetches an *incoming* media file, decrypting it from WhatsApp's servers.
+
+    `media_info` carries the encryption metadata straight off the message
+    (Url/DirectPath/MediaKey/Mimetype/FileSHA256/FileEncSHA256/FileLength) —
+    the file is stored encrypted, so it can only be pulled with those.
+
+    Only needed when WuzAPI doesn't already ship the bytes in the webhook
+    (i.e. when it runs with -skipmedia). The response envelope isn't pinned
+    down in WuzAPI's docs, so the payload is unwrapped leniently: the base64
+    has been seen both raw and as a data URI, under a handful of key spellings.
+    """
+    endpoint = _DOWNLOAD_ENDPOINTS.get(mediatype, _DOWNLOAD_ENDPOINTS["document"])
+    resp = await _request("POST", endpoint, _token_headers(token), media_info)
+    data = resp.get("data", resp)
+    if isinstance(data, str):
+        b64 = data
+    else:
+        b64 = next((data[k] for k in ("Data", "data", "base64", "Base64", "Media")
+                    if isinstance(data.get(k), str)), None)
+    if not b64:
+        raise WuzapiError(f"WuzAPI {endpoint}: resposta sem conteúdo base64")
+    if b64.startswith("data:"):
+        b64 = b64.split(",", 1)[-1]
+    try:
+        return base64.b64decode(b64)
+    except Exception as e:
+        raise WuzapiError(f"WuzAPI {endpoint}: base64 inválido ({e})")
+
+
+async def send_media(token: str, number: str, mediatype: str, media: str,
+                     caption: str = "", filename: str | None = None) -> dict:
+    """`media` must already be a base64 data URI (see module docstring)."""
     endpoint, field = _MEDIA_ENDPOINTS.get(mediatype, _MEDIA_ENDPOINTS["document"])
-    return await _request("POST", endpoint, _token_headers(token), {"Phone": number, field: media, "Caption": caption})
+    body = {"Phone": number, field: media, "Caption": caption}
+    if endpoint == _MEDIA_ENDPOINTS["document"][0]:
+        # WuzAPI names the document from FileName; without it the contact
+        # receives an unnamed attachment with no extension.
+        body["FileName"] = filename or "arquivo"
+    return await _request("POST", endpoint, _token_headers(token), body)

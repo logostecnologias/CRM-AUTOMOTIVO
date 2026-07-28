@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -7,7 +8,6 @@ import LoginPage from "@/pages/Login";
 import TenantDashboard from "@/pages/tenant/TenantDashboard";
 import BotsPage from "@/pages/tenant/BotsPage";
 import AIAgentsPage from "@/pages/tenant/AIAgentsPage";
-import FlowEditorPage from "@/pages/tenant/FlowEditorPage";
 import ContactsPage from "@/pages/tenant/ContactsPage";
 import InboxPage from "@/pages/tenant/InboxPage";
 import WhatsAppPage from "@/pages/tenant/WhatsAppPage";
@@ -19,6 +19,21 @@ import SuperAdminDashboard from "@/pages/superadmin/SuperAdminDashboard";
 import TenantsPage from "@/pages/superadmin/TenantsPage";
 import PlansPage from "@/pages/superadmin/PlansPage";
 import "@/App.css";
+
+// O editor de fluxos carrega o React Flow, de longe a dependência mais pesada
+// do frontend, e é a única tela que precisa dele. Estático, ele entrava no
+// bundle inicial de todo atendente que só usa a Central e nunca abre o editor.
+const FlowEditorPage = lazy(() => import("@/pages/tenant/FlowEditorPage"));
+
+function EditorLoading() {
+  return (
+    <div className="h-screen flex items-center justify-center" data-testid="editor-loading">
+      <div className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
+        Carregando editor…
+      </div>
+    </div>
+  );
+}
 
 const TENANT_ROLES = ["tenant_admin", "agent"];
 const ADMIN_ONLY = ["tenant_admin"];
@@ -55,7 +70,9 @@ function App() {
             path="/app/bots/:botId/flow/:flowId"
             element={
               <ProtectedRoute roles={ADMIN_ONLY}>
-                <FlowEditorPage />
+                <Suspense fallback={<EditorLoading />}>
+                  <FlowEditorPage />
+                </Suspense>
               </ProtectedRoute>
             }
           />

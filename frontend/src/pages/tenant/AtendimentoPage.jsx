@@ -1,9 +1,10 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { PaperPlaneRight, Hand, CheckCircle, X } from "@phosphor-icons/react";
+import { useActiveSession } from "@/hooks/useActiveSession";
+import { Hand, CheckCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { STATUS, SessionCard, MessageBubble, StatusBadge, ConnectionBadge } from "@/components/atendimento/shared";
+import { STATUS, SessionCard, MessageBubble, StatusBadge, ConnectionBadge, ChatComposer } from "@/components/atendimento/shared";
 
 export default function AtendimentoPage() {
   const { user } = useAuth();
@@ -11,45 +12,33 @@ export default function AtendimentoPage() {
   const [depts, setDepts] = useState([]);
   const [connections, setConnections] = useState([]);
   const [activeId, setActiveId] = useState(null);
-  const [active, setActive] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [connFilter, setConnFilter] = useState("");
   const chatEnd = useRef(null);
+  const { active, messages, refresh: refreshActive } = useActiveSession(activeId);
 
-  const loadSessions = () => {
+  const loadSessions = useCallback(() => {
     const params = {};
     if (deptFilter) params.department_id = deptFilter;
     if (connFilter) params.connection_id = connFilter;
     return api.get("/atendimento/sessions", { params }).then((r) => setSessions(r.data));
-  };
-  const loadActive = async (id) => {
-    if (!id) return;
-    const { data } = await api.get(`/atendimento/sessions/${id}`);
-    setActive(data.session);
-    setMessages(data.messages);
-  };
+  }, [deptFilter, connFilter]);
 
+  // Listas que não mudam com a navegação.
   useEffect(() => {
-    loadSessions();
     api.get("/departments").then((r) => setDepts(r.data));
     api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
   }, []);
-  useEffect(() => { loadSessions(); /* eslint-disable-next-line */ }, [deptFilter, connFilter]);
+  // Carga inicial e recarga a cada troca de filtro — `loadSessions` só muda
+  // quando um dos filtros muda.
+  useEffect(() => { loadSessions(); }, [loadSessions]);
   useEffect(() => {
     const t = setInterval(() => {
       loadSessions();
-      if (activeId) loadActive(activeId);
+      refreshActive();
     }, 3000);
     return () => clearInterval(t);
-    // eslint-disable-next-line
-  }, [activeId, deptFilter, connFilter]);
-  useEffect(() => {
-    if (activeId) loadActive(activeId);
-    else { setActive(null); setMessages([]); }
-    // eslint-disable-next-line
-  }, [activeId]);
+  }, [loadSessions, refreshActive]);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
 
   const counts = STATUS.reduce((acc, s) => {
@@ -60,29 +49,18 @@ export default function AtendimentoPage() {
   const assume = async () => {
     await api.post(`/atendimento/sessions/${activeId}/assume`);
     toast.success("Conversa assumida");
-    await loadActive(activeId); loadSessions();
+    await refreshActive(); loadSessions();
   };
   const finalize = async () => {
     await api.post(`/atendimento/sessions/${activeId}/finalize`);
     toast.success("Atendimento finalizado");
-    await loadActive(activeId); loadSessions();
+    await refreshActive(); loadSessions();
   };
   const reassign = async (deptId) => {
     await api.patch(`/atendimento/sessions/${activeId}/department`, { department_id: deptId || null });
     toast.success("Departamento reatribuído");
-    await loadActive(activeId); loadSessions();
+    await refreshActive(); loadSessions();
   };
-  const send = async () => {
-    if (!input.trim()) return;
-    try {
-      await api.post(`/atendimento/sessions/${activeId}/send`, { content: input });
-      setInput("");
-      await loadActive(activeId);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Falha ao enviar");
-    }
-  };
-
   const canSend = active?.status_atendimento === "em_atendimento" &&
     (user?.role !== "agent" || active?.atendente_id === user?.id);
 
@@ -207,16 +185,7 @@ export default function AtendimentoPage() {
               <div ref={chatEnd} />
             </div>
 
-            <div className="p-2 border-t border-slate-200 flex gap-2">
-              <input value={input} onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && canSend && send()}
-                className="zz-input"
-                placeholder={canSend ? "Digite uma mensagem..." : "Assuma a conversa para responder"}
-                disabled={!canSend} data-testid="chat-input" />
-              <button onClick={send} disabled={!canSend || !input.trim()} className="zz-btn" data-testid="chat-send">
-                <PaperPlaneRight size={14} weight="bold" />
-              </button>
-            </div>
+            <ChatComposer sessionId={activeId} canSend={canSend} onSent={refreshActive} />
           </div>
         )}
       </div>

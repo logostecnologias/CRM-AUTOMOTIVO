@@ -15,6 +15,7 @@ Two things happen on every CHECK_INTERVAL sweep:
 """
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
 from db import get_db
@@ -22,7 +23,12 @@ import wuzapi_client as wuzapi
 
 logger = logging.getLogger("zappzen.health")
 
-CHECK_INTERVAL = 5           # seconds between sweeps
+# Dois ritmos, porque as duas varreduras têm urgências diferentes: quem está
+# pareando tem o QR na tela esperando confirmação, e um atraso ali é visível;
+# quem já está conectado só precisa ser reavaliado de vez em quando, e essa
+# varredura roda para o sistema inteiro, não para uma tela aberta.
+PAIRING_INTERVAL = 5         # seconds between pairing sweeps
+HEALTH_INTERVAL = 30         # seconds between 'conectado' health sweeps
 STALE_AFTER = 5 * 60         # 5 minutes with no webhook event → probe a 'conectado' row
 
 _task: asyncio.Task | None = None
@@ -87,15 +93,17 @@ async def _probe_conectado(row: dict):
         )
 
 
-async def _sweep():
+async def _sweep_pareando():
     db = get_db()
-
     async for row in db.whatsapp_connections.find({"status": "pareando"}):
         try:
             await _probe_pareando(row)
         except Exception as e:
             logger.exception("Pairing probe failed for connection %s: %s", row.get("id"), e)
 
+
+async def _sweep_conectado():
+    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=STALE_AFTER)).isoformat()
     cursor = db.whatsapp_connections.find({
         "status": "conectado",
@@ -112,15 +120,23 @@ async def _sweep():
 
 
 async def _loop():
-    logger.info("WhatsApp health monitor started (interval=%ds, stale=%ds)", CHECK_INTERVAL, STALE_AFTER)
+    logger.info("WhatsApp health monitor started (pareamento=%ds, saúde=%ds, stale=%ds)",
+                PAIRING_INTERVAL, HEALTH_INTERVAL, STALE_AFTER)
+    # Zero e não `time.monotonic()`: a primeira volta já roda a varredura de
+    # saúde, para o estado das conexões ficar correto logo após um restart.
+    last_health = 0.0
     while True:
         try:
-            await _sweep()
+            await _sweep_pareando()
+            now = time.monotonic()
+            if now - last_health >= HEALTH_INTERVAL:
+                await _sweep_conectado()
+                last_health = now
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.exception("Health sweep crashed: %s", e)
-        await asyncio.sleep(CHECK_INTERVAL)
+        await asyncio.sleep(PAIRING_INTERVAL)
 
 
 def start():
