@@ -37,7 +37,7 @@ export default function AppShell({ variant = "tenant" }) {
   const { user, logout, impersonatedFrom, exitImpersonation } = useAuth();
   const navigate = useNavigate();
   const nav = variant === "admin" ? adminNav : tenantNav(user?.role);
-  useUnreadNotifier(variant === "tenant");
+  const { aguardando } = useUnreadNotifier(variant === "tenant");
 
   const handleLogout = async () => {
     await logout();
@@ -89,6 +89,15 @@ export default function AppShell({ variant = "tenant" }) {
               >
                 <item.icon size={18} weight="bold" />
                 <span>{item.label}</span>
+                {item.to === "/app/inbox" && aguardando > 0 && (
+                  <span
+                    className="zz-queue-badge zz-alert-pulse ml-auto"
+                    data-testid="nav-queue-badge"
+                    title={`${aguardando} conversa(s) aguardando atendimento`}
+                  >
+                    {aguardando > 99 ? "99+" : aguardando}
+                  </span>
+                )}
               </NavLink>
             ))}
           </nav>

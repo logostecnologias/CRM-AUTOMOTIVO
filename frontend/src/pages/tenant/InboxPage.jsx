@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { PaperPlaneRight, Hand, CheckCircle, X } from "@phosphor-icons/react";
+import { PaperPlaneRight, Hand, CheckCircle, X, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { STATUS, SessionListItem, MessageBubble, Avatar } from "@/components/atendimento/shared";
 
@@ -81,29 +81,53 @@ export default function InboxPage() {
           {STATUS.map((s) => {
             const Icon = s.icon;
             const isActive = stage === s.key;
+            const n = counts[s.key] || 0;
+            // A fila humana é a única aba que "grita": conversa parada em
+            // aguardando é cliente esperando resposta, não pode passar batido.
+            const alerting = s.key === "aguardando" && n > 0;
             return (
               <button
                 key={s.key}
                 onClick={() => { setStage(s.key); setActiveId(null); }}
                 data-testid={`stage-btn-${s.key}`}
-                className="flex items-center gap-2 px-3 py-2 border font-bold text-xs uppercase tracking-wider transition-colors"
-                style={isActive
-                  ? { background: s.color, borderColor: s.color, color: "#fff" }
-                  : { background: "#fff", borderColor: "#cbd5e1", color: "#0F172A" }}
+                className={`flex items-center gap-2 px-3 py-2 border-2 font-bold text-xs uppercase tracking-wider transition-colors ${alerting && !isActive ? "zz-alert-pulse" : ""}`}
+                style={
+                  alerting
+                    // Aba selecionada continua distinguível pela borda escura,
+                    // mesmo quando o vermelho de alerta assume o fundo.
+                    ? { background: "#EF4444", borderColor: isActive ? "#0F172A" : "#B91C1C", color: "#fff" }
+                    : isActive
+                      ? { background: s.color, borderColor: s.color, color: "#fff" }
+                      : { background: "#fff", borderColor: "#e2e8f0", color: "#64748B" }
+                }
               >
                 <Icon size={14} weight="bold" />
                 {s.label}
                 <span
-                  className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[10px] font-mono border"
-                  style={isActive ? { borderColor: "#fff" } : { borderColor: "#cbd5e1" }}
+                  className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[11px] font-bold ${alerting ? "rounded-full bg-white text-red-600" : "font-mono border"}`}
+                  style={alerting ? undefined : { borderColor: isActive ? "#fff" : "#cbd5e1" }}
                 >
-                  {counts[s.key] || 0}
+                  {n}
                 </span>
               </button>
             );
           })}
         </div>
       </div>
+
+      {counts.aguardando > 0 && stage !== "aguardando" && (
+        <button
+          onClick={() => { setStage("aguardando"); setActiveId(null); }}
+          data-testid="queue-banner"
+          className="w-full shrink-0 flex items-center justify-center gap-2 px-6 py-2 bg-red-500 text-white text-sm font-bold border-b-2 border-red-700 hover:bg-red-600 zz-alert-blink"
+        >
+          <Warning size={16} weight="fill" />
+          {counts.aguardando === 1
+            ? "1 cliente aguardando atendimento"
+            : `${counts.aguardando} clientes aguardando atendimento`}
+          <span className="underline">— ver fila</span>
+        </button>
+      )}
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-80 border-r border-slate-200 bg-white flex flex-col">

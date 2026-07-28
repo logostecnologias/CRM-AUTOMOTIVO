@@ -90,19 +90,25 @@ async def list_sessions(
 
 @router.get("/unread-count")
 async def unread_count(user: dict = Depends(get_current_user)):
-    """Soma leve de unread_count, sem o enrich caro de /sessions — usada pelo
-    polling do sino/som de notificação, que roda a cada poucos segundos."""
+    """Soma leve de unread_count + tamanho da fila humana, sem o enrich caro de
+    /sessions — usada pelo polling do sino/som de notificação e pelo badge de
+    fila no menu lateral, que rodam a cada poucos segundos."""
     if not user.get("tenant_id"):
         raise HTTPException(status_code=403, detail="Sem tenant")
     db = get_db()
-    q: dict = {"tenant_id": user["tenant_id"], "unread_count": {"$gt": 0}}
+    scope: dict = {"tenant_id": user["tenant_id"]}
     accessible = await _accessible_connection_ids(db, user)
     if accessible is not None:
-        q["whatsapp_connection_id"] = {"$in": accessible}
+        scope["whatsapp_connection_id"] = {"$in": accessible}
     total = 0
-    async for s in db.conversation_sessions.find(q, {"_id": 0, "unread_count": 1}):
+    async for s in db.conversation_sessions.find(
+        {**scope, "unread_count": {"$gt": 0}}, {"_id": 0, "unread_count": 1}
+    ):
         total += s.get("unread_count") or 0
-    return {"total": total}
+    aguardando = await db.conversation_sessions.count_documents(
+        {**scope, "status_atendimento": "aguardando"}
+    )
+    return {"total": total, "aguardando": aguardando}
 
 
 @router.get("/sessions/{session_id}")
@@ -142,6 +148,7 @@ async def assume(session_id: str, user: dict = Depends(get_current_user)):
             "status": "aguardando_humano",
             "atendente_id": user["id"],
             "assumido_em": s.get("assumido_em") or _now(),
+            "aguardando_desde": None,
             "updated_at": _now(),
         }},
     )

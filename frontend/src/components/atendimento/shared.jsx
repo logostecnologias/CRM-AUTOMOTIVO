@@ -8,6 +8,33 @@ export const STATUS = [
   { key: "finalizado", label: "Finalizado", icon: CheckCircle, color: "#475569" },
 ];
 
+// Há quanto tempo a conversa está na fila, em texto curto. Escala de urgência:
+// até 5min é normal, até 15min atenção, acima disso é atraso gritante.
+export function waitingInfo(session) {
+  if (session.status_atendimento !== "aguardando") return null;
+  const since = session.aguardando_desde || session.updated_at;
+  if (!since) return null;
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 60000));
+  const label = mins < 1 ? "agora" : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, "0")}`;
+  const level = mins >= 15 ? "critico" : mins >= 5 ? "atencao" : "novo";
+  const color = level === "critico" ? "#EF4444" : level === "atencao" ? "#F59E0B" : "#64748B";
+  return { mins, label, level, color };
+}
+
+export function WaitingChip({ session }) {
+  const w = waitingInfo(session);
+  if (!w) return null;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white shrink-0 ${w.level === "critico" ? "zz-alert-blink" : ""}`}
+      style={{ background: w.color }}
+      data-testid="waiting-chip"
+    >
+      <Timer size={10} weight="bold" /> {w.label}
+    </span>
+  );
+}
+
 export function SessionCard({ session, active, onClick }) {
   const last = session.last_message;
   return (
@@ -28,7 +55,10 @@ export function SessionCard({ session, active, onClick }) {
         <div className="mb-1"><ConnectionBadge connection={session.connection} /></div>
       )}
       <div className="text-xs text-slate-500 truncate">{last?.content || "—"}</div>
-      <div className="text-[10px] text-slate-400 mt-1 font-mono">{new Date(session.updated_at).toLocaleString("pt-BR")}</div>
+      <div className="flex items-center justify-between gap-1 mt-1">
+        <div className="text-[10px] text-slate-400 font-mono">{new Date(session.updated_at).toLocaleString("pt-BR")}</div>
+        <WaitingChip session={session} />
+      </div>
       {session.agent && <div className="text-[10px] text-slate-600 mt-0.5">👤 {session.agent.name}</div>}
     </button>
   );
@@ -80,11 +110,13 @@ export function Avatar({ name, photoUrl, size = 44 }) {
 export function SessionListItem({ session, active, onClick }) {
   const last = session.last_message;
   const name = session.contact?.nome || session.contact?.numero_whatsapp || "—";
+  const waiting = waitingInfo(session);
   return (
     <button
       onClick={onClick}
       data-testid={`session-card-${session.id}`}
       className={`w-full text-left px-3 py-2.5 flex items-center gap-3 border-b border-slate-100 transition-colors ${active ? "bg-slate-100" : "hover:bg-slate-50"}`}
+      style={waiting ? { borderLeft: `4px solid ${waiting.color}`, paddingLeft: "calc(0.75rem - 4px)" } : undefined}
     >
       <Avatar name={name} photoUrl={session.contact?.foto_url} />
       <div className="flex-1 min-w-0">
@@ -103,14 +135,17 @@ export function SessionListItem({ session, active, onClick }) {
             </span>
           )}
         </div>
-        {session.department && (
-          <div className="mt-1">
-            <span
-              className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white shrink-0"
-              style={{ background: session.department.cor }}
-            >
-              {session.department.nome}
-            </span>
+        {(session.department || waiting) && (
+          <div className="mt-1 flex items-center gap-1 flex-wrap">
+            {waiting && <WaitingChip session={session} />}
+            {session.department && (
+              <span
+                className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 text-white shrink-0"
+                style={{ background: session.department.cor }}
+              >
+                {session.department.nome}
+              </span>
+            )}
           </div>
         )}
       </div>
