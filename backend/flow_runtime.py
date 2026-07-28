@@ -545,7 +545,9 @@ async def send_human_media(tenant_id: str, session_id: str, media_doc: dict, cap
         f"*{agent_name}:*" if agent_name else caption
     )
     try:
-        data_uri = media_store.to_data_uri(media_doc["mime"], media_store.read_bytes(media_doc))
+        # Lido do disco durante o envio: o arquivo pode ter dezenas de MB, e
+        # este é o caminho por onde ele passa inteiro.
+        data_uri = media_store.DataUriStream(media_doc)
         await wuzapi.send_media(token, contact["numero_whatsapp"], media_doc["kind"],
                                 data_uri, outgoing_caption, filename=media_doc["filename"])
     except Exception as e:

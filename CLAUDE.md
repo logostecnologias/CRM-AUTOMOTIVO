@@ -75,6 +75,11 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **`last_message` é desnormalizado na sessão**: `flow_runtime.log_message()` grava a mensagem e a prévia juntas, e **todo** caminho que escreve em `messages_log` passa por ela — é o que impede os dois lados de divergir. Antes a lista de conversas redescobria a última mensagem de cada uma com um aggregate que ordenava todas as mensagens das até 200 conversas em tela, a cada 3s, por atendente. Sessões anteriores à mudança são preenchidas por `migrations.py` (idempotente, roda no start)
 - **`GET /atendimento/sessions/{id}?since=`** devolve só as mensagens novas. O corte é `$gte` e o front reconcilia por id: o relógio do Windows anda de ~15ms em ~15ms, então mensagens da mesma rajada nascem com timestamp **idêntico** — com `$gt` a rajada seguinte ao cursor sumiria da tela. Pelo mesmo motivo, todo sort de histórico desempata por `_id` (`[("timestamp", 1), ("_id", 1)]`), senão a ordem das mensagens de uma rajada é indefinida
 - **Um único `httpx.AsyncClient`** no processo (`wuzapi_client._get_client()`), fechado no shutdown. Um client por chamada pagava handshake novo em cada mensagem enviada e em cada probe de saúde
+- **Mídia nunca passa inteira pela memória.** No recebimento do upload, `media_store.store_stream()` grava em disco conforme chega, com o teto aplicado durante a escrita. No envio, `media_store.DataUriStream` lê o arquivo aos pedaços e codifica em base64 na hora, e `wuzapi_client._CorpoStream` costura o JSON em volta. O pico ficou **constante em ~3,4MB**, independente do tamanho do arquivo (antes era ~4× o arquivo: 64MB para um vídeo de 16MB). Três detalhes que não se pode mexer sem quebrar:
+  - o corpo vai com **`Content-Length` explícito**, o que mantém o envio fora do `Transfer-Encoding: chunked` que o httpx usaria sozinho para um corpo iterável — não há garantia de que a WuzAPI aceite chunked. Por isso `DataUriStream.__len__` calcula o tamanho exato do base64 (`4 * ceil(n/3)`) sem montá-lo; errar por um byte corrompe a requisição inteira
+  - `DataUriStream` reabre o arquivo a cada `async for`, porque `_request` tem retry e um gerador já consumido mandaria corpo vazio na segunda tentativa
+  - o httpx só reconhece `bytes` e `str` como corpo pronto; **`bytearray` ele trata como stream síncrono**, e um `AsyncClient` recusa isso na hora do envio
+- **Contagens são agrupadas, não uma consulta por linha**: `summary` (quatro colunas do Kanban), `unread-count` (soma no servidor, com as duas metades em paralelo) e a lista de empresas do super admin. O que dominava não era o volume, era a ida e volta até o banco — que aqui passa por túnel SSH
 - O editor de fluxos entra por `React.lazy`: o React Flow é a dependência mais pesada do frontend e só ele a usa. Bundle inicial: 155 kB gzip (era 227 kB)
 
 ## Pendências conhecidas (Next Action Items da última entrega)
@@ -90,6 +95,8 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **Nunca** deixar uma query no backend sem filtro de `tenant_id` explícito — é a única barreira de isolamento entre empresas, já que o Mongo não tem RLS nativo.
 - O motor de execução de fluxos é único e compartilhado entre o modo "Testar" (simulado) e o fluxo real de mensagens — não duplicar lógica.
 - **Nunca** inserir em `messages_log` direto: usar `flow_runtime.log_message()`, que grava a mensagem e a prévia da sessão na mesma operação. Um insert avulso deixa a lista de conversas mostrando mensagem velha.
+- **Nunca** carregar um arquivo de mídia inteiro na memória (`read_bytes` + `to_data_uri`): usar `store_stream` no recebimento e `DataUriStream` no envio. O teto por tipo chega a 20MB, e isso é por envio simultâneo.
+- `mime` vem do cliente e termina embutido num data URI dentro de um JSON: passar sempre por `media_store.sanitize_mime()`.
 - Rotas administrativas (admin/super admin) devem retornar 403 de verdade para usuários sem permissão, não só esconder na UI — validar sempre no backend.
 - Toda ação de impersonation do Super Admin deve ficar registrada em `impersonation_log`.
 - Design já definido (Swiss Brutalist / Grid Borders) — manter consistência visual ao adicionar novas telas.

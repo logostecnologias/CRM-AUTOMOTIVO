@@ -40,6 +40,7 @@ media_store.ensure_data_uri() is what turns a stored file or a public URL
 into one.
 """
 import base64
+import json
 import os
 import secrets
 import asyncio
@@ -106,11 +107,27 @@ async def close_client():
     _client = None
 
 
-async def _request(method: str, path: str, headers: dict, json: Any = None) -> dict:
+async def _request(method: str, path: str, headers: dict, json: Any = None,
+                   body: "_CorpoStream | None" = None) -> dict:
+    """`body` envia o corpo aos pedaços, para arquivos grandes não precisarem
+    caber inteiros na memória (ver send_media). Nunca vem junto com `json`.
+
+    Ele é remontado a cada tentativa de propósito: um gerador já consumido
+    mandaria corpo vazio no retry."""
     last_err: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            r = await _get_client().request(method, f"{_base()}{path}", json=json, headers=headers)
+            if body is None:
+                extra = {"json": json}
+            else:
+                extra = {"content": body.pedacos()}
+                # Content-Length explícito mantém o envio fora do
+                # `Transfer-Encoding: chunked` que o httpx usaria sozinho
+                # para um corpo iterável — nem todo servidor aceita chunked.
+                headers = {**headers, "Content-Length": str(len(body))}
+            r = await _get_client().request(
+                method, f"{_base()}{path}", headers=headers, **extra,
+            )
             if r.status_code in RETRY_STATUS:
                 last_err = WuzapiError(f"WuzAPI {method} {path} -> {r.status_code}: {r.text[:200]}")
                 logger.warning("WuzAPI transient %s on attempt %d/%d: %s %s",
@@ -227,13 +244,60 @@ async def download_media(token: str, mediatype: str, media_info: dict) -> bytes:
         raise WuzapiError(f"WuzAPI {endpoint}: base64 inválido ({e})")
 
 
-async def send_media(token: str, number: str, mediatype: str, media: str,
+def _dumps(valor: Any) -> bytes:
+    """Mesmos parâmetros que o httpx usa no `json=`, para o corpo montado aqui
+    sair byte a byte igual ao que ele mandaria — inclusive acento, que sem
+    `ensure_ascii=False` viraria \\uXXXX e mudaria o tamanho do corpo."""
+    return json.dumps(valor, ensure_ascii=False, separators=(",", ":"),
+                      allow_nan=False).encode("utf-8")
+
+
+class _CorpoStream:
+    """Corpo JSON cujo campo de mídia é lido do disco durante o envio.
+
+    Os campos pequenos são serializados normalmente; o grande é emitido aos
+    pedaços pelo `midia`, que sabe o próprio tamanho. Assim o corpo tem
+    Content-Length conhecido sem nunca existir inteiro na memória.
+
+    O que trafega é idêntico ao que o httpx montaria com `json=`: mesma
+    ordem de campos, mesmos separadores, mesmo escape.
+    """
+
+    def __init__(self, campos: dict, campo_midia: str, midia):
+        cabeca = bytearray(b"{")
+        for chave, valor in campos.items():
+            cabeca += _dumps(chave) + b":" + _dumps(valor) + b","
+        cabeca += _dumps(campo_midia) + b':"'
+        self.cabeca = bytes(cabeca)
+        self.cauda = b'"}'
+        self.midia = midia
+
+    def __len__(self) -> int:
+        return len(self.cabeca) + len(self.midia) + len(self.cauda)
+
+    async def pedacos(self):
+        yield self.cabeca
+        async for pedaco in self.midia:
+            yield pedaco
+        yield self.cauda
+
+
+async def send_media(token: str, number: str, mediatype: str, media,
                      caption: str = "", filename: str | None = None) -> dict:
-    """`media` must already be a base64 data URI (see module docstring)."""
+    """`media` must already be a base64 data URI (see module docstring).
+
+    Aceita a str pronta — é o caso do nó de Mídia do editor, que baixa de uma
+    URL — ou um media_store.DataUriStream, quando o arquivo é nosso: aí ele é
+    lido do disco durante o envio, sem passar inteiro pela memória.
+    """
     endpoint, field = _MEDIA_ENDPOINTS.get(mediatype, _MEDIA_ENDPOINTS["document"])
-    body = {"Phone": number, field: media, "Caption": caption}
+    body = {"Phone": number, "Caption": caption}
     if endpoint == _MEDIA_ENDPOINTS["document"][0]:
         # WuzAPI names the document from FileName; without it the contact
         # receives an unnamed attachment with no extension.
         body["FileName"] = filename or "arquivo"
-    return await _request("POST", endpoint, _token_headers(token), body)
+
+    if isinstance(media, str):
+        return await _request("POST", endpoint, _token_headers(token), {**body, field: media})
+    return await _request("POST", endpoint, _token_headers(token),
+                          body=_CorpoStream(body, field, media))

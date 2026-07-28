@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -32,16 +33,38 @@ async def _enrich_plan(db, tenants: list[dict]):
     return tenants
 
 
+async def _count_por_tenant(collection, tenant_ids: list[str]) -> dict[str, int]:
+    """Quantos documentos cada empresa tem, numa consulta só."""
+    if not tenant_ids:
+        return {}
+    return {
+        linha["_id"]: linha["n"]
+        async for linha in collection.aggregate([
+            {"$match": {"tenant_id": {"$in": tenant_ids}}},
+            {"$group": {"_id": "$tenant_id", "n": {"$sum": 1}}},
+        ])
+    }
+
+
 @router.get("/tenants")
 async def list_tenants(_=Depends(require_super_admin)):
+    """Lista as empresas com o resumo de bots e usuários de cada uma.
+
+    As contagens vêm agrupadas, e não uma consulta por empresa dentro do laço:
+    com 200 empresas na tela isso eram 400 idas ao banco para montar duas
+    colunas. Agora são duas, e em paralelo.
+    """
     db = get_db()
     tenants = await db.tenants.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    # counts per tenant
-    result = []
-    for t in tenants:
-        bots = await db.bots.count_documents({"tenant_id": t["id"]})
-        users = await db.users.count_documents({"tenant_id": t["id"]})
-        result.append({**t, "bots_count": bots, "users_count": users})
+    ids = [t["id"] for t in tenants]
+    bots, users = await asyncio.gather(
+        _count_por_tenant(db.bots, ids),
+        _count_por_tenant(db.users, ids),
+    )
+    result = [
+        {**t, "bots_count": bots.get(t["id"], 0), "users_count": users.get(t["id"], 0)}
+        for t in tenants
+    ]
     return await _enrich_plan(db, result)
 
 

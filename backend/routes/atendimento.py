@@ -1,4 +1,5 @@
 """Central de Atendimento — lista de conversas + ações."""
+import asyncio
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -93,13 +94,26 @@ async def unread_count(user: dict = Depends(get_current_user)):
     accessible = await _accessible_connection_ids(db, user)
     if accessible is not None:
         scope["whatsapp_connection_id"] = {"$in": accessible}
-    total = 0
-    async for s in db.conversation_sessions.find(
-        {**scope, "unread_count": {"$gt": 0}}, {"_id": 0, "unread_count": 1}
-    ):
-        total += s.get("unread_count") or 0
-    aguardando = await db.conversation_sessions.count_documents(
-        {**scope, "status_atendimento": "aguardando"}
+
+    async def _soma_nao_lidas() -> int:
+        # A soma acontece no servidor. Antes cada conversa não lida vinha pela
+        # rede só para ter um número somado aqui.
+        async for linha in db.conversation_sessions.aggregate([
+            {"$match": {**scope, "unread_count": {"$gt": 0}}},
+            {"$group": {"_id": None, "total": {"$sum": "$unread_count"}}},
+        ]):
+            return linha.get("total") or 0
+        return 0
+
+    # As duas em paralelo: são independentes, e o que pesa aqui é a ida e
+    # volta até o banco. Continuam separadas de propósito — juntá-las num
+    # `$facet` obrigaria o `$match` inicial a pegar todas as conversas do
+    # tenant, perdendo os dois filtros seletivos que hoje usam índice.
+    total, aguardando = await asyncio.gather(
+        _soma_nao_lidas(),
+        db.conversation_sessions.count_documents(
+            {**scope, "status_atendimento": "aguardando"}
+        ),
     )
     return {"total": total, "aguardando": aguardando}
 
@@ -282,22 +296,13 @@ async def send_media(
     db = get_db()
     await _authorize_send(db, session_id, user)
 
-    # Lê em blocos com teto: um upload gigante não pode inflar a memória do
-    # processo só para ser rejeitado depois.
-    chunks, total = [], 0
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > media_store.HARD_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="Arquivo muito grande")
-        chunks.append(chunk)
-
+    # Gravado direto em disco conforme chega, com o teto aplicado durante a
+    # escrita: acumular o arquivo inteiro na memória para só então salvá-lo
+    # custava duas cópias dele, por envio simultâneo.
     try:
-        doc = await media_store.store_upload(
+        doc = await media_store.store_stream(
             db, user["tenant_id"], session_id, user["id"],
-            file.filename, file.content_type, b"".join(chunks),
+            file.filename, file.content_type, file.read,
         )
     except media_store.MediaError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -311,15 +316,29 @@ async def send_media(
     return {"ok": True, "media": media_store.public_payload(doc)}
 
 
+KANBAN_STATUSES = ("bot", "aguardando", "em_atendimento", "finalizado")
+
+
 @router.get("/summary")
 async def summary(user: dict = Depends(get_current_user)):
-    """Kanban column counts respecting user access."""
+    """Kanban column counts respecting user access.
+
+    Uma contagem agrupada em vez de uma consulta por coluna: eram quatro idas
+    e voltas ao banco para montar quatro números.
+    """
     db = get_db()
     q: dict = {"tenant_id": user["tenant_id"]}
     accessible = await _accessible_connection_ids(db, user)
     if accessible is not None:
         q["whatsapp_connection_id"] = {"$in": accessible}
-    counts = {}
-    for st in ["bot", "aguardando", "em_atendimento", "finalizado"]:
-        counts[st] = await db.conversation_sessions.count_documents({**q, "status_atendimento": st})
+
+    counts = {st: 0 for st in KANBAN_STATUSES}
+    async for linha in db.conversation_sessions.aggregate([
+        {"$match": q},
+        {"$group": {"_id": "$status_atendimento", "n": {"$sum": 1}}},
+    ]):
+        # Conversa com status fora das quatro colunas é ignorada, não vira
+        # chave nova: o front indexa o retorno pelas colunas que conhece.
+        if linha["_id"] in counts:
+            counts[linha["_id"]] = linha["n"]
     return counts
