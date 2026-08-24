@@ -88,6 +88,40 @@ async def require_super_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+async def require_tenant_member(user: dict = Depends(get_current_user)) -> dict:
+    """Qualquer pessoa de dentro da empresa: tenant_admin ou atendente.
+
+    Existe para o atendente alcançar a base de contatos, o funil e a agenda.
+    Sem isso `responsavel_id` era decorativo: quem era responsável por um
+    contato não conseguia abrir a ficha dele.
+
+    O que **continua** restrito ao admin é configuração e movimentação em
+    massa — campos personalizados, etapas do funil, importação e exportação de
+    CSV. Exportar a base inteira é o caminho mais curto para ela sair da
+    empresa, e não é tarefa de quem atende.
+    """
+    if user.get("role") not in ("tenant_admin", "agent"):
+        raise HTTPException(status_code=403, detail="Acesso restrito à equipe da empresa")
+    if not user.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="Tenant não vinculado")
+    return user
+
+
+async def accessible_connection_ids(db, user: dict) -> list[str] | None:
+    """Conexões que este usuário alcança. `None` significa todas.
+
+    Vive aqui, e não numa rota, porque é regra de permissão: o atendente só vê
+    e só fala pelas conexões liberadas para ele (`user_connection_access`), e
+    isso vale em toda tela que envie mensagem — não só na Central.
+    """
+    if user.get("role") in ("tenant_admin", "super_admin"):
+        return None
+    rows = await db.user_connection_access.find(
+        {"tenant_id": user["tenant_id"], "user_id": user["id"]}, {"_id": 0}
+    ).to_list(500)
+    return [r["whatsapp_connection_id"] for r in rows]
+
+
 async def require_tenant_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "tenant_admin":
         raise HTTPException(status_code=403, detail="Acesso restrito ao Tenant Admin")

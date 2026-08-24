@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 import media_store
 from db import get_db
-from auth import get_current_user
+from auth import accessible_connection_ids, get_current_user
 from flow_runtime import log_message, send_human_message, send_human_media
 
 router = APIRouter(prefix="/api/atendimento", tags=["atendimento"])
@@ -17,13 +17,9 @@ def _now():
 
 
 async def _accessible_connection_ids(db, user: dict) -> list[str] | None:
-    """Returns None (=todos) para admin/super, ou lista explícita para agent."""
-    if user["role"] in ("tenant_admin", "super_admin"):
-        return None
-    rows = await db.user_connection_access.find(
-        {"tenant_id": user["tenant_id"], "user_id": user["id"]}, {"_id": 0}
-    ).to_list(500)
-    return [r["whatsapp_connection_id"] for r in rows]
+    """None (=todas) para admin/super, ou lista explícita para o atendente.
+    A regra mora em auth.py: ela vale em toda tela que envie mensagem."""
+    return await accessible_connection_ids(db, user)
 
 
 async def _enrich(db, sessions: list[dict]):
