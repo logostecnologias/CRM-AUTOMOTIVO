@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Robot, Timer, Headset, CheckCircle, Paperclip, PaperPlaneRight, X, FileArrowDown, Prohibit } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { API, formatApiErrorDetail } from "@/lib/api";
@@ -173,6 +174,76 @@ export function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Visualizador de imagem em tela cheia. Abrir a URL do arquivo em outra aba
+// deixava o usuário sem volta: /api/media serve o binário cru, fora do SPA, e
+// em janela sem barra de navegação (PWA/webview) não há como sair. Aqui a saída
+// é sempre visível: X, ESC ou clique no fundo.
+function ImageLightbox({ src, filename, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    // Trava o scroll do chat atrás do overlay.
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="image-lightbox"
+    >
+      <div className="absolute top-3 right-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <a
+          href={src}
+          download={filename || "imagem"}
+          className="flex items-center gap-1 px-2 py-1.5 bg-white border-2 border-slate-900 text-xs font-bold uppercase tracking-wider hover:bg-slate-100"
+          data-testid="lightbox-download"
+        >
+          <FileArrowDown size={16} weight="bold" /> Baixar
+        </a>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Fechar"
+          className="p-1.5 bg-white border-2 border-slate-900 hover:bg-slate-100"
+          data-testid="lightbox-close"
+        >
+          <X size={18} weight="bold" />
+        </button>
+      </div>
+      {/* clique na própria imagem não fecha, pra dar espaço de olhar/ampliar */}
+      <img
+        src={src}
+        alt={filename || "imagem"}
+        className="max-w-full max-h-full object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>,
+    document.body
+  );
+}
+
+function ImageBubble({ src, media }) {
+  const [aberta, setAberta] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setAberta(true)} className="block" data-testid="media-image">
+        <img
+          src={src}
+          alt={media.filename || "imagem"}
+          className="max-w-full max-h-72 border border-slate-300 object-contain cursor-zoom-in"
+        />
+      </button>
+      {aberta && <ImageLightbox src={src} filename={media.filename} onClose={() => setAberta(false)} />}
+    </>
+  );
+}
+
 // Anexo dentro da bolha. `media.id` aponta pro nosso /api/media (cookie
 // httpOnly vai junto no <img>/<video>, então não precisa de token na URL);
 // mídia vinda do nó de fluxo não tem id, só a URL pública original.
@@ -194,11 +265,7 @@ function MediaContent({ media }) {
   }
   if (!src) return null;
   if (media.kind === "image") {
-    return (
-      <a href={src} target="_blank" rel="noreferrer">
-        <img src={src} alt={media.filename || "imagem"} className="max-w-full max-h-72 border border-slate-300 object-contain" />
-      </a>
-    );
+    return <ImageBubble src={src} media={media} />;
   }
   if (media.kind === "video") {
     return <video src={src} controls className="max-w-full max-h-72 border border-slate-300" />;
