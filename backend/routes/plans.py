@@ -18,6 +18,10 @@ class PlanIn(BaseModel):
     # Dias que a mídia das conversas fica guardada. None = usa o default do
     # servidor (MEDIA_RETENTION_DAYS); 0 = nunca apaga. Ver media_retention.py.
     retencao_midia_dias: int | None = None
+    # Teto de mensagens de campanha por mês. None ou 0 = ilimitado. Contado
+    # sobre disparo entregue, não sobre campanha criada — é a mensagem que
+    # custa. Ver routes/campaigns.py:_enforce_cota_mensal.
+    max_disparos_mes: int | None = None
     status: str = "active"
 
 

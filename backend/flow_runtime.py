@@ -19,6 +19,18 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _campanhas():
+    """Import tardio de `campaigns`.
+
+    `campaigns` importa este módulo (por `log_message` e
+    `last_message_preview`), então importá-lo aqui no topo fecharia o ciclo e
+    derrubaria o boot. Só o caminho de entrada precisa dele, e uma vez por
+    mensagem recebida o custo do import já resolvido é nulo.
+    """
+    import campaigns
+    return campaigns
+
+
 async def _fetch_avatar_bg(contact_id: str, token: str, number: str):
     """Fire-and-forget: fetch the contact's profile picture without
     delaying message/reply handling (WuzAPI can take a few seconds, or
@@ -258,6 +270,9 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "tenant_id": tenant_id,
             "numero_whatsapp": from_number,
             "nome": push_name or from_number,
+            # Origem preenchida na criação: é campo da ficha, e depois não há
+            # como saber se o contato entrou por mensagem ou por cadastro.
+            "origem": "mensagem recebida",
             "created_at": _now(),
         }
         await db.contacts.insert_one(contact)
@@ -294,6 +309,28 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             text = f"[{media['kind']} não pôde ser baixado]"
     incoming = await _log_msg(db, session_id, tenant_id, "recebida", text, mtype=msg_type, meta=msg_meta)
 
+    camp = _campanhas()
+
+    # Taxa de resposta é a métrica que uma campanha existe para produzir.
+    # Marcada aqui, antes de qualquer decisão de roteamento, porque vale
+    # inclusive quando a conversa já está com um humano e o resto desta função
+    # não roda — a resposta aconteceu de todo jeito.
+    if session and session.get("campanha_id"):
+        await camp.mark_reply(db, session)
+
+    # Descadastro. Vale para qualquer mensagem, não só resposta de disparo: o
+    # contato pode pedir para sair quando quiser, e a palavra é a mesma.
+    # Sinaliza e segue — quem não quer campanha continua sendo atendido
+    # normalmente, então o fluxo abaixo não é interrompido.
+    if text and camp.pediu_opt_out(text) and not contact.get("opt_out"):
+        await db.contacts.update_one(
+            {"id": contact["id"], "tenant_id": tenant_id},
+            {"$set": {"opt_out": True, "opt_out_em": _now()}},
+        )
+        await _log_msg(db, session_id, tenant_id, "sistema",
+                       "Contato pediu para não receber mais campanhas — "
+                       "removido dos próximos disparos", mtype="system")
+
     outputs: list[dict] = []
 
     if session and session.get("status") == "aguardando_humano":
@@ -304,25 +341,43 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         return
 
     if session:
+        primeira_resposta_campanha = bool(session.get("aguardando_primeira_resposta"))
         loaded = await _load_bot_flow(db, tenant_id, session.get("bot_id"), require_active=False)
         if not loaded:
-            # Bot da conversa sumiu ou teve o fluxo despublicado: manda pra
-            # fila humana em vez de engolir a mensagem.
+            # Sem bot que atenda: fila humana, em vez de engolir a mensagem.
+            # A conversa aberta por campanha em modo "aguardando" cai aqui de
+            # propósito — ela nasce sem bot —, e é por isso que a mensagem de
+            # sistema é outra: dizer "bot indisponível" ali descreveria um
+            # defeito onde está a configuração escolhida na campanha.
             await db.conversation_sessions.update_one(
                 {"id": session_id},
                 {"$set": {"status": "aguardando_humano", "status_atendimento": "aguardando",
                           "aguardando_desde": session.get("aguardando_desde") or _now(),
+                          "aguardando_primeira_resposta": False,
                           "updated_at": _now()},
                  "$inc": {"unread_count": 1}},
             )
-            await _log_msg(db, session_id, tenant_id, "sistema",
-                           "Bot da conversa indisponível — encaminhada para atendimento humano")
+            await _log_msg(
+                db, session_id, tenant_id, "sistema",
+                "Resposta a uma campanha — encaminhada para atendimento humano"
+                if primeira_resposta_campanha else
+                "Bot da conversa indisponível — encaminhada para atendimento humano")
             return
-        bot, flow, _start = loaded
+        bot, flow, start_node = loaded
 
         session["last_user_message"] = text
         awaiting = session.get("awaiting")
-        if awaiting and awaiting.get("node_id"):
+        if primeira_resposta_campanha:
+            # A conversa foi aberta pelo disparo, então não existe fluxo em
+            # andamento nem menu esperando resposta: ninguém tinha falado
+            # ainda. É esta primeira resposta que dá a partida no bot escolhido
+            # na campanha. Sem este ramo, o caminho normal encontraria uma
+            # sessão "ativa" sem `awaiting`, não faria nada, e a resposta
+            # ficaria no histórico sem bot e sem atendente.
+            session["aguardando_primeira_resposta"] = False
+            session["flow_id"] = flow["id"]
+            await _run_from(start_node["id"], flow, session, outputs)
+        elif awaiting and awaiting.get("node_id"):
             menu_node = _find_node(flow["nodes"], awaiting["node_id"])
             if menu_node and menu_node["type"] == "menu":
                 opts = menu_node.get("data", {}).get("options", [])
@@ -419,6 +474,10 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "flow_id": session.get("flow_id"),
             "departamento_id": session.get("departamento_id"),
             "finalizado_em": session.get("finalizado_em"),
+            # Já consumida acima quando era uma resposta de campanha. Precisa
+            # ser persistida aqui, senão a mensagem seguinte do contato
+            # reiniciaria o fluxo do começo em vez de continuar de onde parou.
+            "aguardando_primeira_resposta": bool(session.get("aguardando_primeira_resposta")),
             "updated_at": _now(),
         }, "$inc": {"unread_count": 1}},
     )

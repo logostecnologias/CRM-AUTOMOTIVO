@@ -1,0 +1,530 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import api, { formatApiErrorDetail } from "@/lib/api";
+import { toast } from "sonner";
+import { confirmToast } from "@/lib/confirm-toast";
+import {
+  Plus, Play, Pause, X, Trash, PencilSimple, Paperclip, CaretDown, CaretRight,
+  Megaphone, Warning,
+} from "@phosphor-icons/react";
+
+const STATUS_META = {
+  rascunho: { label: "rascunho", classe: "bg-slate-100 border-slate-400 text-slate-700" },
+  agendada: { label: "agendada", classe: "bg-blue-50 border-blue-500 text-blue-700" },
+  enviando: { label: "enviando", classe: "bg-amber-50 border-amber-500 text-amber-700" },
+  pausada: { label: "pausada", classe: "bg-orange-50 border-orange-500 text-orange-700" },
+  concluida: { label: "concluída", classe: "bg-green-50 border-green-500 text-green-700" },
+  cancelada: { label: "cancelada", classe: "bg-red-50 border-red-500 text-red-700" },
+};
+
+const EMPTY = {
+  nome: "",
+  whatsapp_connection_id: "",
+  conteudo: { tipo: "text", texto: "", media_id: null },
+  publico: { tipo: "todos", tags: [], contact_ids: [] },
+  cadencia: { por_minuto: 12 },
+  agendada_para: "",
+  resposta_modo: "aguardando",
+  bot_id: null,
+  departamento_id: null,
+};
+
+// O <input type="datetime-local"> fala no fuso do navegador e o backend guarda
+// tudo em UTC. As duas conversões ficam juntas aqui para não divergirem.
+function paraInputLocal(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function paraIso(local) {
+  return local ? new Date(local).toISOString() : null;
+}
+
+function Campo({ label, hint, children, className = "" }) {
+  return (
+    <div className={className}>
+      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">{label}</label>
+      {children}
+      {hint && <div className="text-[10px] text-slate-500 mt-1">{hint}</div>}
+    </div>
+  );
+}
+
+function Progresso({ campanha }) {
+  const t = campanha.totais || {};
+  const total = t.total || 0;
+  const feitos = (t.enviados || 0) + (t.falhas || 0) + (t.ignorados || 0);
+  const pct = total ? Math.round((feitos / total) * 100) : 0;
+  return (
+    <div>
+      <div className="h-2 bg-slate-200 border border-slate-300">
+        <div className="h-full bg-slate-900" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="text-[10px] font-mono text-slate-600 mt-1">
+        {feitos}/{total} · {t.enviados || 0} enviados
+        {t.falhas ? ` · ${t.falhas} falhas` : ""}
+        {t.ignorados ? ` · ${t.ignorados} ignorados` : ""}
+      </div>
+    </div>
+  );
+}
+
+function SeletorContatos({ selecionados, onChange }) {
+  const [busca, setBusca] = useState("");
+  const [achados, setAchados] = useState([]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api.get("/contacts", { params: { q: busca || undefined, limit: 30 } })
+        .then((r) => setAchados(r.data.items || []))
+        .catch(() => setAchados([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [busca]);
+
+  const alterna = (id) =>
+    onChange(selecionados.includes(id) ? selecionados.filter((x) => x !== id) : [...selecionados, id]);
+
+  return (
+    <div className="border border-slate-300 bg-white">
+      <input className="zz-input border-0 border-b border-slate-200" placeholder="Buscar por nome ou número…"
+        value={busca} onChange={(e) => setBusca(e.target.value)} data-testid="campaign-contact-search" />
+      <div className="max-h-44 overflow-y-auto">
+        {achados.length === 0 && <div className="p-3 text-xs text-slate-500">Nenhum contato encontrado.</div>}
+        {achados.map((c) => (
+          <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+            <input type="checkbox" checked={selecionados.includes(c.id)} onChange={() => alterna(c.id)} />
+            <span className="text-sm font-semibold flex-1 truncate">{c.nome}</span>
+            <span className="text-xs font-mono text-slate-500">{c.numero_whatsapp}</span>
+            {c.opt_out && <span className="text-[9px] font-bold uppercase text-red-600">optout</span>}
+          </label>
+        ))}
+      </div>
+      <div className="px-3 py-1.5 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+        {selecionados.length} selecionado(s)
+      </div>
+    </div>
+  );
+}
+
+function Detalhe({ campanha }) {
+  const [dados, setDados] = useState(null);
+  const [falhas, setFalhas] = useState([]);
+
+  useEffect(() => {
+    api.get(`/campaigns/${campanha.id}`).then((r) => setDados(r.data.metricas)).catch(() => {});
+    api.get(`/campaigns/${campanha.id}/recipients`, { params: { status: "falha", limit: 20 } })
+      .then((r) => setFalhas(r.data.items || [])).catch(() => {});
+  }, [campanha.id, campanha.updated_at]);
+
+  if (!dados) return <div className="px-4 py-3 text-xs text-slate-500">Carregando…</div>;
+
+  const caixas = [
+    ["Público", (dados.pendente || 0) + (dados.enviando || 0) + (dados.enviado || 0) + (dados.falha || 0) + (dados.ignorado || 0)],
+    ["Enviados", dados.enviado || 0],
+    ["Respostas", dados.respostas || 0],
+    ["Falhas", dados.falha || 0],
+    ["Ignorados", dados.ignorado || 0],
+    ["Na fila", dados.pendente || 0],
+  ];
+  const taxa = dados.enviado ? Math.round(((dados.respostas || 0) / dados.enviado) * 100) : 0;
+
+  return (
+    <div className="px-4 py-4 bg-slate-50 border-b border-slate-200">
+      <div className="grid grid-cols-6 gap-2 mb-3">
+        {caixas.map(([rotulo, valor]) => (
+          <div key={rotulo} className="border border-slate-300 bg-white px-3 py-2">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{rotulo}</div>
+            <div className="font-heading text-xl font-black tracking-tighter">{valor}</div>
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-slate-600 mb-3">
+        Taxa de resposta: <strong className="font-mono">{taxa}%</strong>
+        {campanha.motivo_pausa && (
+          <span className="ml-3 text-orange-700"><Warning size={12} weight="bold" className="inline" /> {campanha.motivo_pausa}</span>
+        )}
+      </div>
+      {falhas.length > 0 && (
+        <div className="border border-slate-300 bg-white">
+          <div className="px-3 py-1.5 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+            Falhas recentes
+          </div>
+          {falhas.map((f) => (
+            <div key={f.id} className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-100 text-xs">
+              <span className="font-mono text-slate-700 w-32 shrink-0">{f.numero_whatsapp}</span>
+              <span className="truncate text-slate-500">{f.erro}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function CampanhasPage() {
+  const [campanhas, setCampanhas] = useState([]);
+  const [conexoes, setConexoes] = useState([]);
+  const [bots, setBots] = useState([]);
+  const [departamentos, setDepartamentos] = useState([]);
+  const [tagsDisponiveis, setTagsDisponiveis] = useState([]);
+  const [editando, setEditando] = useState(null);
+  const [form, setForm] = useState(EMPTY);
+  const [anexo, setAnexo] = useState(null);
+  const [previa, setPrevia] = useState(null);
+  const [aberta, setAberta] = useState(null);
+  const arquivoRef = useRef(null);
+
+  const carregar = useCallback(
+    () => api.get("/campaigns").then((r) => setCampanhas(r.data)).catch(() => {}),
+    []
+  );
+
+  useEffect(() => {
+    carregar();
+    api.get("/whatsapp/connections").then((r) => setConexoes(r.data)).catch(() => {});
+    api.get("/bots").then((r) => setBots(r.data)).catch(() => {});
+    api.get("/departments").then((r) => setDepartamentos(r.data)).catch(() => {});
+    api.get("/contacts/tags").then((r) => setTagsDisponiveis(r.data)).catch(() => {});
+  }, [carregar]);
+
+  // Só pesquisa enquanto há campanha andando. Uma tela de campanhas todas
+  // concluídas não muda sozinha, e o polling de 4s existe para acompanhar o
+  // progresso de um disparo — não para ficar batendo no banco à toa.
+  const temAtiva = campanhas.some((c) => ["enviando", "agendada"].includes(c.status));
+  useEffect(() => {
+    if (!temAtiva) return;
+    const t = setInterval(carregar, 4000);
+    return () => clearInterval(t);
+  }, [temAtiva, carregar]);
+
+  // Prévia do público. É o número que a pessoa confere antes de disparar para
+  // milhares de contatos, então é recalculado a cada mudança do filtro.
+  useEffect(() => {
+    if (!editando) return;
+    const t = setTimeout(() => {
+      api.post("/campaigns/audience/preview", { publico: form.publico })
+        .then((r) => setPrevia(r.data)).catch(() => setPrevia(null));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [editando, form.publico]);
+
+  const abrirNova = () => {
+    setForm({ ...EMPTY, whatsapp_connection_id: conexoes[0]?.id || "" });
+    setAnexo(null);
+    setEditando({});
+  };
+
+  const abrirEdicao = (c) => {
+    setForm({
+      nome: c.nome,
+      whatsapp_connection_id: c.whatsapp_connection_id || "",
+      conteudo: { tipo: c.conteudo?.tipo || "text", texto: c.conteudo?.texto || "", media_id: c.conteudo?.media_id || null },
+      publico: { tipo: c.publico?.tipo || "todos", tags: c.publico?.tags || [], contact_ids: c.publico?.contact_ids || [] },
+      cadencia: { por_minuto: c.cadencia?.por_minuto || 12 },
+      agendada_para: paraInputLocal(c.agendada_para),
+      resposta_modo: c.resposta_modo || "aguardando",
+      bot_id: c.bot_id || null,
+      departamento_id: c.departamento_id || null,
+    });
+    setAnexo(c.conteudo?.media_id ? { id: c.conteudo.media_id, filename: "arquivo anexado" } : null);
+    setEditando(c);
+  };
+
+  const enviarArquivo = async (file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const r = await api.post("/campaigns/media", fd);
+      setAnexo(r.data);
+      setForm((f) => ({ ...f, conteudo: { ...f.conteudo, tipo: "media", media_id: r.data.id } }));
+      toast.success("Arquivo anexado");
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  };
+
+  const removerAnexo = () => {
+    setAnexo(null);
+    setForm((f) => ({ ...f, conteudo: { ...f.conteudo, tipo: "text", media_id: null } }));
+    if (arquivoRef.current) arquivoRef.current.value = "";
+  };
+
+  const salvar = async (e) => {
+    e.preventDefault();
+    const payload = { ...form, agendada_para: paraIso(form.agendada_para) };
+    try {
+      if (editando?.id) await api.patch(`/campaigns/${editando.id}`, payload);
+      else await api.post("/campaigns", payload);
+      setEditando(null);
+      toast.success("Campanha salva");
+      carregar();
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  };
+
+  const acao = async (c, rota, mensagem, confirmar) => {
+    if (confirmar && !(await confirmToast(confirmar, { confirmLabel: "Confirmar" }))) return;
+    try {
+      const r = await api.post(`/campaigns/${c.id}/${rota}`);
+      toast.success(mensagem(r.data));
+      carregar();
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  };
+
+  const excluir = async (c) => {
+    if (!(await confirmToast(`Excluir a campanha "${c.nome}"?`, { confirmLabel: "Excluir" }))) return;
+    try {
+      await api.delete(`/campaigns/${c.id}`);
+      toast.success("Campanha excluída");
+      carregar();
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  };
+
+  const alternaTag = (tag) =>
+    setForm((f) => ({
+      ...f,
+      publico: {
+        ...f.publico,
+        tags: f.publico.tags.includes(tag) ? f.publico.tags.filter((t) => t !== tag) : [...f.publico.tags, tag],
+      },
+    }));
+
+  const semConexao = conexoes.length === 0;
+
+  return (
+    <div className="p-8 max-w-6xl" data-testid="campaigns-page">
+      <div className="flex items-end justify-between mb-8">
+        <div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Marketing</div>
+          <h1 className="font-heading text-4xl font-black tracking-tighter">Campanhas</h1>
+          <p className="text-slate-600 mt-2 text-sm">
+            Dispare uma mensagem para uma lista de contatos e acompanhe quem recebeu e quem respondeu.
+          </p>
+        </div>
+        <button data-testid="new-campaign-btn" onClick={abrirNova} disabled={semConexao} className="zz-btn disabled:opacity-40">
+          <Plus size={14} weight="bold" /> Nova campanha
+        </button>
+      </div>
+
+      <div className="border-2 border-amber-400 bg-amber-50 p-4 mb-6 flex gap-3" data-testid="campaign-warning">
+        <Warning size={18} weight="bold" className="text-amber-700 shrink-0 mt-0.5" />
+        <div className="text-sm text-slate-800">
+          <strong className="font-bold">Disparo em volume derruba número de WhatsApp.</strong> Esta conexão usa a
+          API não oficial: não existe template aprovado nem garantia de entrega, e o bloqueio recai sobre o número
+          da empresa. Mande para quem já falou com você, mantenha a cadência baixa e sempre ofereça a saída
+          (o contato que responder <span className="font-mono">SAIR</span> é removido dos próximos disparos
+          automaticamente).
+        </div>
+      </div>
+
+      {semConexao && (
+        <div className="border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-600 mb-6">
+          Conecte um número de WhatsApp antes de criar campanhas.
+        </div>
+      )}
+
+      {editando && (
+        <form onSubmit={salvar} className="border border-slate-900 bg-white p-6 mb-6 grid grid-cols-3 gap-4 zz-panel-hard" data-testid="campaign-form">
+          <Campo label="Nome da campanha" className="col-span-2">
+            <input required autoFocus className="zz-input" data-testid="campaign-name" value={form.nome}
+              onChange={(e) => setForm({ ...form, nome: e.target.value })} />
+          </Campo>
+          <Campo label="Enviar pela conexão">
+            <select required className="zz-input" data-testid="campaign-connection" value={form.whatsapp_connection_id}
+              onChange={(e) => setForm({ ...form, whatsapp_connection_id: e.target.value })}>
+              <option value="">Selecione…</option>
+              {conexoes.map((c) => (
+                <option key={c.id} value={c.id}>{c.nome} {c.status === "conectado" ? "" : `(${c.status})`}</option>
+              ))}
+            </select>
+          </Campo>
+
+          <Campo label="Mensagem" className="col-span-3"
+            hint="Variáveis: {nome_contato}, {primeiro_nome}, {numero}. Com anexo, o texto vira a legenda.">
+            <textarea required rows={4} className="zz-input font-sans" data-testid="campaign-text"
+              value={form.conteudo.texto}
+              onChange={(e) => setForm({ ...form, conteudo: { ...form.conteudo, texto: e.target.value } })} />
+          </Campo>
+
+          <div className="col-span-3 flex items-center gap-3">
+            <input ref={arquivoRef} type="file" className="hidden" data-testid="campaign-file"
+              onChange={(e) => enviarArquivo(e.target.files?.[0])} />
+            <button type="button" onClick={() => arquivoRef.current?.click()} className="zz-btn zz-btn-secondary">
+              <Paperclip size={14} weight="bold" /> Anexar arquivo
+            </button>
+            {anexo && (
+              <span className="text-xs font-mono text-slate-700 flex items-center gap-2">
+                {anexo.filename}
+                <button type="button" onClick={removerAnexo} className="text-red-600 hover:bg-red-50 p-0.5">
+                  <X size={12} weight="bold" />
+                </button>
+              </span>
+            )}
+          </div>
+
+          <Campo label="Público" className="col-span-3">
+            <div className="flex gap-2 mb-2">
+              {[["todos", "Todos os contatos"], ["tags", "Por etiqueta"], ["selecionados", "Escolher contatos"]].map(([v, r]) => (
+                <button key={v} type="button" data-testid={`campaign-audience-${v}`}
+                  onClick={() => setForm({ ...form, publico: { ...form.publico, tipo: v } })}
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border ${
+                    form.publico.tipo === v ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"
+                  }`}>
+                  {r}
+                </button>
+              ))}
+            </div>
+            {form.publico.tipo === "tags" && (
+              tagsDisponiveis.length === 0 ? (
+                <div className="text-xs text-slate-500">
+                  Nenhuma etiqueta criada ainda — marque contatos na tela de Contatos.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {tagsDisponiveis.map((t) => (
+                    <button key={t} type="button" onClick={() => alternaTag(t)}
+                      className={`px-2 py-1 text-xs font-semibold border ${
+                        form.publico.tags.includes(t) ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-700"
+                      }`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+            {form.publico.tipo === "selecionados" && (
+              <SeletorContatos selecionados={form.publico.contact_ids}
+                onChange={(ids) => setForm({ ...form, publico: { ...form.publico, contact_ids: ids } })} />
+            )}
+            {previa && (
+              <div className="text-xs mt-2 font-semibold text-slate-700" data-testid="campaign-audience-preview">
+                {previa.total.toLocaleString("pt-BR")} contato(s) vão receber
+                {previa.total > previa.limite && (
+                  <span className="text-red-600"> — acima do limite de {previa.limite.toLocaleString("pt-BR")} por campanha</span>
+                )}
+              </div>
+            )}
+          </Campo>
+
+          <Campo label="Ritmo (mensagens/min)" hint="Quanto mais devagar, menor o risco de bloqueio.">
+            <input required type="number" min="1" max="60" className="zz-input" data-testid="campaign-rate"
+              value={form.cadencia.por_minuto}
+              onChange={(e) => setForm({ ...form, cadencia: { por_minuto: Number(e.target.value) } })} />
+          </Campo>
+          <Campo label="Agendar para" hint="Vazio = dispara ao clicar em Iniciar.">
+            <input type="datetime-local" className="zz-input" data-testid="campaign-schedule"
+              value={form.agendada_para} onChange={(e) => setForm({ ...form, agendada_para: e.target.value })} />
+          </Campo>
+          <Campo label="Quando o contato responder">
+            <select className="zz-input" data-testid="campaign-reply-mode" value={form.resposta_modo}
+              onChange={(e) => setForm({ ...form, resposta_modo: e.target.value, bot_id: e.target.value === "bot" ? form.bot_id : null })}>
+              <option value="aguardando">Vai para a fila de atendimento</option>
+              <option value="bot">Um robô atende primeiro</option>
+            </select>
+          </Campo>
+
+          {form.resposta_modo === "bot" && (
+            <Campo label="Robô que atende">
+              <select required className="zz-input" data-testid="campaign-bot" value={form.bot_id || ""}
+                onChange={(e) => setForm({ ...form, bot_id: e.target.value || null })}>
+                <option value="">Selecione…</option>
+                {bots.map((b) => <option key={b.id} value={b.id}>{b.nome}</option>)}
+              </select>
+            </Campo>
+          )}
+          <Campo label="Departamento das respostas">
+            <select className="zz-input" data-testid="campaign-department" value={form.departamento_id || ""}
+              onChange={(e) => setForm({ ...form, departamento_id: e.target.value || null })}>
+              <option value="">Padrão da conexão</option>
+              {departamentos.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
+            </select>
+          </Campo>
+
+          <div className="col-span-3 flex gap-2 justify-end">
+            <button type="button" onClick={() => setEditando(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
+            <button type="submit" className="zz-btn" data-testid="campaign-submit">Salvar</button>
+          </div>
+        </form>
+      )}
+
+      <div className="border border-slate-200 bg-white">
+        {campanhas.length === 0 && !editando && (
+          <div className="p-16 text-center">
+            <div className="w-12 h-12 bg-slate-900 text-white flex items-center justify-center mx-auto mb-3">
+              <Megaphone size={22} weight="bold" />
+            </div>
+            <div className="font-heading text-2xl font-black tracking-tighter mb-2">Nenhuma campanha ainda.</div>
+            <div className="text-sm text-slate-600">Crie a primeira para começar a disparar.</div>
+          </div>
+        )}
+        {campanhas.map((c) => {
+          const meta = STATUS_META[c.status] || STATUS_META.rascunho;
+          const expandida = aberta === c.id;
+          return (
+            <div key={c.id} className="border-b border-slate-100" data-testid={`campaign-row-${c.id}`}>
+              <div className="grid grid-cols-12 gap-3 px-4 py-3 items-center hover:bg-slate-50">
+                <button onClick={() => setAberta(expandida ? null : c.id)} className="col-span-4 flex items-center gap-2 text-left">
+                  {expandida ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{c.nome}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{c.conteudo?.texto}</div>
+                  </div>
+                </button>
+                <div className="col-span-2">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${meta.classe}`}>
+                    {meta.label}
+                  </span>
+                  {c.agendada_para && c.status === "agendada" && (
+                    <div className="text-[10px] font-mono text-slate-500 mt-1">
+                      {new Date(c.agendada_para).toLocaleString("pt-BR")}
+                    </div>
+                  )}
+                </div>
+                <div className="col-span-3"><Progresso campanha={c} /></div>
+                <div className="col-span-3 flex gap-1 justify-end">
+                  {["rascunho", "pausada", "agendada"].includes(c.status) && (
+                    <button title="Iniciar" data-testid={`campaign-start-${c.id}`}
+                      onClick={() => acao(c, c.status === "pausada" ? "resume" : "start",
+                        (d) => d.status === "agendada" ? "Campanha agendada" : `Disparando para ${d.pendentes} contato(s)`,
+                        c.status === "rascunho" ? `Disparar "${c.nome}" agora?` : null)}
+                      className="p-1.5 hover:bg-green-100 text-green-700"><Play size={14} weight="bold" /></button>
+                  )}
+                  {["enviando", "agendada"].includes(c.status) && (
+                    <button title="Pausar" data-testid={`campaign-pause-${c.id}`}
+                      onClick={() => acao(c, "pause", () => "Campanha pausada")}
+                      className="p-1.5 hover:bg-orange-100 text-orange-700"><Pause size={14} weight="bold" /></button>
+                  )}
+                  {!["concluida", "cancelada"].includes(c.status) && (
+                    <button title="Cancelar" onClick={() => acao(c, "cancel",
+                      (d) => `Campanha cancelada (${d.descartados} não enviados)`,
+                      `Cancelar "${c.nome}"? Quem ainda não recebeu não vai receber.`)}
+                      className="p-1.5 hover:bg-red-100 text-red-600"><X size={14} weight="bold" /></button>
+                  )}
+                  {["rascunho", "agendada", "pausada"].includes(c.status) && (
+                    <button title="Editar" onClick={() => abrirEdicao(c)} className="p-1.5 hover:bg-slate-200">
+                      <PencilSimple size={14} weight="bold" />
+                    </button>
+                  )}
+                  {c.status !== "enviando" && (
+                    <button title="Excluir" onClick={() => excluir(c)} className="p-1.5 hover:bg-red-100 text-red-600">
+                      <Trash size={14} weight="bold" />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {expandida && <Detalhe campanha={c} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
