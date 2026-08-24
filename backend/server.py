@@ -24,6 +24,11 @@ from routes.users import router as users_router
 from routes.atendimento import router as atendimento_router
 from routes.plans import router as plans_router
 from routes.media import router as media_router
+from routes.campaigns import router as campaigns_router
+from routes.deals import router as deals_router
+from routes.activities import router as activities_router
+from routes.reports import router as reports_router
+import campaign_runner
 import health_monitor
 import media_retention
 import migrations
@@ -53,6 +58,10 @@ app.include_router(users_router)
 app.include_router(atendimento_router)
 app.include_router(plans_router)
 app.include_router(media_router)
+app.include_router(campaigns_router)
+app.include_router(deals_router)
+app.include_router(activities_router)
+app.include_router(reports_router)
 
 
 @app.get("/api/health")
@@ -99,6 +108,69 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("contacts", [("id", 1)], {}),
     # Resolução do contato pelo número, uma vez por mensagem recebida.
     ("contacts", [("tenant_id", 1), ("numero_whatsapp", 1)], {}),
+    # Público de campanha por etiqueta, já descontando quem pediu para sair
+    # (campaigns.audience_query). É a consulta que decide quem recebe.
+    ("contacts", [("tenant_id", 1), ("opt_out", 1), ("tags", 1)], {}),
+    # Carteira de um responsável (filtro da lista de contatos).
+    ("contacts", [("tenant_id", 1), ("responsavel_id", 1)], {}),
+
+    # Notas da ficha, sempre lidas por contato e em ordem de data. `_id` entra
+    # porque entra no sort: duas notas seguidas compartilham o `created_at`
+    # (resolução do relógio), e é ele que desempata.
+    ("contact_notes", [("tenant_id", 1), ("contact_id", 1), ("created_at", -1), ("_id", -1)], {}),
+    ("contact_notes", [("id", 1)], {}),
+    # Definições de campo personalizado: lidas inteiras, na ordem da tela.
+    ("contact_field_defs", [("tenant_id", 1), ("ordem", 1)], {}),
+
+    ("pipelines", [("tenant_id", 1), ("created_at", 1)], {}),
+    ("pipelines", [("id", 1)], {}),
+
+    # Uma coluna do quadro: etapa do funil, na ordem dos cartões. É a consulta
+    # que roda uma vez por coluna a cada abertura do Kanban.
+    ("deals", [("tenant_id", 1), ("pipeline_id", 1), ("etapa_id", 1), ("ordem", 1)], {}),
+    # Relatório: resumo por status e a janela por data de fechamento.
+    ("deals", [("tenant_id", 1), ("pipeline_id", 1), ("status", 1), ("fechado_em", 1)], {}),
+    # Bloco de negócios na ficha do contato.
+    ("deals", [("tenant_id", 1), ("contact_id", 1)], {}),
+    # Carteira de um responsável (filtro do quadro).
+    ("deals", [("tenant_id", 1), ("responsavel_id", 1)], {}),
+    ("deals", [("id", 1)], {}),
+    # Retorno por campanha: agrupa os ganhos pela campanha de origem.
+    ("deals", [("tenant_id", 1), ("campanha_id", 1), ("status", 1)], {}),
+
+    # Histórico do negócio. `_id` entra porque entra no sort: dois eventos do
+    # mesmo salvamento compartilham o `created_at`.
+    ("deal_events", [("tenant_id", 1), ("deal_id", 1), ("created_at", -1), ("_id", -1)], {}),
+
+    # A agenda de um responsável: pendentes, na ordem de vencimento. É a
+    # consulta que abre a tela de Atividades e alimenta o selo do menu.
+    ("activities", [("tenant_id", 1), ("responsavel_id", 1), ("concluida_em", 1), ("vence_em", 1)], {}),
+    # Mesma lista sem filtro de responsável, e o resumo por empresa.
+    ("activities", [("tenant_id", 1), ("concluida_em", 1), ("vence_em", 1)], {}),
+    # "Este negócio tem próximo passo?" — marca do cartão no quadro.
+    ("activities", [("tenant_id", 1), ("deal_id", 1), ("concluida_em", 1)], {}),
+    # Bloco de atividades na ficha do contato.
+    ("activities", [("tenant_id", 1), ("contact_id", 1), ("concluida_em", 1)], {}),
+    ("activities", [("id", 1)], {}),
+    # Corrente de follow-up, desfeita quando a atividade de origem é apagada.
+    ("activities", [("tenant_id", 1), ("origem_id", 1)], {}),
+
+    ("campaigns", [("tenant_id", 1), ("created_at", -1)], {}),
+    ("campaigns", [("id", 1)], {}),
+    # Varredura do supervisor: campanha em disparo e agendada cuja hora chegou.
+    ("campaigns", [("status", 1), ("agendada_para", 1)], {}),
+
+    # O claim do próximo destinatário (find_one_and_update ordenado por _id)
+    # roda uma vez por mensagem disparada — é a consulta mais quente de uma
+    # campanha grande.
+    ("campaign_recipients", [("campaign_id", 1), ("status", 1), ("_id", 1)], {}),
+    ("campaign_recipients", [("id", 1)], {}),
+    # Marcação de resposta e listagem por contato.
+    ("campaign_recipients", [("campaign_id", 1), ("contact_id", 1)], {}),
+    # Cota mensal de disparos do plano.
+    ("campaign_recipients", [("tenant_id", 1), ("status", 1), ("sent_at", 1)], {}),
+    # "Quais campanhas este contato já recebeu?" — bloco da ficha.
+    ("campaign_recipients", [("tenant_id", 1), ("contact_id", 1)], {}),
 
     # A lista da Central filtra por `status_atendimento` e ordena por
     # `updated_at`. O índice que existia cobria `status` — outro campo, com
@@ -112,6 +184,8 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("conversation_sessions", [("tenant_id", 1), ("contact_id", 1), ("whatsapp_connection_id", 1)], {}),
     # Contadores do dashboard, que ainda consultam `status`.
     ("conversation_sessions", [("tenant_id", 1), ("status", 1)], {}),
+    # Janela do relatório de atendimento: conversas criadas no período.
+    ("conversation_sessions", [("tenant_id", 1), ("created_at", 1)], {}),
     # Soma de não lidas do sino de notificação, a cada poucos segundos.
     ("conversation_sessions", [("tenant_id", 1), ("unread_count", 1)], {}),
 
@@ -121,7 +195,8 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # tenham podem descartá-lo.
     ("messages_log", [("session_id", 1), ("timestamp", 1), ("_id", 1)], {}),
     ("messages_log", [("meta.media.id", 1)], {"sparse": True}),
-    # Contagem de mensagens do mês no dashboard.
+    # Contagem de mensagens do mês no dashboard e a série por dia do relatório
+    # de atendimento (agrupada pelo prefixo do ISO em `timestamp`).
     ("messages_log", [("tenant_id", 1), ("timestamp", 1)], {}),
 
     ("processed_messages", [("message_id", 1)], {"unique": True}),
@@ -187,6 +262,7 @@ async def on_startup():
     migrations.start()
     health_monitor.start()
     media_retention.start()
+    campaign_runner.start()
     logger.info("ZappZen backend started, super admin seeded.")
 
 
@@ -195,5 +271,6 @@ async def on_shutdown():
     migrations.stop()
     health_monitor.stop()
     media_retention.stop()
+    campaign_runner.stop()
     await wuzapi_client.close_client()
     close_db()

@@ -69,6 +69,113 @@ O desenvolvimento continua localmente via **Claude Code**.
 
 ---
 
+### Campanhas de disparo (envio ativo)
+- **É o primeiro envio ativo do sistema.** Todo o resto era reativo: mensagem só saía dentro de uma conversa nascida de um webhook de entrada. Campanha inverte isso, e é daí que vêm quase todas as decisões deste módulo
+- `campaigns` (a campanha) + `campaign_recipients` (**um documento por destinatário**). O estado por destinatário é o que permite retomar exatamente de onde parou depois de um restart — e é de onde saem as métricas, sem varrer `messages_log`
+- **A sessão é criada antes do envio** (`campaigns.ensure_session`), nunca depois. Um disparo que só chamasse `wuzapi.send_text` entregaria a mensagem e deixaria a resposta do contato cair numa conversa nova, sem vínculo: o atendente veria "quanto custa?" sem saber o que foi oferecido. Conversa aberta do mesmo contato na mesma conexão é reaproveitada — abrir uma segunda dividiria o histórico do número em dois lugares
+- A conversa de campanha nasce em `status_atendimento = 'bot'`, **não** em `aguardando`: a maioria dos disparados não responde, e jogar o público inteiro na fila encheria a Central de conversas em que ninguém falou nada. Ela entra na fila quando (e se) o contato responder
+- `aguardando_primeira_resposta` na sessão é o sinal que faz a resposta funcionar. A conversa foi aberta por nós, então não há fluxo em andamento nem menu esperando; sem essa marca, o caminho de entrada encontraria uma sessão `ativa` sem `awaiting`, **não faria nada**, e a resposta ficaria no histórico sem bot e sem atendente. `resposta_modo` decide o destino: `aguardando` (fila humana) ou `bot` (roda o fluxo do bot escolhido, do nó Início)
+- **Cadência com jitter** (`campaign_runner`): uma task por campanha, um envio por vez, com pausa de `60/por_minuto` multiplicada por um fator aleatório. Mandar tudo o mais rápido possível é o caminho conhecido para o número ser bloqueado — e o número é do cliente. Intervalo exato é assinatura de robô, daí o jitter
+- **O claim do destinatário é atômico** (`find_one_and_update` de `pendente` → `enviando`). Com dois processos no ar, a janela entre ler e marcar é suficiente para o mesmo contato receber a campanha duas vezes. Destinatário preso em `enviando` há mais de 15 min volta para a fila — é o resto de um processo que morreu no meio do envio
+- **Conexão desconectada pausa a campanha**, não queima o público: marcar 1.800 contatos como "falha" porque o QR caiu tornaria a campanha inaproveitável
+- O público é **congelado** em `campaign_recipients` no início do disparo, não resolvido a cada envio: uma campanha "todos os contatos" rodando por uma hora incluiria quem chegou no meio, e o total na tela nunca fecharia com o enviado. Materializar é idempotente, e é isso que torna "retomar" seguro
+- **Opt-out** (`contacts.opt_out` + `opt_out_em`): o contato sai respondendo `SAIR`/`PARAR`/`DESCADASTRAR`. O cotejo é com a mensagem **inteira** normalizada (sem acento/pontuação), nunca "contém" — "quero cancelar meu pedido" é atendimento, e tirar esse cliente da base por engano é pior que exigir a palavra exata. Vale para qualquer mensagem, não só resposta de campanha, e não interrompe o atendimento
+- `opt_out` é filtrado em `audience_query`, não na hora do envio: assim a prévia que a tela mostra é o mesmo número que vai receber
+- `agendada_para` é **normalizado na entrada** para o formato de `_now()`. O supervisor compara como string, e o navegador manda `…Z` enquanto o Python gera `…+00:00` — dois textos que não se ordenam entre si
+- `canal: "wuzapi"` já é gravado em cada campanha. É o campo que decide por onde ela sai quando a Cloud API oficial entrar, sem migrar as antigas
+- **Teto por plano**: `max_disparos_mes` conta mensagem **entregue** no mês (`campaign_recipients.status = enviado`), não campanha criada — é a mensagem que custa. Vazio ou 0 = ilimitado. Não entra na tabela `LIMITS` do `plan_limits.py` porque aquele helper conta documentos por tenant, e este limite é por janela de tempo
+- Teto de público por campanha: `MAX_PUBLICO` (20.000). Acima disso a resposta diz o número exato em vez de truncar calado
+- Contatos ganharam `tags` (público por etiqueta) e a tela ficou paginada com busca. A lista antiga devolvia 500 documentos crus sem filtro — inútil para escolher público
+- **A tela avisa do risco.** Disparo em volume por API não oficial derruba número de WhatsApp, e o prejuízo é do cliente. O aviso fica fixo no topo da tela de Campanhas, não escondido em documentação
+
+
+### Ficha de contato
+- O registro deixou de ter 4 campos úteis: além de nome/número/etiquetas/opt-out, agora tem `email`, `empresa`, `cargo`, `origem`, `responsavel_id` e `campos` (personalizados). `origem` é preenchida na criação (`mensagem recebida`, `cadastro manual`) — depois não há como saber por onde o contato entrou
+- **Campos personalizados** em duas partes: `contact_field_defs` (definição por empresa: nome, tipo `texto|numero|data|selecao`, opções, ordem) e `contacts.campos` (`{id_da_definição: valor}`). Valor de definição apagada é **descartado** em silêncio, não recusado — apagar um campo não pode impedir que a ficha volte a ser salva; já valor de tipo errado é recusado, senão "abc" num campo numérico quebraria depois qualquer filtro que dependa dele. Apagar a definição limpa o valor de todas as fichas (`$unset` em `campos.<id>`)
+- `_para_numero` aceita `1250.5`, `1250,50` **e** `1.250,50`: a tela é pt-BR (ponto de milhar, vírgula decimal) mas o `<input type="number">` entrega ponto decimal. Um `replace(",", ".")` cru virava `1.250.50` e recusava valor válido
+- **Notas em coleção própria** (`contact_notes`), não em array dentro do contato: a lista cresce sem teto e o documento do contato é lido a cada mensagem recebida. O sort desempata por `_id` — mesma razão do histórico de mensagens: duas notas seguidas nascem com `created_at` idêntico (resolução do relógio), e só com o timestamp a nota nova aparecia embaixo da anterior
+- `GET /contacts/{id}` devolve a ficha inteira numa chamada (dados, campos casados com as definições, notas, conversas, campanhas recebidas, resumo). Seis requests para montar uma tela custariam seis idas e voltas pelo túnel SSH onde cabem seis consultas na mesma
+- `POST /contacts` normaliza o número para dígitos e **recusa duplicado com 409**: o número é a identidade do contato em todo o sistema, e um duplicado partiria a ficha em duas
+- **`outbound.py`** nasceu aqui: o bootstrap de sessão saiu de `campaigns.py` quando a ficha ganhou envio, porque o conceito é "a plataforma escreveu primeiro", não "campanha". `campaigns.ensure_session` passou a delegar. A diferença entre os dois está em quem assume: campanha nasce sem dono (em `bot`, entra na fila só se o contato responder); mensagem da ficha nasce **com** dono — `em_atendimento` no nome de quem clicou, `status = aguardando_humano` para o motor de fluxos não tentar responder por cima, e sem `aguardando_primeira_resposta` (já tem quem responda)
+- `POST /contacts/{id}/send` **reusa `flow_runtime.send_human_message`**, o mesmo envio do painel de atendimento — não uma segunda implementação. É o que garante o prefixo com o nome de quem enviou, o `log_message` (prévia junto) e que falha de entrega não apareça como enviada
+- Sem conexão escolhida, o envio sai pela **conexão da última conversa do contato**: ele já conhece aquele número, e trocar o remetente no meio de um assunto parece outra empresa falando
+- `opt_out` **não** bloqueia mensagem direta: é recusa de campanha, e isto é uma pessoa escrevendo para outra. A ficha mostra o aviso em vez de impedir
+
+
+### Funil de negócios
+- O Kanban da Central mostra **estado de conversa**; isso nunca foi funil — não tem valor, previsão, dono nem desfecho. Negócio é outra entidade (`deals`), e é dela que saem as contas que uma agência cobra: conversão, ticket médio, ciclo de venda e retorno por campanha
+- **Etapas embutidas no funil** (`pipelines.etapas`), não em coleção separada: são poucas, ordenadas, e nunca lidas sem o funil. Cada etapa tem `tipo` (`aberta|ganho|perdido`) — é o `tipo` que diz ao sistema quando o negócio fechou, não o nome dela
+- **`status` é gravado no negócio mesmo sendo derivado da etapa.** Duplicação proposital: "abertos" e "ganhos no mês" são as consultas quentes, e não há como indexar valor que mora dentro de um array de outra coleção. Quem muda de etapa passa por `deals.aplicar_etapa`, que é o único lugar que mexe nos três campos que precisam concordar (`etapa_id`, `status`, `fechado_em`) — mover para "Ganho" sem gravar a data tiraria o negócio de todo relatório de ciclo, e voltar de "Perdido" sem limpá-la o manteria contado como fechado para sempre
+- **`ciclo_dias` é gravado no fechamento**, não calculado no relatório: o `$avg` do Mongo não subtrai duas datas guardadas como string ISO, e ISO é o formato do resto do sistema
+- **Toda mudança gera evento** (`deal_events`): sem histórico não existe ciclo de venda nem tempo por etapa, e "por que perdemos" viraria opinião. `registrar_evento` nunca levanta — perder um log é ruim, travar a venda porque o log falhou é pior. Salvar o mesmo valor não gera evento, para o histórico não encher de linhas iguais
+- **Remover etapa que ainda tem negócio é recusado com 409**, dizendo quantos são; ou se passa `mover_para`. Apagar em silêncio deixaria os negócios apontando para uma etapa inexistente e eles desapareceriam do quadro sem nunca terem sido ganhos nem perdidos. Renomear preserva o `id` — e por isso preserva o vínculo
+- **Atribuição de origem** (`deals.atribuir_origem`): sem campanha nem sessão informadas, procura a conversa mais recente do contato que nasceu de um disparo. É o vínculo que permite dizer "esta campanha gerou R$ 40 mil fechados" em vez de "teve boa taxa de resposta", que não paga ninguém
+- **Conversão é sobre negócios decididos** (ganhos ÷ (ganhos + perdidos)), não sobre o total: contar os abertos como perda faria a taxa despencar só porque o funil está cheio. A janela dos relatórios filtra por `fechado_em`, não por criação — "ganhamos R$ X em agosto" é sobre o que fechou em agosto
+- **Teto de `POR_COLUNA` (100) cartões por coluna**, com o total real ao lado (`n`) e `truncada`/`valor_parcial` para a tela dizer "mostrando 100 de 400". Com filtro ativo o `n` é recontado em vez de usar `len(cartoes)`, senão o corte ficaria invisível
+- Os totais das colunas saem de **uma agregação sobre a coluna inteira** (`deals.por_etapa`), não da soma dos cartões devolvidos: somar o que veio mostraria R$ 30 mil numa coluna de R$ 200 mil
+- **Arrastar usa o drag-and-drop nativo do HTML5**, sem biblioteca: o projeto não tem nenhuma de dnd e o caso é mover cartão entre colunas. Soltar numa coluna de `perdido` abre o diálogo de motivo antes de gravar — deixar para depois é garantir relatório de motivos vazio
+- O item "CRM" do menu passou a se chamar **"Conversas"**, e "Funil" é a tela nova. O rótulo antigo prometia o que a tela não entregava
+
+
+### Atividades e follow-up
+- Ficha e funil guardam o que **já** aconteceu; atividade guarda o que ainda precisa acontecer. Sem isso o próximo passo mora na cabeça do vendedor, e o CRM vira cadastro morto
+- **"Atrasada" não é campo, é comparação.** O estado gravado é só `concluida_em` (nulo = pendente); atrasada é `pendente e vence_em < agora`, calculado na leitura (`atividades.com_atraso`). Gravar um status exigiria varredura periódica para virar a chave de cada atividade na hora certa — trabalho de fundo para produzir o que uma comparação de data já responde
+- **Os cortes de "hoje" e "semana" vêm do navegador**, não do servidor: "hoje" em UTC-3 começa três horas antes de "hoje" em UTC, e o servidor não sabe o fuso de quem abriu a tela. O backend só filtra por `de`/`ate`. Calcular no servidor faria a agenda de fim de tarde mostrar as tarefas de amanhã
+- **O follow-up é encadeado na conclusão**: `POST /activities/{id}/complete` aceita `proxima` no mesmo pedido, e a nova herda contato, negócio e responsável, guardando `origem_id`. É ali que a pessoa está pensando no assunto — "depois eu agendo" é como se perde a venda
+- A próxima é **validada e montada antes** de fechar a atual. Na ordem inversa, uma data inválida no follow-up deixava a atividade concluída e devolvia erro: quem tentasse de novo levava 409 e ficava sem o próximo passo, que era o motivo do clique
+- Atividade **sem responsável não aparece na agenda de ninguém**, então `responsavel_id` cai em quem criou (ou em quem editou, se o campo for limpo). É assim que uma tarefa deixa de desaparecer
+- **`sem_proximo_passo` no cartão do quadro** (`atividades.negocios_sem_proximo_passo`): cartão sem atividade pendente é venda parada sem ninguém ter decidido pará-la. Sai de uma agregação só sobre os ids em tela — uma consulta por cartão custaria uma ida ao banco por negócio. Negócio já fechado não é cobrado
+- O resumo da agenda (atrasadas/hoje/semana/pendentes) sai de **uma agregação com `$cond`**, não de quatro contagens: o que domina é a ida e volta pelo túnel SSH
+- Excluir atividade **não apaga a corrente** de follow-up: as seguintes são compromissos já assumidos, só perdem o `origem_id`
+- Selo de atrasadas no menu com polling de **60s**, não os 3s da fila: atividade vence em hora marcada, e quem está atrasado às 14:00 continua atrasado às 14:01
+- **Lembrete fora do sistema não existe** (push, e-mail, WhatsApp para o responsável). O aviso é in-app: selo no menu e aba "Atrasadas". Usuário não tem telefone no schema, só e-mail
+
+### Datas vindas do cliente (`datas.py`)
+- `para_utc` é para **instante** (`agendada_para`, `vence_em`): o navegador manda `…Z` e o Python gera `…+00:00`, dois textos para o mesmo momento que não se ordenam entre si — e esses campos são comparados como string no banco
+- `valida_data` é para **dia do calendário** (`previsao_fechamento`, campo personalizado de data): normalizar seria um erro, porque `2026-09-30` viraria `2026-09-30T00:00:00+00:00` e, exibido em UTC-3, apareceria como dia 29. Prazo não pode andar para trás por causa de fuso
+- A distinção é o motivo de existir o módulo: a mesma checagem estava em três lugares e as três versões divergiam exatamente nisso
+
+
+### Importação e exportação de contatos (CSV)
+- Era o que travava a base na prática: contato só nascia de mensagem recebida ou de cadastro um por um, então uma planilha de milhares de leads não tinha por onde entrar — e sem base, campanha e funil não têm o que processar
+- **O número concentra o risco.** Uma planilha real traz `(11) 99999-8888`, `11999998888`, `+55 11 99999-8888` e `5511999998888` na mesma coluna. `normaliza_numero` aceita as quatro: 10/11 dígitos ganham o DDI, 12/13 passam como estão. **Nunca inventa dígito** — acrescentar o nono num número de 8 manda a mensagem para outra pessoa, e um fixo tem a mesma forma de um celular antigo. Linha com número irreconhecível é recusada com o motivo, não "corrigida"
+- **Importação em dois passos.** `dry_run=True` (o padrão) não grava nada: devolve o mapeamento sugerido, uma amostra do que entraria e os números (novos, já existentes, com erro). Importar às cegas e descobrir depois que a coluna do telefone estava errada é o que esse passo evita
+- O arquivo sobe duas vezes (prévia e confirmação) **de propósito**: guardar o conteúdo entre as chamadas criaria estado temporário para expirar e limpar, e um CSV é texto — reenviar é barato
+- **O mapeamento é sugerido, nunca imposto**: sinônimos por coluna (`celular`/`telefone`/`whatsapp` → número) cotejados por texto normalizado, e campo personalizado casado pelo nome da definição. Coluna não reconhecida fica sem alvo em vez de ser adivinhada. Um alvo por coluna: com "Telefone" e "Celular" na mesma planilha, a segunda sobrescreveria a primeira
+- **Nada é ignorado em silêncio**: cada linha recusada volta com o número da linha **do arquivo** (cabeçalho conta como 1, que é o que o editor de planilha mostra) e o motivo; acima de `MAX_ERROS_DETALHADOS` o total omitido vai junto
+- Erro numa linha derruba **a linha**, não a importação: `_valida_campos` é chamado por linha dentro de `try`, e um valor errado num campo personalizado não pode impedir as outras 5.000 de entrar
+- **Duplicado por número dentro da empresa**, com `ignorar` (padrão) ou `atualizar`. Em `atualizar`, só sobrescreve o que vem preenchido — e **etiquetas são somadas, não substituídas**: a etiqueta posta na tela não pode ser apagada por uma planilha que simplesmente não a conhece
+- Quem já existe é descoberto em **lotes de 1.000** e a escrita vai por `bulk_write` de 500 com `ordered=False`. Um `find_one` por linha seriam 20 mil idas e voltas pelo túnel SSH
+- Teto de 10MB aplicado **durante** a leitura do upload, e 20.000 linhas por arquivo. Com o teto só no fim, um arquivo de 500MB já teria passado inteiro pela memória
+- **Exportação em fluxo** (`StreamingResponse`), linha a linha do cursor — montar o arquivo inteiro na memória é justamente o que não se faz neste projeto. `;` como separador padrão e **BOM no início**, porque o destino real é o Excel em português: com `,` ele joga tudo numa coluna, e sem BOM os acentos viram símbolos. Campos personalizados entram como colunas, e os filtros da tela valem na exportação
+- A exportação também é o mecanismo de LGPD para "o titular pediu os dados dele"
+
+
+### Permissões: o que o atendente alcança
+- `require_tenant_member` (em `auth.py`) é a dependência de "qualquer pessoa de dentro da empresa". Antes, tudo em `/contacts` exigia `require_tenant_admin`, o que deixava `responsavel_id` decorativo: quem era responsável por um contato não conseguia abrir a ficha dele
+- **A equipe alcança a base toda**: listar/buscar contatos, abrir e editar ficha, anotar, cadastrar, enviar mensagem da ficha, ver campos personalizados, funil (quadro, negócios, relatório) e agenda de atividades
+- **Continua só no admin** o que é configuração ou movimentação em massa: criar/editar/apagar campo personalizado, mexer nas etapas do funil, e **importar/exportar CSV**. Exportar a base inteira é o caminho mais curto para ela sair da empresa, e não é tarefa de quem atende
+- Anotação: o atendente apaga só a própria (`autor_id` entra no filtro do delete); o admin apaga qualquer uma
+- `accessible_connection_ids` saiu de `routes/atendimento.py` para `auth.py`, porque a regra vale em **toda** tela que envia mensagem, não só na Central. `_resolve_conexao` da ficha agora a consulta: o atendente só fala pelas conexões liberadas, e se a conversa aberta do contato está numa conexão fora do alcance dele o envio é **recusado com 403** em vez de abrir uma segunda conversa por outro número — que dividiria o histórico e furaria o escopo
+- Cuidado ao testar barreira de permissão: chamar a função da rota direto **não** executa o `Depends`. O teste confere a guarda onde ela é declarada (inspecionando a assinatura do endpoint) além de exercitar as funções `require_*`
+
+### Relatórios
+- Três: **atendimento** e **campanhas** (`relatorios.py`) e o do **funil**, que já existia (`deals.metricas`). A tela junta os três em abas, reaproveitando `FunilMetricas`
+- **Os tempos são calculados na leitura, não gravados** — e isso é o oposto do que o funil faz. `espera` é `assumido_em - aguardando_desde`, `atendimento` é `finalizado_em - assumido_em`, e o `$avg` do Mongo não subtrai duas datas em string ISO. No funil a solução foi gravar `ciclo_dias` no fechamento, porque o campo nasceu com a coleção; aqui existem conversas antigas, e um campo novo exigiria migrar a base toda para produzir um número que só é lido quando alguém abre um relatório. A conta sai em Python sobre as conversas da janela, com projeção de sete campos
+- **Teto de `MAX_SESSOES` (50.000) por janela**, com **413** e o número exato quando estoura. Meia conta sem aviso é pior que recusar
+- **`$substr` no ISO para a série por dia**: `"2026-08-24T18:30:00+00:00"` cortado em 10 dá `"2026-08-24"`, e agrupar por esse prefixo dá o dia sem converter data nenhuma — é o único lugar em que guardar data como texto vira vantagem
+- **Média sempre acompanhada de p90**: uma fila com média de 4 min e p90 de 40 é uma operação com problema que a média esconde. Duração negativa (relógio, campo fora de ordem) entra como ausente em vez de puxar a média
+- Com filtro de conexão/departamento, as mensagens são contadas pelos ids das conversas do recorte (em lotes de 1.000); sem filtro, direto por `tenant_id`, que o índice cobre. Misturar os dois mostraria o volume da empresa ao lado dos números de uma conexão só
+- O relatório de campanhas junta `campaign_recipients` com `deals` ganhos: campanha que fechou negócio na janela aparece mesmo tendo disparado antes, senão a receita ficaria sem dono
+
+### Gráficos
+- **Paleta validada, não escolhida a olho**: `#2563EB` (o azul que já existe no produto) + `#EA580C`. O `#F97316` do sistema **reprova** no contraste contra fundo claro (2,73:1); a variação escura passa. Separação para daltonismo ~31 (piso é 8)
+- **Nunca eixo duplo.** Conversas e mensagens têm escalas diferentes, então são dois gráficos lado a lado. Eixo duplo inventa correlação que não está no dado
+- Barra ≤ 24px com topo arredondado (raio 4) e base quadrada; vão de 2px entre segmentos empilhados, **descontado da própria barra** para o topo continuar marcando o total; grade fina e sólida (tracejado é ruído); rótulo de dia de tantos em tantos
+- **Legenda sempre com duas séries ou mais**, e toda série tem alternativa em tabela (botão no canto) — identidade nunca depende só de cor
+- A geometria vive em `components/reports/geometria.js`, **JS puro sem JSX**, justamente para ser conferida sem navegador: é a parte que erra em silêncio (barra fora da área, pilha passando do total, raio maior que a barra)
+
+
 ### Desempenho (varredura de 2026-07-28)
 - **Índices**: todos declarados numa tabela única (`INDEXES`, em `server.py`), não espalhados pelo startup — é lá que se responde "esta query está coberta?". Ao criar uma query quente nova, conferir a tabela. Faltavam os de `users.id` (usado em **toda** request autenticada, via `get_current_user`) e o de `conversation_sessions.status_atendimento` — o que existia cobria `status`, campo diferente, então a tela principal do produto nunca usava índice
 - **`processed_messages` tem TTL de 7 dias**, indexado em `at`. Por isso `at` é gravado como `datetime` nativo e não como string ISO igual ao resto do sistema: o TTL do Mongo só age sobre campo do tipo `Date`. A coleção é só deduplicação da janela de retry do gateway — nada ali precisa sobreviver dias
@@ -84,9 +191,12 @@ O desenvolvimento continua localmente via **Claude Code**.
 
 ## Pendências conhecidas (Next Action Items da última entrega)
 
-1. **[PRIORIDADE ALTA] Multi-conexão no frontend**: o schema (`whatsapp_connections`) já suporta múltiplas conexões por tenant, mas a UI ainda assume uma única conexão. Precisa: lista de conexões na tela de WhatsApp, seletor de conexão nos filtros da Central de Atendimento, departamento padrão configurável por conexão (já existe no backend, falta expor bem no front para múltiplas).
-2. **Reabertura configurável de conversas finalizadas**: hoje sempre reabre em `bot`. Adicionar `reopen_mode` (`bot` ou `aguardando`), configurável por bot ou por departamento.
-3. **WebSocket no lugar do polling de 3s**: continua valendo, mas ficou bem menos urgente — o ciclo de polling era o que custava caro, e o `?since=` mais o `last_message` desnormalizado tiraram o grosso do custo de cada ciclo.
+1. **Lembrete fora do sistema**: as atividades existem e avisam dentro do app (selo no menu, aba "Atrasadas"), mas não há push, e-mail nem WhatsApp para o responsável na hora do vencimento. Precisa de um worker no padrão `health_monitor` e de um canal — o usuário só tem e-mail no schema, não telefone.
+2. **[PRIORIDADE ALTA] Multi-conexão no frontend**: o schema (`whatsapp_connections`) já suporta múltiplas conexões por tenant, mas a UI ainda assume uma única conexão. Precisa: lista de conexões na tela de WhatsApp, seletor de conexão nos filtros da Central de Atendimento, departamento padrão configurável por conexão (já existe no backend, falta expor bem no front para múltiplas).
+3. **Reabertura configurável de conversas finalizadas**: hoje sempre reabre em `bot`. Adicionar `reopen_mode` (`bot` ou `aguardando`), configurável por bot ou por departamento.
+4. **Campanha na Cloud API oficial**: o que existe hoje sai pela WuzAPI (protocolo não oficial), o que serve para volume baixo e público que já falou com a empresa. Disparo em escala exige Meta Cloud API com template HSM aprovado e opt-in registrado — o campo `canal` da campanha já existe para isso.
+5. **Atribuição de campanha na Central**: a sessão carrega `campanha_id`, mas o Kanban/Inbox ainda não mostram de qual campanha a conversa veio. Falta só o selo na tela.
+6. **WebSocket no lugar do polling de 3s**: continua valendo, mas ficou bem menos urgente — o ciclo de polling era o que custava caro, e o `?since=` mais o `last_message` desnormalizado tiraram o grosso do custo de cada ciclo.
 
 ---
 
@@ -97,6 +207,15 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **Nunca** inserir em `messages_log` direto: usar `flow_runtime.log_message()`, que grava a mensagem e a prévia da sessão na mesma operação. Um insert avulso deixa a lista de conversas mostrando mensagem velha.
 - **Nunca** carregar um arquivo de mídia inteiro na memória (`read_bytes` + `to_data_uri`): usar `store_stream` no recebimento e `DataUriStream` no envio. O teto por tipo chega a 20MB, e isso é por envio simultâneo.
 - `mime` vem do cliente e termina embutido num data URI dentro de um JSON: passar sempre por `media_store.sanitize_mime()`.
+- **Nunca** disparar campanha sem passar por `campaign_recipients`: é o documento por destinatário que dá retomada, métrica e a garantia de não enviar duas vezes. Envio direto num laço perde tudo isso e não sobrevive a um restart.
+- **Nunca** usar `require_tenant_admin` para leitura/escrita da base de contatos, funil ou agenda: é `require_tenant_member`. Admin fica para configuração e exportação em massa.
+- **Nunca** montar gráfico com dois eixos y, nem escolher cor de série a olho: rodar o validador de paleta.
+- **Nunca** normalizar número de telefone à mão: usar `contatos_csv.normaliza_numero()`, e nunca completar dígito que não veio. Um número "corrigido" pertence a outra pessoa, e a mensagem sai.
+- **Nunca** gravar um status "atrasada" em atividade: atraso é `vence_em < agora` calculado na leitura. Um campo persistido exigiria varredura periódica e ficaria errado entre uma varredura e outra.
+- **Nunca** calcular limite de "hoje"/"semana" no servidor: o fuso é do navegador. O backend recebe `de`/`ate` e filtra.
+- **Nunca** mudar a etapa de um negócio escrevendo `etapa_id` na mão: usar `deals.aplicar_etapa()`, que ajusta `status`, `fechado_em` e `motivo_perda` na mesma operação. Um `$set` avulso deixa negócio ganho fora dos relatórios ou negócio reaberto contado como fechado.
+- **Nunca** criar `conversation_sessions` fora de `flow_runtime.handle_incoming_message` (entrada) ou `outbound.ensure_session` (envio ativo). Sessão montada à mão fica sem `aguardando_primeira_resposta` e a resposta do contato não aciona nem bot nem fila.
+- **Nunca** montar público de campanha sem `campaigns.audience_query()`: é ele que exclui quem pediu para sair. Um filtro escrito à mão manda mensagem para quem se descadastrou.
 - Rotas administrativas (admin/super admin) devem retornar 403 de verdade para usuários sem permissão, não só esconder na UI — validar sempre no backend.
 - Toda ação de impersonation do Super Admin deve ficar registrada em `impersonation_log`.
 - Design já definido (Swiss Brutalist / Grid Borders) — manter consistência visual ao adicionar novas telas.

@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
+import { useAtividadesAtrasadas } from "@/hooks/useAtividadesAtrasadas";
 import {
   ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
-  ArrowUUpLeft, Sparkle, CreditCard,
+  ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
 } from "@phosphor-icons/react";
 
 const adminNav = [
@@ -16,7 +17,7 @@ const adminNav = [
 function tenantNav(role) {
   const base = [
     { to: "/app/inbox", icon: Headset, label: "Atendimento" },
-    { to: "/app/atendimento", icon: Kanban, label: "CRM" },
+    { to: "/app/atendimento", icon: Kanban, label: "Conversas" },
   ];
   if (role === "tenant_admin") {
     base.unshift({ to: "/app", icon: House, label: "Painel", end: true });
@@ -27,6 +28,10 @@ function tenantNav(role) {
       { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
       { to: "/app/users", icon: Users, label: "Usuários" },
       { to: "/app/contacts", icon: UsersThree, label: "Contatos" },
+      { to: "/app/campanhas", icon: Megaphone, label: "Campanhas" },
+      { to: "/app/funil", icon: Funnel, label: "Funil" },
+      { to: "/app/atividades", icon: CheckSquareOffset, label: "Atividades" },
+      { to: "/app/relatorios", icon: ChartBar, label: "Relatórios" },
       { to: "/app/settings", icon: Gear, label: "Configurações" },
     );
   }
@@ -38,6 +43,7 @@ export default function AppShell({ variant = "tenant" }) {
   const navigate = useNavigate();
   const nav = variant === "admin" ? adminNav : tenantNav(user?.role);
   const { aguardando } = useUnreadNotifier(variant === "tenant");
+  const atrasadas = useAtividadesAtrasadas(variant === "tenant" && user?.role === "tenant_admin");
 
   const handleLogout = async () => {
     await logout();
@@ -89,6 +95,15 @@ export default function AppShell({ variant = "tenant" }) {
               >
                 <item.icon size={18} weight="bold" />
                 <span>{item.label}</span>
+                {item.to === "/app/atividades" && atrasadas > 0 && (
+                  <span
+                    className="zz-queue-badge ml-auto"
+                    data-testid="nav-atividades-badge"
+                    title={`${atrasadas} atividade(s) atrasada(s)`}
+                  >
+                    {atrasadas > 99 ? "99+" : atrasadas}
+                  </span>
+                )}
                 {item.to === "/app/inbox" && aguardando > 0 && (
                   <span
                     className="zz-queue-badge zz-alert-pulse ml-auto"

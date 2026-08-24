@@ -133,6 +133,17 @@ async def delete_tenant(tenant_id: str, _=Depends(require_super_admin)):
     await db.contacts.delete_many({"tenant_id": tenant_id})
     await db.conversation_sessions.delete_many({"tenant_id": tenant_id})
     await db.whatsapp_connections.delete_many({"tenant_id": tenant_id})
+    # Campanhas e a lista de destinatarios de cada uma. Sem isto o runner
+    # continuaria encontrando campanha em "enviando" de uma empresa que nao
+    # existe mais — e tentaria disparar por uma conexao ja apagada.
+    await db.campaigns.delete_many({"tenant_id": tenant_id})
+    await db.campaign_recipients.delete_many({"tenant_id": tenant_id})
+    await db.contact_notes.delete_many({"tenant_id": tenant_id})
+    await db.contact_field_defs.delete_many({"tenant_id": tenant_id})
+    await db.pipelines.delete_many({"tenant_id": tenant_id})
+    await db.deals.delete_many({"tenant_id": tenant_id})
+    await db.deal_events.delete_many({"tenant_id": tenant_id})
+    await db.activities.delete_many({"tenant_id": tenant_id})
     return {"ok": True}
 
 

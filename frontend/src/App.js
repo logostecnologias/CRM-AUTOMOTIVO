@@ -9,6 +9,10 @@ import TenantDashboard from "@/pages/tenant/TenantDashboard";
 import BotsPage from "@/pages/tenant/BotsPage";
 import AIAgentsPage from "@/pages/tenant/AIAgentsPage";
 import ContactsPage from "@/pages/tenant/ContactsPage";
+import CampanhasPage from "@/pages/tenant/CampanhasPage";
+import FunilPage from "@/pages/tenant/FunilPage";
+import AtividadesPage from "@/pages/tenant/AtividadesPage";
+import RelatoriosPage from "@/pages/tenant/RelatoriosPage";
 import InboxPage from "@/pages/tenant/InboxPage";
 import WhatsAppPage from "@/pages/tenant/WhatsAppPage";
 import SettingsPage from "@/pages/tenant/SettingsPage";
@@ -62,6 +66,10 @@ function App() {
             <Route path="departments" element={<ProtectedRoute roles={ADMIN_ONLY}><DepartamentosPage /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute roles={ADMIN_ONLY}><UsersPage /></ProtectedRoute>} />
             <Route path="contacts" element={<ProtectedRoute roles={ADMIN_ONLY}><ContactsPage /></ProtectedRoute>} />
+            <Route path="campanhas" element={<ProtectedRoute roles={ADMIN_ONLY}><CampanhasPage /></ProtectedRoute>} />
+            <Route path="funil" element={<ProtectedRoute roles={ADMIN_ONLY}><FunilPage /></ProtectedRoute>} />
+            <Route path="atividades" element={<ProtectedRoute roles={ADMIN_ONLY}><AtividadesPage /></ProtectedRoute>} />
+            <Route path="relatorios" element={<ProtectedRoute roles={ADMIN_ONLY}><RelatoriosPage /></ProtectedRoute>} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
