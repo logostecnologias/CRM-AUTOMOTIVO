@@ -176,6 +176,24 @@ O desenvolvimento continua localmente via **Claude Code**.
 - A geometria vive em `components/reports/geometria.js`, **JS puro sem JSX**, justamente para ser conferida sem navegador: é a parte que erra em silêncio (barra fora da área, pilha passando do total, raio maior que a barra)
 
 
+### Exclusão, anonimização e mesclagem de contato
+- **Anonimizar é o padrão; apagar é a exceção.** A LGPD pede que o dado pessoal saia, não que o registro da transação desapareça. Um negócio de R$ 40 mil fechado em julho tem de continuar somando em julho — apagá-lo mudaria retroativamente um relatório que a empresa já entregou. Então o dado pessoal sai e o esqueleto fica: o negócio aponta para um contato que agora se chama "Contato removido"
+- O **conteúdo das mensagens também é dado pessoal** (o contato digitou endereço, CPF, mandou foto de documento). Anonimizar redige o texto, apaga o arquivo de mídia do disco e marca `purged_at` — mesmo padrão do `media_retention`, para a bolha antiga mostrar "mídia expirada" em vez de imagem quebrada. A prévia na sessão (`last_message`) é redigida junto, senão o texto continuaria visível na lista de conversas
+- `numero_whatsapp` vira `anon-<id>`, não vazio: é o que impede uma importação futura de recriar a ficha achando que o número está livre
+- **`modo=apagar`** existe para contato de teste ou importação errada: leva conversas, mensagens, negócios e histórico, e a resposta diz exatamente o que foi. Só admin nas duas — é a operação mais destrutiva da base
+- **Mesclar move, não copia.** Conversas, negócios, atividades, notas e disparos passam para a ficha que fica. Campo vazio herda o do secundário; campo preenchido **não** é sobrescrito, porque quem escolheu o principal escolheu os dados dele. Etiquetas são somadas e `opt_out` é a recusa mais restritiva das duas
+- Se as duas fichas receberam a **mesma campanha**, o destinatário do secundário é descartado em vez de movido — mover deixaria o contato contado duas vezes na métrica daquela campanha
+- **Duplicado não é detectado por número**: ele já é único por empresa (o cadastro recusa com 409). Duplicata real é a mesma pessoa por dois números, e o que resta para reconhecê-la é e-mail ou nome. Contato anonimizado fica fora da varredura — todos passam a ter o mesmo nome-marcador, e agrupar por ele juntaria pessoas diferentes
+
+### Testes (`backend/tests/`)
+- Rodam contra um **Mongo falso** (`tests/fakedb.py`), não contra o banco real: o Mongo do projeto está atrás de túnel SSH, e teste que só passa com o túnel de pé não roda em máquina nova. O falso cobre lógica — filtros, agregações, transições de estado, permissão. **Não** cobre índice aceito, tipo e o resultado exato de uma agregação real; isso continua exigindo teste de fumaça com o banco no ar
+- **`_conectar_fake()` é chamado no início de cada teste, não só no import.** O pytest importa todos os módulos de teste no mesmo processo, e `get_db` (e o dublê de `wuzapi.send_text`) são atributos de módulo compartilhados: sem reaplicar, o último arquivo importado ficava com o banco de todos, e as mensagens "enviadas" caíam no gravador da outra suíte. Foi exatamente o que aconteceu na primeira execução
+- Os helpers se chamam `etapa_*`, não `teste_*`: o prefixo `test` faz o pytest coletar a função como teste, e helper async coletado falha por não ter plugin de asyncio. Cada módulo expõe um `test_suite()` só, que roda as etapas em ordem
+- As etapas de um módulo **compartilham** o estado do Mongo falso e continuam de onde a anterior parou. O `--dist loadscope` do `pytest.ini` fixa o módulo num worker só, e é isso que preserva a ordem sob paralelismo
+- **Barreira de permissão não se testa chamando a função da rota**: o `Depends` não executa. O teste confere a guarda onde ela é declarada (inspecionando a assinatura do endpoint) além de exercitar as funções `require_*`
+- A geometria do gráfico tem teste próprio no frontend (`geometria.test.js`, roda com `craco test`) — é a parte que erra em silêncio no navegador
+
+
 ### Desempenho (varredura de 2026-07-28)
 - **Índices**: todos declarados numa tabela única (`INDEXES`, em `server.py`), não espalhados pelo startup — é lá que se responde "esta query está coberta?". Ao criar uma query quente nova, conferir a tabela. Faltavam os de `users.id` (usado em **toda** request autenticada, via `get_current_user`) e o de `conversation_sessions.status_atendimento` — o que existia cobria `status`, campo diferente, então a tela principal do produto nunca usava índice
 - **`processed_messages` tem TTL de 7 dias**, indexado em `at`. Por isso `at` é gravado como `datetime` nativo e não como string ISO igual ao resto do sistema: o TTL do Mongo só age sobre campo do tipo `Date`. A coleção é só deduplicação da janela de retry do gateway — nada ali precisa sobreviver dias
@@ -191,12 +209,15 @@ O desenvolvimento continua localmente via **Claude Code**.
 
 ## Pendências conhecidas (Next Action Items da última entrega)
 
-1. **Lembrete fora do sistema**: as atividades existem e avisam dentro do app (selo no menu, aba "Atrasadas"), mas não há push, e-mail nem WhatsApp para o responsável na hora do vencimento. Precisa de um worker no padrão `health_monitor` e de um canal — o usuário só tem e-mail no schema, não telefone.
+1. **Lembrete fora do sistema**: as atividades avisam dentro do app (selo no menu, aba "Atrasadas"), mas não há push, e-mail nem WhatsApp para o responsável no vencimento. Precisa de um worker no padrão `health_monitor` e de um canal — o usuário só tem e-mail no schema, não telefone.
 2. **[PRIORIDADE ALTA] Multi-conexão no frontend**: o schema (`whatsapp_connections`) já suporta múltiplas conexões por tenant, mas a UI ainda assume uma única conexão. Precisa: lista de conexões na tela de WhatsApp, seletor de conexão nos filtros da Central de Atendimento, departamento padrão configurável por conexão (já existe no backend, falta expor bem no front para múltiplas).
 3. **Reabertura configurável de conversas finalizadas**: hoje sempre reabre em `bot`. Adicionar `reopen_mode` (`bot` ou `aguardando`), configurável por bot ou por departamento.
 4. **Campanha na Cloud API oficial**: o que existe hoje sai pela WuzAPI (protocolo não oficial), o que serve para volume baixo e público que já falou com a empresa. Disparo em escala exige Meta Cloud API com template HSM aprovado e opt-in registrado — o campo `canal` da campanha já existe para isso.
 5. **Atribuição de campanha na Central**: a sessão carrega `campanha_id`, mas o Kanban/Inbox ainda não mostram de qual campanha a conversa veio. Falta só o selo na tela.
-6. **WebSocket no lugar do polling de 3s**: continua valendo, mas ficou bem menos urgente — o ciclo de polling era o que custava caro, e o `?since=` mais o `last_message` desnormalizado tiraram o grosso do custo de cada ciclo.
+6. **Cobrança**: os planos têm `preco_mensal` e limites que já são aplicados, mas não existe gateway de pagamento, assinatura, fatura nem bloqueio por inadimplência. A cobrança hoje acontece fora do sistema. Depende de escolher o provedor antes de codar.
+7. **Teste de fumaça contra o Mongo real**: a suíte roda contra um Mongo falso (`backend/tests/fakedb.py`). Índices aceitos, tipos e o resultado exato das agregações nunca foram exercitados no banco de verdade — o túnel SSH esteve fora durante toda esta série de entregas.
+8. **Agentes de IA**: a tela segue placeholder, sem integração com LLM. O contexto necessário já existe (histórico indexado por sessão, ferramentas de CRM que viram tool calling). Autenticação por chave de API — assinatura de terceiro não é caminho compatível.
+9. **WebSocket no lugar do polling de 3s**: continua valendo, mas ficou bem menos urgente — o ciclo de polling era o que custava caro, e o `?since=` mais o `last_message` desnormalizado tiraram o grosso do custo de cada ciclo.
 
 ---
 
@@ -208,6 +229,7 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **Nunca** carregar um arquivo de mídia inteiro na memória (`read_bytes` + `to_data_uri`): usar `store_stream` no recebimento e `DataUriStream` no envio. O teto por tipo chega a 20MB, e isso é por envio simultâneo.
 - `mime` vem do cliente e termina embutido num data URI dentro de um JSON: passar sempre por `media_store.sanitize_mime()`.
 - **Nunca** disparar campanha sem passar por `campaign_recipients`: é o documento por destinatário que dá retomada, métrica e a garantia de não enviar duas vezes. Envio direto num laço perde tudo isso e não sobrevive a um restart.
+- **Nunca** apagar contato com `delete_one` avulso: usar `contatos.anonimizar()` (padrão) ou `contatos.apagar()`. Um delete cru deixa conversas, negócios e mídia órfãos, e o texto das mensagens — que é dado pessoal — intacto no banco.
 - **Nunca** usar `require_tenant_admin` para leitura/escrita da base de contatos, funil ou agenda: é `require_tenant_member`. Admin fica para configuração e exportação em massa.
 - **Nunca** montar gráfico com dois eixos y, nem escolher cor de série a olho: rodar o validador de paleta.
 - **Nunca** normalizar número de telefone à mão: usar `contatos_csv.normaliza_numero()`, e nunca completar dígito que não veio. Um número "corrigido" pertence a outra pessoa, e a mensagem sai.
