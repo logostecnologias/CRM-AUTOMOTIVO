@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
-import { MagnifyingGlass, Prohibit, Plus, SlidersHorizontal, X, ArrowsDownUp } from "@phosphor-icons/react";
+import { MagnifyingGlass, Prohibit, Plus, SlidersHorizontal, X, ArrowsDownUp, ArrowsMerge } from "@phosphor-icons/react";
 import ContactPanel from "@/components/contacts/ContactPanel";
 import FieldsManager from "@/components/contacts/FieldsManager";
 import ImportExport from "@/components/contacts/ImportExport";
+import Duplicados from "@/components/contacts/Duplicados";
 
 const POR_PAGINA = 50;
 
@@ -21,6 +22,7 @@ export default function ContactsPage() {
   const [aberto, setAberto] = useState(null);
   const [mostrarCampos, setMostrarCampos] = useState(false);
   const [mostrarCsv, setMostrarCsv] = useState(false);
+  const [mostrarDup, setMostrarDup] = useState(false);
   const [novo, setNovo] = useState(null);
   // Link direto vindo do funil ("ver a ficha do contato deste negócio").
   const [params] = useSearchParams();
@@ -90,11 +92,15 @@ export default function ContactsPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => { setMostrarCsv((v) => !v); setMostrarCampos(false); }}
+          <button onClick={() => { setMostrarDup((v) => !v); setMostrarCsv(false); setMostrarCampos(false); }}
+            className="zz-btn zz-btn-secondary" data-testid="toggle-dup-btn">
+            <ArrowsMerge size={14} weight="bold" /> Duplicados
+          </button>
+          <button onClick={() => { setMostrarCsv((v) => !v); setMostrarCampos(false); setMostrarDup(false); }}
             className="zz-btn zz-btn-secondary" data-testid="toggle-csv-btn">
             <ArrowsDownUp size={14} weight="bold" /> CSV
           </button>
-          <button onClick={() => { setMostrarCampos((v) => !v); setMostrarCsv(false); }}
+          <button onClick={() => { setMostrarCampos((v) => !v); setMostrarCsv(false); setMostrarDup(false); }}
             className="zz-btn zz-btn-secondary" data-testid="toggle-fields-btn">
             <SlidersHorizontal size={14} weight="bold" /> Campos
           </button>
@@ -104,6 +110,11 @@ export default function ContactsPage() {
           </button>
         </div>
       </div>
+
+      {mostrarDup && (
+        <Duplicados onClose={() => setMostrarDup(false)}
+          onMesclou={() => { carregar(); carregarTags(); }} />
+      )}
 
       {mostrarCsv && (
         <ImportExport

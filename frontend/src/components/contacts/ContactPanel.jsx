@@ -6,7 +6,7 @@ import { formatBRL, parseBRLInput } from "@/lib/currency";
 import Atividades from "@/components/activities/Atividades";
 import {
   X, PaperPlaneRight, Trash, Prohibit, Check, ChatCircleDots, Megaphone,
-  NotePencil, Warning, ArrowSquareOut, Funnel, Plus,
+  NotePencil, Warning, ArrowSquareOut, Funnel, Plus, Trash as TrashIcon, ShieldCheck,
 } from "@phosphor-icons/react";
 
 const KANBAN_LABEL = {
@@ -64,6 +64,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
   const [funis, setFunis] = useState([]);
   const [enviando, setEnviando] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
   const areaRef = useRef(null);
 
   const carregar = useCallback(() => {
@@ -161,6 +162,19 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
       setCriandoNegocio(null);
       toast.success("Negócio criado no funil");
       carregarNegocios();
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  };
+
+  const excluir = async (modo) => {
+    try {
+      const r = await api.delete(`/contacts/${contactId}`, { params: { modo } });
+      toast.success(modo === "apagar"
+        ? `Contato apagado (${r.data.conversas_apagadas} conversa(s), ${r.data.negocios_apagados} negócio(s))`
+        : `Dados pessoais removidos (${r.data.conversas_preservadas} conversa(s) preservada(s))`);
+      onSaved?.();
+      onClose();
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
@@ -425,6 +439,43 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
             </div>
           </Bloco>
         )}
+
+        <Bloco titulo="Dados do titular (LGPD)">
+          {!excluindo ? (
+            <button onClick={() => setExcluindo(true)} data-testid="abrir-exclusao"
+              className="zz-btn zz-btn-secondary text-xs py-1 text-red-600 border-red-300 hover:bg-red-50">
+              <TrashIcon size={12} weight="bold" /> Remover este contato
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <button onClick={() => excluir("anonimizar")} data-testid="anonimizar"
+                className="w-full text-left border border-slate-300 bg-white px-3 py-2 hover:border-slate-900">
+                <div className="flex items-center gap-1.5 text-sm font-semibold">
+                  <ShieldCheck size={13} weight="bold" className="text-green-700" />
+                  Remover dados pessoais
+                </div>
+                <div className="text-[11px] text-slate-600 mt-0.5">
+                  Nome, número, e-mail, campos e notas somem; o texto das mensagens é redigido e a
+                  mídia sai do disco. As conversas e os negócios continuam existindo, para os
+                  relatórios de meses passados não mudarem. <strong>É esta que atende ao pedido
+                  do titular.</strong>
+                </div>
+              </button>
+              <button onClick={() => excluir("apagar")} data-testid="apagar"
+                className="w-full text-left border border-red-300 bg-red-50 px-3 py-2 hover:border-red-600">
+                <div className="flex items-center gap-1.5 text-sm font-semibold text-red-700">
+                  <TrashIcon size={13} weight="bold" /> Apagar tudo
+                </div>
+                <div className="text-[11px] text-slate-700 mt-0.5">
+                  Leva conversas, mensagens, negócios e histórico. A receita desses negócios sai
+                  dos relatórios. Use para contato de teste ou importação errada.
+                </div>
+              </button>
+              <button onClick={() => setExcluindo(false)}
+                className="text-[11px] text-slate-600 underline">Cancelar</button>
+            </div>
+          )}
+        </Bloco>
       </div>
 
       <form onSubmit={enviar} className="border-t-2 border-slate-900 p-3 bg-slate-50" data-testid="contact-send-form">

@@ -12,6 +12,7 @@ from pymongo import InsertOne, UpdateOne
 from db import get_db
 from auth import accessible_connection_ids, require_tenant_admin, require_tenant_member
 from flow_runtime import send_human_message as _send_human
+import contatos
 import contatos_csv
 import outbound
 
@@ -548,6 +549,18 @@ async def export_contacts(
     )
 
 
+# ---------- Duplicados ----------
+#
+# Antes de /contacts/{contact_id}: "duplicates" seria capturado como um id.
+
+
+@router.get("/contacts/duplicates")
+async def list_duplicates(user=Depends(require_tenant_admin)):
+    """Fichas que parecem ser a mesma pessoa, para revisão antes de mesclar."""
+    db = get_db()
+    return await contatos.achar_duplicados(db, user["tenant_id"])
+
+
 # ---------- Ficha ----------
 
 
@@ -728,6 +741,62 @@ async def create_contact(body: ContactIn, user=Depends(require_tenant_member)):
     await db.contacts.insert_one(dict(contact))
     contact.pop("_id", None)
     return contact
+
+
+@router.delete("/contacts/{contact_id}")
+async def delete_contact(contact_id: str, modo: str = "anonimizar",
+                         user=Depends(require_tenant_admin)):
+    """Remove o contato. `anonimizar` (padrão) ou `apagar`.
+
+    **anonimizar** atende ao direito de exclusão do titular sem falsificar o
+    passado: nome, número, e-mail, etiquetas, campos e notas somem, o texto das
+    mensagens é redigido e a mídia sai do disco — mas as conversas e os negócios
+    continuam existindo. Um negócio de R$ 40 mil fechado em julho tem de
+    continuar somando em julho; apagá-lo mudaria retroativamente um relatório
+    que a empresa já entregou.
+
+    **apagar** é para contato de teste ou importação errada: leva conversas,
+    mensagens, negócios e histórico. A resposta diz exatamente o que foi.
+
+    Só admin: é a operação mais destrutiva da base.
+    """
+    if modo not in ("anonimizar", "apagar"):
+        raise HTTPException(status_code=400, detail="Modo inválido")
+    db = get_db()
+    tenant_id = user["tenant_id"]
+    contact = await db.contacts.find_one({"id": contact_id, "tenant_id": tenant_id}, {"_id": 0})
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+    if modo == "apagar":
+        return await contatos.apagar(db, tenant_id, contact)
+    return await contatos.anonimizar(db, tenant_id, contact)
+
+
+class MesclarIn(BaseModel):
+    # A ficha que será absorvida e apagada. A que fica é a da URL.
+    secundario_id: str
+
+
+@router.post("/contacts/{contact_id}/merge")
+async def merge_contacts(contact_id: str, body: MesclarIn, user=Depends(require_tenant_admin)):
+    """Junta duas fichas do mesmo cliente em uma.
+
+    O contato da URL é o que fica; o do corpo é absorvido e apagado. Conversas,
+    negócios, atividades, notas e disparos passam para o principal; campo vazio
+    no principal herda o do secundário, campo preenchido não é sobrescrito.
+    """
+    db = get_db()
+    tenant_id = user["tenant_id"]
+    principal = await db.contacts.find_one({"id": contact_id, "tenant_id": tenant_id}, {"_id": 0})
+    secundario = await db.contacts.find_one(
+        {"id": body.secundario_id, "tenant_id": tenant_id}, {"_id": 0}
+    )
+    if not principal or not secundario:
+        raise HTTPException(status_code=404, detail="Contato não encontrado")
+    try:
+        return await contatos.mesclar(db, tenant_id, principal, secundario)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------- Notas ----------

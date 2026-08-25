@@ -1,0 +1,116 @@
+import { useCallback, useEffect, useState } from "react";
+import api, { formatApiErrorDetail } from "@/lib/api";
+import { toast } from "sonner";
+import { X, ArrowsMerge, CheckCircle } from "@phosphor-icons/react";
+
+const CRITERIO = { email: "mesmo e-mail", nome: "mesmo nome" };
+
+export default function Duplicados({ onClose, onMesclou }) {
+  const [grupos, setGrupos] = useState(null);
+  // Qual ficha fica, por grupo. O padrão é a mais antiga: ela tende a ter mais
+  // histórico acumulado, então mover o resto para ela move menos coisa.
+  const [principal, setPrincipal] = useState({});
+  const [ocupado, setOcupado] = useState(false);
+
+  const carregar = useCallback(() => {
+    api.get("/contacts/duplicates").then((r) => {
+      setGrupos(r.data);
+      const escolha = {};
+      r.data.forEach((g, i) => {
+        const maisAntigo = [...g.contatos].sort(
+          (a, b) => (a.created_at || "").localeCompare(b.created_at || "")
+        )[0];
+        escolha[i] = maisAntigo?.id;
+      });
+      setPrincipal(escolha);
+    }).catch(() => setGrupos([]));
+  }, []);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const mesclar = async (grupo, indice) => {
+    const fica = principal[indice];
+    if (!fica) return;
+    const absorver = grupo.contatos.filter((c) => c.id !== fica);
+    setOcupado(true);
+    try {
+      // Um por vez, e em série: cada mesclagem move documentos e muda o estado
+      // do principal, então em paralelo a segunda leria a ficha desatualizada.
+      for (const c of absorver) {
+        await api.post(`/contacts/${fica}/merge`, { secundario_id: c.id });
+      }
+      toast.success(`${absorver.length} ficha(s) mesclada(s)`);
+      carregar();
+      onMesclou?.();
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  return (
+    <div className="border border-slate-900 bg-white p-5 mb-6 zz-panel-hard" data-testid="duplicados">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <div className="font-heading text-xl font-black tracking-tighter">Possíveis duplicados</div>
+          <p className="text-xs text-slate-600 mt-1">
+            Fichas com o mesmo e-mail ou o mesmo nome. Escolha qual fica — as outras são
+            absorvidas e apagadas, e conversas, negócios, atividades e notas passam para ela.
+          </p>
+        </div>
+        <button onClick={onClose} className="p-1.5 hover:bg-slate-200"><X size={15} weight="bold" /></button>
+      </div>
+
+      {grupos === null && <div className="text-xs text-slate-500 py-4">Procurando…</div>}
+
+      {grupos?.length === 0 && (
+        <div className="border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+          <CheckCircle size={24} weight="bold" className="mx-auto mb-2 text-green-600" />
+          <div className="font-heading text-lg font-black tracking-tighter">Nenhum duplicado.</div>
+          <div className="text-xs text-slate-600 mt-1">
+            Não há fichas com e-mail ou nome repetido.
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {(grupos || []).map((g, i) => (
+          <div key={`${g.criterio}-${g.valor}`} className="border border-slate-300"
+            data-testid={`grupo-${i}`}>
+            <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-600">
+                {g.contatos.length} fichas com {CRITERIO[g.criterio] || g.criterio}:{" "}
+                <strong className="font-semibold">{g.valor}</strong>
+              </span>
+              <button onClick={() => mesclar(g, i)} disabled={ocupado || !principal[i]}
+                className="zz-btn text-xs py-1 disabled:opacity-40" data-testid={`mesclar-${i}`}>
+                <ArrowsMerge size={13} weight="bold" /> Mesclar
+              </button>
+            </div>
+            {g.contatos.map((c) => (
+              <label key={c.id}
+                className={`flex items-center gap-3 px-3 py-2 border-b border-slate-100 last:border-b-0 cursor-pointer ${
+                  principal[i] === c.id ? "bg-green-50" : "hover:bg-slate-50"
+                }`}>
+                <input type="radio" name={`principal-${i}`} checked={principal[i] === c.id}
+                  onChange={() => setPrincipal({ ...principal, [i]: c.id })} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold truncate">{c.nome}</div>
+                  <div className="text-[11px] font-mono text-slate-500">
+                    {c.numero_whatsapp}
+                    {c.empresa ? ` · ${c.empresa}` : ""}
+                    {c.created_at ? ` · desde ${new Date(c.created_at).toLocaleDateString("pt-BR")}` : ""}
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
+                  {principal[i] === c.id ? "fica" : "será absorvida"}
+                </span>
+              </label>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
