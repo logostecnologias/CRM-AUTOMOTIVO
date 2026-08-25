@@ -228,7 +228,7 @@ export default function FunilPage() {
       )}
 
       {novo && (
-        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-4 grid grid-cols-5 gap-3 items-end zz-panel-hard rounded-lg"
+        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 items-end zz-panel-hard rounded-lg"
           data-testid="new-deal-form">
           <div className="col-span-2">
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Título</label>

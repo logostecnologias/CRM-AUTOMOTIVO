@@ -58,7 +58,7 @@ export default function UsersPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl" data-testid="users-page">
+    <div className="zz-page" data-testid="users-page">
       <div className="flex items-end justify-between mb-8">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Equipe</div>
@@ -69,7 +69,7 @@ export default function UsersPage() {
       </div>
 
       {editing && (
-        <form onSubmit={save} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-2 gap-4 zz-panel-hard rounded-lg">
+        <form onSubmit={save} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 zz-panel-hard rounded-lg">
           <Field label="Nome"><input required className="zz-input" data-testid="user-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Email"><input required type="email" disabled={!!editing?.id} className="zz-input" data-testid="user-email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
           <Field label={editing?.id ? "Nova senha (opcional)" : "Senha"}>

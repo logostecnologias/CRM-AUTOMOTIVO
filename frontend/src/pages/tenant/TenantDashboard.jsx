@@ -38,7 +38,7 @@ function Bloco({ titulo, icone: Icone, para, children }) {
           </Link>
         )}
       </div>
-      <div className="p-4">{children}</div>
+      <div className="p-4 zz-cartao-corpo">{children}</div>
     </div>
   );
 }
@@ -69,14 +69,14 @@ export default function TenantDashboard() {
 
   if (!isAdmin) {
     return (
-      <div className="p-8" data-testid="tenant-dashboard">
+      <div className="zz-page" data-testid="tenant-dashboard">
         <div className="mb-8">
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Painel</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Olá, {user?.name}.</h1>
           <p className="text-ink-2 mt-2">Suas conversas estão na Central de Atendimento.</p>
         </div>
         {m && (
-          <div className="grid grid-cols-3 gap-2 max-w-2xl">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-w-2xl">
             <div className="border border-line bg-surface p-5 rounded-lg">
               <Numero rotulo="Aguardando na fila" valor={m.atendimento.aguardando}
                 alerta={m.atendimento.aguardando > 0} destaque />
@@ -95,7 +95,7 @@ export default function TenantDashboard() {
   }
 
   return (
-    <div className="p-8 max-w-6xl" data-testid="tenant-dashboard">
+    <div className="zz-page" data-testid="tenant-dashboard">
       <div className="mb-6">
         <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Painel</div>
         <h1 className="font-heading text-4xl font-black tracking-tighter">Olá, {user?.name}.</h1>
@@ -124,9 +124,9 @@ export default function TenantDashboard() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-3">
             <Bloco titulo="Atendimento" icone={Headset} para="/app/inbox">
-              <div className="grid grid-cols-4 gap-3">
+              <div className="zz-numeros">
                 <Numero rotulo="Com o robô" valor={m.atendimento.bot} />
                 <Numero rotulo="Na fila" valor={m.atendimento.aguardando}
                   alerta={m.atendimento.aguardando > 0} />
@@ -139,7 +139,7 @@ export default function TenantDashboard() {
             </Bloco>
 
             <Bloco titulo="Funil" icone={Funnel} para="/app/funil">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="zz-numeros-2">
                 <div>
                   <div className="text-[9px] font-bold uppercase tracking-wider text-ink-3">
                     Em aberto
@@ -162,7 +162,7 @@ export default function TenantDashboard() {
             </Bloco>
 
             <Bloco titulo="Agenda" icone={CheckSquareOffset} para="/app/atividades">
-              <div className="grid grid-cols-4 gap-3">
+              <div className="zz-numeros">
                 <Numero rotulo="Atrasadas" valor={m.agenda.atrasadas}
                   alerta={m.agenda.atrasadas > 0} />
                 <Numero rotulo="Hoje" valor={m.agenda.hoje} />
@@ -172,15 +172,13 @@ export default function TenantDashboard() {
             </Bloco>
 
             <Bloco titulo="Campanhas" icone={Megaphone} para="/app/campanhas">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="zz-numeros-2">
                 <Numero rotulo="Em andamento" valor={m.campanhas.em_andamento} />
                 <Numero rotulo="Disparos no mês"
                   valor={m.campanhas.disparos_mes.toLocaleString("pt-BR")} />
               </div>
             </Bloco>
-          </div>
 
-          <div className="grid grid-cols-3 gap-3">
             <Bloco titulo="Base" icone={UsersThree} para="/app/contacts">
               <Numero rotulo="Contatos" valor={m.base.contatos.toLocaleString("pt-BR")} destaque />
             </Bloco>

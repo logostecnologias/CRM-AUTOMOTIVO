@@ -136,7 +136,7 @@ export default function AIAgentsPage() {
   const mostrarFormulario = !conexao || editando;
 
   return (
-    <div className="p-8 max-w-4xl" data-testid="ai-agents-page">
+    <div className="zz-page" data-testid="ai-agents-page">
       <div className="mb-8">
         <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Automação</div>
         <h1 className="font-heading text-4xl font-black tracking-tighter">Agentes de IA</h1>
@@ -227,7 +227,7 @@ export default function AIAgentsPage() {
             <div className="text-xs font-bold uppercase tracking-wider text-ink-2 mb-3">
               1. Escolha o provedor
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {provedores.map((p) => (
                 <button
                   key={p.id}

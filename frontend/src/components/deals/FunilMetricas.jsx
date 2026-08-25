@@ -61,7 +61,7 @@ export default function FunilMetricas({ pipelineId, onClose }) {
         <div className="text-xs text-ink-3 py-4">Carregando…</div>
       ) : (
         <>
-          <div className="grid grid-cols-5 gap-2 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 mb-4">
             <Caixa rotulo="Em aberto" valor={formatBRL(dados.resumo.aberto.valor)}
               hint={`${dados.resumo.aberto.n} negócio(s)`} />
             <Caixa rotulo="Ganho na janela" valor={formatBRL(dados.janela.ganho.valor)}
@@ -76,7 +76,7 @@ export default function FunilMetricas({ pipelineId, onClose }) {
               hint="da criação ao ganho" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">
                 Retorno por campanha

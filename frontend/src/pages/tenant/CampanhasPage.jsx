@@ -132,7 +132,7 @@ function Detalhe({ campanha }) {
 
   return (
     <div className="px-4 py-4 bg-surface-2 border-b border-line">
-      <div className="grid grid-cols-6 gap-2 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
         {caixas.map(([rotulo, valor]) => (
           <div key={rotulo} className="border border-line bg-surface px-3 py-2 rounded-lg">
             <div className="text-[9px] font-bold uppercase tracking-wider text-ink-3">{rotulo}</div>
@@ -300,7 +300,7 @@ export default function CampanhasPage() {
   const semConexao = conexoes.length === 0;
 
   return (
-    <div className="p-8 max-w-6xl" data-testid="campaigns-page">
+    <div className="zz-page" data-testid="campaigns-page">
       <div className="flex items-end justify-between mb-8">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Marketing</div>
@@ -332,7 +332,7 @@ export default function CampanhasPage() {
       )}
 
       {editando && (
-        <form onSubmit={salvar} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-3 gap-4 zz-panel-hard rounded-lg" data-testid="campaign-form">
+        <form onSubmit={salvar} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 zz-panel-hard rounded-lg" data-testid="campaign-form">
           <Campo label="Nome da campanha" className="col-span-2">
             <input required autoFocus className="zz-input" data-testid="campaign-name" value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })} />

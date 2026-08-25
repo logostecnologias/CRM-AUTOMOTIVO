@@ -146,7 +146,7 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
         </div>
       ) : (
         <div>
-          <div className="grid grid-cols-4 gap-2 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
             {[["Linhas no arquivo", previa.linhas, "border-line bg-surface"],
               ["Novos", previa.novos, "border-success bg-success-soft"],
               ["Já existem", previa.duplicados, "border-warning bg-warning-soft"],

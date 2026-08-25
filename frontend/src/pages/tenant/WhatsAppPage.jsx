@@ -92,7 +92,7 @@ export default function WhatsAppPage() {
   };
 
   return (
-    <div className="p-8 max-w-4xl" data-testid="whatsapp-page">
+    <div className="zz-page" data-testid="whatsapp-page">
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Integração</div>
@@ -107,7 +107,7 @@ export default function WhatsAppPage() {
       </div>
 
       {creating && (
-        <form onSubmit={createConnection} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-3 gap-4 zz-panel-hard rounded-lg">
+        <form onSubmit={createConnection} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 zz-panel-hard rounded-lg">
           <div>
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome da conexão</label>
             <input autoFocus required data-testid="new-connection-name" className="zz-input"
@@ -226,7 +226,7 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
         </div>
       )}
 
-      <div className="mt-4 pt-4 border-t border-line grid grid-cols-3 gap-4">
+      <div className="mt-4 pt-4 border-t border-line grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div>
           <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">Departamento padrão</label>
           <select className="zz-input" style={{ padding: "0.4rem 0.6rem" }}

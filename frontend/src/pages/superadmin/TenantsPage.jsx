@@ -72,7 +72,7 @@ export default function TenantsPage() {
   };
 
   return (
-    <div className="p-8" data-testid="admin-tenants-page">
+    <div className="zz-page" data-testid="admin-tenants-page">
       <div className="flex items-end justify-between mb-8">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Gestão</div>
@@ -84,7 +84,7 @@ export default function TenantsPage() {
       </div>
 
       {showForm && (
-        <form onSubmit={create} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-2 gap-4 zz-panel-hard rounded-lg">
+        <form onSubmit={create} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4 zz-panel-hard rounded-lg">
           <Field label="Nome da Empresa"><input required data-testid="tenant-name" className="zz-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Plano">
             {plans.length === 0 ? (

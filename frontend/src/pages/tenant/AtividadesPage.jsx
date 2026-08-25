@@ -110,7 +110,7 @@ export default function AtividadesPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl" data-testid="atividades-page">
+    <div className="zz-page" data-testid="atividades-page">
       <div className="flex items-end justify-between mb-6">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Agenda</div>
@@ -133,7 +133,7 @@ export default function AtividadesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-2 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-6">
         {[["Atrasadas", resumo.atrasadas, "border-danger bg-danger-soft"],
           ["Para hoje", resumo.hoje, "border-warning bg-warning-soft"],
           ["Próximos 7 dias", resumo.semana, "border-line bg-surface"],
@@ -146,7 +146,7 @@ export default function AtividadesPage() {
       </div>
 
       {criando && (
-        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-6 grid grid-cols-4 gap-3 items-end zz-panel-hard rounded-lg"
+        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end zz-panel-hard rounded-lg"
           data-testid="nova-atividade-form">
           <div className="col-span-2">
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">

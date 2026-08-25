@@ -108,7 +108,7 @@ function Atendimento({ janela }) {
         </select>
       </div>
 
-      <div className="grid grid-cols-6 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
         <Tile rotulo="Conversas" valor={resumo.conversas.toLocaleString("pt-BR")} destaque />
         <Tile rotulo="Finalizadas" valor={resumo.finalizadas.toLocaleString("pt-BR")} />
         <Tile rotulo="Em aberto" valor={resumo.em_aberto.toLocaleString("pt-BR")} />
@@ -119,14 +119,14 @@ function Atendimento({ janela }) {
           hint="mensagens" />
       </div>
 
-      <div className="grid grid-cols-2 gap-2 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
         <Tile rotulo="Espera na fila" valor={duracao(tempos.espera_media_s)}
           hint={`média · 90% abaixo de ${duracao(tempos.espera_p90_s)} · ${tempos.espera_amostra} conversa(s)`} />
         <Tile rotulo="Duração do atendimento" valor={duracao(tempos.atendimento_medio_s)}
           hint={`média · 90% abaixo de ${duracao(tempos.atendimento_p90_s)} · ${tempos.atendimento_amostra} conversa(s)`} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
         <SerieDiaria titulo="Conversas por dia" dados={dados.por_dia}
           series={[{ chave: "conversas", rotulo: "Conversas", slot: 1 }]} />
         <SerieDiaria titulo="Mensagens por dia" dados={dados.por_dia}
@@ -136,7 +136,7 @@ function Atendimento({ janela }) {
           ]} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="border border-line bg-surface p-5 rounded-lg">
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-3">
             Por atendente
@@ -226,7 +226,7 @@ function Campanhas({ janela }) {
 
   return (
     <div>
-      <div className="grid grid-cols-5 gap-2 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 mb-4">
         <Tile rotulo="Disparos entregues" valor={resumo.enviados.toLocaleString("pt-BR")} />
         <Tile rotulo="Falhas" valor={resumo.falhas.toLocaleString("pt-BR")} />
         <Tile rotulo="Respostas" valor={resumo.respostas.toLocaleString("pt-BR")}
@@ -311,7 +311,7 @@ export default function RelatoriosPage() {
   const [janela, setJanela] = useState("30");
 
   return (
-    <div className="p-8 max-w-7xl" data-testid="relatorios-page">
+    <div className="zz-page" data-testid="relatorios-page">
       <div className="flex items-end justify-between mb-6">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Números</div>

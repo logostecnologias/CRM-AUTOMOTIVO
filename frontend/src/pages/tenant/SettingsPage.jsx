@@ -3,7 +3,7 @@ import { useAuth } from "@/context/AuthContext";
 export default function SettingsPage() {
   const { user } = useAuth();
   return (
-    <div className="p-8 max-w-3xl" data-testid="settings-page">
+    <div className="zz-page-form" data-testid="settings-page">
       <div className="mb-8">
         <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Conta</div>
         <h1 className="font-heading text-4xl font-black tracking-tighter">Configurações</h1>

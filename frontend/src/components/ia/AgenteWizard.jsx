@@ -151,7 +151,7 @@ export default function AgenteWizard({ catalogo, conexoes, departamentos, agente
                   É isso que define a estratégia dele na conversa. Tudo o mais ajusta por cima.
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {catalogo.tipos.map((t) => (
                   <button
                     key={t.id}
@@ -197,7 +197,7 @@ export default function AgenteWizard({ catalogo, conexoes, departamentos, agente
                   transferir sempre que perguntarem preço, horário ou endereço — em vez de inventar.
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Rotulo>Nome da empresa</Rotulo>
                   <input
@@ -265,7 +265,7 @@ export default function AgenteWizard({ catalogo, conexoes, departamentos, agente
                 <p className="text-xs text-ink-2 mt-0.5">Ajuste fino de tom, tamanho e limites.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Rotulo obrigatorio>Nome do agente</Rotulo>
                   <input
@@ -321,7 +321,7 @@ export default function AgenteWizard({ catalogo, conexoes, departamentos, agente
 
               <div>
                 <Rotulo>Tamanho das respostas</Rotulo>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {catalogo.tamanhos.map((t) => (
                     <button
                       key={t.id}
@@ -398,7 +398,7 @@ export default function AgenteWizard({ catalogo, conexoes, departamentos, agente
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Rotulo>Em quais conexões</Rotulo>
                     <div className="border border-line p-3 max-h-32 overflow-y-auto space-y-1 rounded-lg">

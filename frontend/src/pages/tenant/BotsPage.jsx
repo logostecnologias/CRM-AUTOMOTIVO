@@ -56,7 +56,7 @@ export default function BotsPage() {
   };
 
   return (
-    <div className="p-8" data-testid="bots-page">
+    <div className="zz-page" data-testid="bots-page">
       <div className="flex items-end justify-between mb-8">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Automação</div>
