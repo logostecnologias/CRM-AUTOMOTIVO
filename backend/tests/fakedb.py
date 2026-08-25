@@ -189,11 +189,17 @@ class Colecao:
     async def count_documents(self, filtro=None):
         return sum(1 for d in self.docs if _casa(d, filtro))
 
-    def _aplica(self, doc, update):
+    def _aplica(self, doc, update, inserindo=False):
         for op, campos in update.items():
             if op == "$set":
                 for k, v in campos.items():
                     _set(doc, k, v)
+            elif op == "$setOnInsert":
+                # So vale quando o upsert de fato criou o documento; num
+                # documento que ja existia o Mongo ignora este operador.
+                if inserindo:
+                    for k, v in campos.items():
+                        _set(doc, k, v)
             elif op == "$inc":
                 for k, v in campos.items():
                     _set(doc, k, (_get(doc, k) or 0) + v)
@@ -210,11 +216,21 @@ class Colecao:
             else:
                 raise NotImplementedError(op)
 
-    async def update_one(self, filtro, update, **kw):
+    async def update_one(self, filtro, update, upsert=False, **kw):
         for d in self.docs:
             if _casa(d, filtro):
                 self._aplica(d, update)
                 return _Res(1, 1)
+        if upsert:
+            # O Mongo semeia o documento novo com os campos de igualdade do
+            # filtro e so depois aplica o update. Sem isto, todo codigo que usa
+            # upsert (contador de consumo de IA, conexao de IA) parecia nao
+            # gravar nada no teste, sem erro nenhum.
+            doc = {k: v for k, v in (filtro or {}).items()
+                   if not k.startswith("$") and not isinstance(v, dict)}
+            self._aplica(doc, update, inserindo=True)
+            self.docs.append(doc)
+            return _Res(0, 1)
         return _Res(0, 0)
 
     async def update_many(self, filtro, update, **kw):

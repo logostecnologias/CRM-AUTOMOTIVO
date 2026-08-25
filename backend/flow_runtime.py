@@ -11,6 +11,7 @@ from db import get_db
 from flow_engine import _find_node, _find_next, _find_start, _interp, _process_node
 import media_store
 import wuzapi_client as wuzapi
+import ai_agents
 
 logger = logging.getLogger("zappzen.flow_runtime")
 
@@ -226,9 +227,38 @@ async def _pick_bot_for_new_session(db, tenant_id: str, conn: dict, text: str):
 
     keyword_bot = await slot("keyword")
     if keyword_bot and _keyword_matches(keyword_bot[2], text):
-        return keyword_bot
+        # O quarto item diz que a escolha veio de uma palavra-chave digitada
+        # pelo contato. É o que permite o agente de IA em modo "primeiro" ceder
+        # a vez: quem digitou a palavra pediu aquele fluxo, não uma conversa.
+        return (*keyword_bot, True)
 
-    return await slot("first_message")
+    padrao = await slot("first_message")
+    return (*padrao, False) if padrao else None
+
+
+async def _agente_ia(db, tenant_id, conn, session, contact, text, media, outputs,
+                     *, exigir_primeiro=False):
+    """Deixa o agente de IA responder, se houver um ligado para esta conexão.
+
+    Devolve True só quando ele de fato respondeu. Escalar (por decisão dele,
+    por falha do provedor ou por teto do plano) devolve False, e a explicação
+    já ficou no histórico — quem chama segue para a fila humana.
+
+    `exigir_primeiro` é usado quando um bot atenderia a conversa: aí só um
+    agente em modo `primeiro` toma a frente. Sem bot, qualquer agente ligado
+    serve, que é o modo `fallback`.
+    """
+    agente = await ai_agents.agente_da_conexao(db, tenant_id, conn.get("id") if conn else None)
+    if not agente:
+        return False
+    if exigir_primeiro and agente.get("modo") != ai_agents.MODO_PRIMEIRO:
+        return False
+    resultado = await ai_agents.tentar_responder(
+        db, agente, session, contact, text, bool(media), outputs)
+    if resultado == ai_agents.RESPONDEU:
+        session["ia_agente_id"] = agente["id"]
+        return True
+    return False
 
 
 async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None):
@@ -298,6 +328,11 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
     # Loga a mensagem antes de qualquer decisão: mesmo sem bot capaz de
     # atender, ela precisa aparecer no histórico da conversa.
     session_id = session["id"] if session else str(uuid.uuid4())
+    # O que o contato de fato escreveu, guardado antes de `text` poder virar um
+    # aviso de sistema logo abaixo. É isto que o agente de IA recebe: responder
+    # a "[image não pôde ser baixado]" como se fosse fala do contato é pior do
+    # que passar a conversa para alguém que consegue abrir o anexo.
+    legenda_contato = text
     msg_type, msg_meta = "text", None
     if media:
         stored = await _ingest_incoming_media(db, tenant_id, session_id, token, media)
@@ -344,7 +379,28 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
         primeira_resposta_campanha = bool(session.get("aguardando_primeira_resposta"))
         loaded = await _load_bot_flow(db, tenant_id, session.get("bot_id"), require_active=False)
         if not loaded:
-            # Sem bot que atenda: fila humana, em vez de engolir a mensagem.
+            # Antes da fila, o agente de IA. É aqui que ele atua em modo
+            # `fallback`: exatamente o ponto em que hoje a mensagem cairia
+            # direto para um humano, e por isso ligar um agente não altera o
+            # comportamento de nenhum fluxo já publicado.
+            #
+            # A resposta de campanha é a exceção: quando o disparo escolheu
+            # `resposta_modo = aguardando`, a fila humana é a configuração
+            # pedida, não ausência de bot — o agente não passa por cima disso.
+            if not primeira_resposta_campanha and await _agente_ia(
+                    db, tenant_id, conn, session, contact, legenda_contato, media, outputs):
+                await db.conversation_sessions.update_one(
+                    {"id": session_id},
+                    {"$set": {"ia_respostas": session.get("ia_respostas", 0),
+                              "ia_agente_id": session.get("ia_agente_id"),
+                              "updated_at": _now()},
+                     "$inc": {"unread_count": 1}},
+                )
+                if token and outputs:
+                    await _send_outputs(db, tenant_id, token, from_number, session_id, outputs)
+                return
+
+            # Sem bot e sem agente: fila humana, em vez de engolir a mensagem.
             # A conversa aberta por campanha em modo "aguardando" cai aqui de
             # propósito — ela nasce sem bot —, e é por isso que a mensagem de
             # sistema é outra: dizer "bot indisponível" ali descreveria um
@@ -407,9 +463,10 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
                         await _run_from(next_id, flow, session, outputs)
     else:
         picked = await _pick_bot_for_new_session(db, tenant_id, conn, text)
+        por_palavra_chave = bool(picked and picked[3])
         run_bot_flow = picked is not None
         if picked:
-            bot, flow, start = picked
+            bot, flow, start, _ = picked
         else:
             # Nenhum bot atende: a conversa ainda nasce, direto em "aguardando",
             # pra um humano ver na inbox em vez de a mensagem sumir.
@@ -435,6 +492,10 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "status": "ativa",
             "awaiting": None,
             "last_user_message": text,
+            # Quantas vezes o agente de IA já respondeu nesta conversa, e qual
+            # agente. O contador é o freio de mão contra conversa infinita.
+            "ia_respostas": 0,
+            "ia_agente_id": None,
             # A mensagem que abriu a conversa foi gravada antes de a sessão
             # existir, então o update de log_message não teve o que casar — a
             # prévia entra aqui para o card não nascer vazio.
@@ -443,7 +504,24 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             "updated_at": _now(),
         }
         await db.conversation_sessions.insert_one(session)
-        if run_bot_flow:
+        # Palavra-chave digitada pelo contato tem precedência absoluta: quem
+        # digitou pediu aquele fluxo, não uma conversa com o agente. Fora
+        # disso, o agente assume — em modo `primeiro` mesmo havendo um bot de
+        # primeira mensagem, em `fallback` só quando não há bot nenhum.
+        assumiu_ia = False
+        if not por_palavra_chave:
+            assumiu_ia = await _agente_ia(
+                db, tenant_id, conn, session, contact, legenda_contato, media, outputs,
+                exigir_primeiro=run_bot_flow)
+        if assumiu_ia:
+            # A conversa passa a ser do agente, não de um fluxo. Zerar o
+            # vínculo é o que faz a próxima mensagem do contato cair de novo no
+            # agente (via `_load_bot_flow` sem bot) em vez de tentar retomar um
+            # fluxo que nunca chegou a rodar.
+            session["bot_id"] = None
+            session["flow_id"] = None
+            session["node_atual_id"] = None
+        elif run_bot_flow:
             await _run_from(start["id"], flow, session, outputs)
         else:
             session["status"] = "aguardando_humano"
@@ -478,6 +556,8 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             # ser persistida aqui, senão a mensagem seguinte do contato
             # reiniciaria o fluxo do começo em vez de continuar de onde parou.
             "aguardando_primeira_resposta": bool(session.get("aguardando_primeira_resposta")),
+            "ia_respostas": session.get("ia_respostas", 0),
+            "ia_agente_id": session.get("ia_agente_id"),
             "updated_at": _now(),
         }, "$inc": {"unread_count": 1}},
     )

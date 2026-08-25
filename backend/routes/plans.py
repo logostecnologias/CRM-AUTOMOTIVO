@@ -22,6 +22,10 @@ class PlanIn(BaseModel):
     # sobre disparo entregue, não sobre campanha criada — é a mensagem que
     # custa. Ver routes/campaigns.py:_enforce_cota_mensal.
     max_disparos_mes: int | None = None
+    # Teto de tokens de IA no mês, contado só quando a empresa usa a chave da
+    # plataforma. Empresa que conectou a conta própria paga o provedor direto e
+    # não tem teto nosso. None ou 0 = ilimitado. Ver ai_runtime._checar_cota.
+    max_tokens_ia_mes: int | None = None
     status: str = "active"
 
 

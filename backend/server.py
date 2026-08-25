@@ -28,6 +28,7 @@ from routes.campaigns import router as campaigns_router
 from routes.deals import router as deals_router
 from routes.activities import router as activities_router
 from routes.reports import router as reports_router
+from routes.ai import router as ai_router
 import campaign_runner
 import health_monitor
 import media_retention
@@ -62,6 +63,7 @@ app.include_router(campaigns_router)
 app.include_router(deals_router)
 app.include_router(activities_router)
 app.include_router(reports_router)
+app.include_router(ai_router)
 
 
 @app.get("/api/health")
@@ -219,6 +221,24 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # Varredura de retenção: busca por idade e marca as mensagens do arquivo.
     ("media_files", [("created_at", 1)], {}),
     ("media_files", [("tenant_id", 1), ("stored_name", 1)], {}),
+
+    # Conexão de IA da empresa. `unique` aqui, contrariando a regra de só
+    # replicar índices únicos já existentes, porque a coleção nasce agora — não
+    # há dado legado duplicado que possa derrubar o boot — e porque a gravação
+    # é um upsert por `tenant_id`: sem unicidade, duas requisições simultâneas
+    # criam dois documentos e o `find_one` passa a devolver um deles ao acaso.
+    ("ai_connections", [("tenant_id", 1)], {"unique": True}),
+
+    # Agentes de IA da empresa. Lidos a cada mensagem recebida que chegue a um
+    # ponto sem bot, então a consulta é quente: `ativo` e `modo` entram no
+    # índice porque entram no filtro (agente desligado não deve nem ser lido).
+    ("ai_agents", [("tenant_id", 1), ("ativo", 1), ("modo", 1), ("created_at", 1)], {}),
+    ("ai_agents", [("id", 1)], {}),
+
+    # Consumo agregado do mês (cota do plano e o número que a tela mostra).
+    ("ai_usage", [("tenant_id", 1), ("mes", 1)], {}),
+    # A chave do upsert que soma cada resposta no acumulado do dia.
+    ("ai_usage", [("tenant_id", 1), ("dia", 1), ("provedor", 1), ("modelo", 1), ("origem", 1)], {}),
 
     ("impersonation_log", [("id", 1)], {}),
 ]
