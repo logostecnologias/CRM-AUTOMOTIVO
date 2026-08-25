@@ -105,24 +105,24 @@ function EditorInner({ flow, bot, connections, onBotChange }) {
 
   return (
     <div className="h-screen flex flex-col" data-testid="flow-editor">
-      <div className="h-14 border-b border-slate-900 bg-white flex items-center justify-between px-4">
+      <div className="h-14 border-b border-line-strong bg-surface flex items-center justify-between px-4">
         <div className="flex items-center gap-4">
-          <button data-testid="back-btn" onClick={() => nav("/app/bots")} className="p-1.5 hover:bg-slate-100">
+          <button data-testid="back-btn" onClick={() => nav("/app/bots")} className="p-1.5 hover:bg-surface-2">
             <ArrowLeft size={18} weight="bold" />
           </button>
           <div>
-            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Editor de Fluxo</div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3">Editor de Fluxo</div>
             <div className="font-heading font-black text-lg tracking-tight">{flow.name}</div>
           </div>
           {flow.published_at && (
-            <div className="flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-500 px-2 py-1">
+            <div className="flex items-center gap-1 text-xs text-success bg-success-soft border border-success px-2 py-1 rounded-full">
               <CheckCircle size={12} weight="bold" /> Publicado v{flow.version}
             </div>
           )}
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Conexão</label>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3">Conexão</label>
             <select
               className="zz-input"
               style={{ padding: "0.35rem 0.6rem", minWidth: "170px" }}
@@ -147,7 +147,7 @@ function EditorInner({ flow, bot, connections, onBotChange }) {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-56 border-r border-slate-900 bg-white flex flex-col">
+        <div className="w-56 border-r border-line-strong bg-surface flex flex-col">
           <NodePalette />
         </div>
 
@@ -197,8 +197,8 @@ export default function FlowEditorPage() {
     api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
   }, [botId]);
 
-  if (err) return <div className="p-8 text-red-600">{err}</div>;
-  if (!flow) return <div className="p-8 text-slate-500">Carregando fluxo...</div>;
+  if (err) return <div className="p-8 text-danger">{err}</div>;
+  if (!flow) return <div className="p-8 text-ink-3">Carregando fluxo...</div>;
 
   return (
     <ReactFlowProvider>

@@ -13,7 +13,7 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **Backend**: FastAPI (Python)
 - **Banco de dados**: MongoDB (sem isolamento nativo de tenant — **todo filtro por `tenant_id` é responsabilidade da aplicação**, aplicado em toda query sensível, sem exceção)
 - **Frontend**: React + `@xyflow/react` (React Flow) para o editor visual
-- **Design**: Swiss Brutalist / Grid Borders, fontes Cabinet Grotesk + IBM Plex Sans, UI 100% em português, elementos com `data-testid`
+- **Design**: **Suave arredondado** com tema claro e escuro, tudo saindo de tokens em `frontend/src/index.css` (era Swiss Brutalist / Grid Borders até 25/08/2026). Fontes Cabinet Grotesk + IBM Plex Sans, UI 100% em português, elementos com `data-testid`
 - **WhatsApp**: integração real via **WuzAPI** (self-hosted, wrapper REST sobre whatsmeow), sempre atrás de um **gateway próprio** (`zappzen-gateway`, porta 8090) que faz rate limiting, normalização de número e fila/retry de webhook — o backend nunca chama a WuzAPI diretamente. Autenticação em duas camadas: `WUZAPI_ADMIN_TOKEN` (só cria/apaga instância) e um token por instância (`wuzapi_token`, guardado em `whatsapp_connections`), usado em toda outra chamada. Credenciais sempre em variável de ambiente, nunca hardcoded.
 
 ---
@@ -169,12 +169,25 @@ O desenvolvimento continua localmente via **Claude Code**.
 - O relatório de campanhas junta `campaign_recipients` com `deals` ganhos: campanha que fechou negócio na janela aparece mesmo tendo disparado antes, senão a receita ficaria sem dono
 
 ### Gráficos
-- **Paleta validada, não escolhida a olho**: `#2563EB` (o azul que já existe no produto) + `#EA580C`. O `#F97316` do sistema **reprova** no contraste contra fundo claro (2,73:1); a variação escura passa. Separação para daltonismo ~31 (piso é 8)
+- **Paleta validada, não escolhida a olho**: no tema claro `#2563EB` (o azul que já existe no produto) + `#EA580C`. O `#F97316` do sistema **reprova** no contraste contra fundo claro (2,73:1); a variação escura passa. Separação para daltonismo ~31 (piso é 8)
+- **O tema escuro tem par próprio, não o claro clareado**: `#3B82F6` + `#E06D1F`. Os passos claros **reprovam na banda de luminosidade** do tema escuro (o laranja `#EA580C` fica acima do teto), então o par escuro foi validado como conjunto contra a `--surface` escura. As cores saem de `var(--serie-1)`/`var(--serie-2)` — o SVG aceita `var()` em `fill`, então o gráfico troca de paleta sem re-render
 - **Nunca eixo duplo.** Conversas e mensagens têm escalas diferentes, então são dois gráficos lado a lado. Eixo duplo inventa correlação que não está no dado
 - Barra ≤ 24px com topo arredondado (raio 4) e base quadrada; vão de 2px entre segmentos empilhados, **descontado da própria barra** para o topo continuar marcando o total; grade fina e sólida (tracejado é ruído); rótulo de dia de tantos em tantos
 - **Legenda sempre com duas séries ou mais**, e toda série tem alternativa em tabela (botão no canto) — identidade nunca depende só de cor
 - A geometria vive em `components/reports/geometria.js`, **JS puro sem JSX**, justamente para ser conferida sem navegador: é a parte que erra em silêncio (barra fora da área, pilha passando do total, raio maior que a barra)
 
+
+### Design: de brutalista para suave, e o tema escuro
+- O desenho anterior era **Swiss Brutalist** de propósito: canto reto, borda preta de 1px e sombra dura deslocada 4px. Isto é a mesma tipografia e a mesma família de cor em versão suave — raio arredondado, borda cinza, sombra difusa. Trocado a pedido do cliente em 25/08/2026
+- **O tema escuro só foi possível porque a cor saiu do JSX.** As ~1.100 classes cravadas (`bg-white`, `text-slate-500`, `border-slate-900`) não têm equivalente escuro: não existe "o `bg-white` do tema escuro". Elas viraram tokens (`bg-surface`, `text-ink-3`, `border-line`) definidos em `index.css` com um valor por tema. Sem essa troca, "adicionar tema escuro" seria editar cada tela de novo
+- **O par claro/escuro de cada papel é escolhido junto — tema escuro não é o claro invertido.** O botão sólido é azul-marinho no claro e **azul** no escuro, porque um bloco quase preto sobre fundo escuro não se destaca de nada. O contraste dos 18 pares texto/fundo é conferido por script nos dois temas; dois reprovaram e foram corrigidos (`--text-4` a 2,56:1, que é o rótulo do eixo do gráfico, e `--danger` sobre a própria caixa de erro a 4,41:1) — os dois vinham de antes, mas quem define o token agora é este arquivo
+- **`-solid` + `-fg` andam em par.** `bg-danger`/`bg-success` no escuro são cores **claras**: texto branco sobre elas dá ~2:1, o erro clássico de tema escuro feito por inversão. Preenchimento cheio (barra de alerta, selo verde) usa `bg-danger-solid` + `text-danger-fg`, que já vem com o texto certo para cada tema
+- **O tema é aplicado antes do React montar** (`lib/tema.js`, chamado em `index.js`), não num `useEffect`: no efeito o primeiro quadro já teria sido pintado claro, e todo carregamento no escuro daria um flash branco
+- **Três estados, não dois**: `claro`, `escuro` e `sistema` (o padrão). Quem já configurou o sistema no escuro não deveria configurar de novo aqui; e uma escolha explícita tem que ganhar do sistema depois, senão o botão não funcionaria para quem está no escuro e quer claro. A preferência é do **navegador**, não do usuário no banco: é configuração de dispositivo
+- **Raio por tamanho do elemento, não uniforme**: 14px em cartão, 10px em controle, 6px em quadradinho de cor, pílula em selo e avatar, 2xl em bolha de conversa. Raio de 14px num quadrado de 16px viraria bolha
+- **"Selecionado" não pode ser `border-line-strong` contra `border-line`.** A varredura mecânica mandou toda borda preta para o cinza forte, e nos estados de seleção isso apagou o sinal — os dois cinzas são quase iguais. Seleção passou a ser `border-info` (+ `ring-1 ring-info`) ou fundo sólido de marca. Foi o retrabalho manual mais extenso depois da varredura
+- O `style` inline **não** passa por varredura de classe. Sobraram hexes no cabeçalho do Kanban e nas abas da Inbox, que ficariam brancos no tema escuro — hoje usam `var(--…)`
+- Sonner pinta o próprio cartão a partir de `theme`: deixado em `"light"` ele desenharia toast claro no tema escuro, por cima das nossas variáveis
 
 ### Exclusão, anonimização e mesclagem de contato
 - **Anonimizar é o padrão; apagar é a exceção.** A LGPD pede que o dado pessoal saia, não que o registro da transação desapareça. Um negócio de R$ 40 mil fechado em julho tem de continuar somando em julho — apagá-lo mudaria retroativamente um relatório que a empresa já entregou. Então o dado pessoal sai e o esqueleto fica: o negócio aponta para um contato que agora se chama "Contato removido"
@@ -240,4 +253,7 @@ O desenvolvimento continua localmente via **Claude Code**.
 - **Nunca** montar público de campanha sem `campaigns.audience_query()`: é ele que exclui quem pediu para sair. Um filtro escrito à mão manda mensagem para quem se descadastrou.
 - Rotas administrativas (admin/super admin) devem retornar 403 de verdade para usuários sem permissão, não só esconder na UI — validar sempre no backend.
 - Toda ação de impersonation do Super Admin deve ficar registrada em `impersonation_log`.
-- Design já definido (Swiss Brutalist / Grid Borders) — manter consistência visual ao adicionar novas telas.
+- **Nunca** cravar cor no JSX (`bg-white`, `text-slate-500`, `border-slate-900`, hex em `style`): usar os tokens (`bg-surface`, `text-ink-3`, `border-line`, `var(--serie-1)`). Cor cravada não tem equivalente no tema escuro — é literalmente o que impediu o tema escuro de existir, e uma única classe esquecida vira painel branco no meio da tela escura.
+- **Nunca** deixar borda completa sem raio, nem marcar "selecionado" só trocando `border-line` por `border-line-strong`: os dois cinzas são quase iguais e o sinal desaparece. Seleção é `border-info` (+ `ring-1 ring-info`) ou fundo sólido de marca.
+- **Nunca** pôr texto branco sobre `bg-danger`/`bg-success`: no tema escuro esses tokens são claros. Preenchimento cheio usa o par `bg-*-solid` + `text-*-fg`, que já vem escolhido para os dois temas.
+- Design já definido (suave arredondado, tokens claros/escuros) — manter consistência visual ao adicionar novas telas.

@@ -66,21 +66,21 @@ export default function AtendimentoPage() {
 
   return (
     <div className="h-screen flex flex-col" data-testid="atendimento-page">
-      <div className="border-b border-slate-900 bg-white px-6 py-4 flex items-center justify-between">
+      <div className="border-b border-line-strong bg-surface px-6 py-4 flex items-center justify-between">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500">Central</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3">Central</div>
           <h1 className="font-heading text-2xl font-black tracking-tighter">CRM</h1>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Conexão:</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-3">Conexão:</label>
             <select data-testid="connection-filter" className="zz-input" style={{ width: "auto" }} value={connFilter} onChange={(e) => setConnFilter(e.target.value)}>
               <option value="">Todas</option>
               {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Depto:</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-3">Depto:</label>
             <select data-testid="dept-filter" className="zz-input" style={{ width: "auto" }} value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
               <option value="">Todos</option>
               {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
@@ -97,19 +97,19 @@ export default function AtendimentoPage() {
             const list = sessions.filter((s) => s.status_atendimento === col.key);
             const alerting = col.key === "aguardando" && list.length > 0;
             return (
-              <div key={col.key} className="border-r border-slate-200 flex flex-col min-w-0 bg-[#F8F9FA]" data-testid={`column-${col.key}`}>
+              <div key={col.key} className="border-r border-line flex flex-col min-w-0 bg-canvas" data-testid={`column-${col.key}`}>
                 <div
-                  className="px-3 py-2.5 border-b-2 flex items-center justify-between"
+                  className="px-3 py-2.5 border-b flex items-center justify-between"
                   style={alerting
-                    ? { background: "#EF4444", borderBottomColor: "#B91C1C", color: "#fff" }
-                    : { background: "#fff", borderBottomColor: "#e2e8f0" }}
+                    ? { background: "var(--danger-solid)", borderBottomColor: "var(--danger)", color: "var(--danger-fg)" }
+                    : { background: "var(--surface)", borderBottomColor: "var(--line)" }}
                 >
                   <div className="flex items-center gap-2">
                     <div
-                      className="w-5 h-5 flex items-center justify-center border text-white"
+                      className="w-5 h-5 flex items-center justify-center border text-white rounded-sm"
                       style={alerting
-                        ? { background: "#B91C1C", borderColor: "#fff" }
-                        : { background: col.color, borderColor: "#0F172A" }}
+                        ? { background: "var(--danger)", borderColor: "var(--danger-fg)" }
+                        : { background: col.color, borderColor: "var(--line-strong)" }}
                     >
                       <Icon size={12} weight="bold" />
                     </div>
@@ -119,14 +119,14 @@ export default function AtendimentoPage() {
                     className={alerting
                       ? "zz-queue-badge zz-alert-pulse"
                       : "text-xs font-mono font-bold"}
-                    style={alerting ? { background: "#fff", color: "#B91C1C" } : undefined}
+                    style={alerting ? { background: "var(--danger-fg)", color: "var(--danger-solid)" } : undefined}
                     data-testid={`count-${col.key}`}
                   >
                     {counts[col.key] || 0}
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {list.length === 0 && <div className="text-xs text-slate-400 text-center pt-4">Vazio</div>}
+                  {list.length === 0 && <div className="text-xs text-ink-4 text-center pt-4">Vazio</div>}
                   {list.map((s) => (
                     <SessionCard key={s.id} session={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
                   ))}
@@ -138,29 +138,29 @@ export default function AtendimentoPage() {
 
         {/* Right chat pane */}
         {activeId && active && (
-          <div className="w-[420px] border-l border-slate-900 bg-white flex flex-col" data-testid="chat-panel">
-            <div className="p-3 border-b border-slate-900 flex items-start justify-between">
+          <div className="w-[420px] border-l border-line-strong bg-surface flex flex-col" data-testid="chat-panel">
+            <div className="p-3 border-b border-line-strong flex items-start justify-between">
               <div className="min-w-0">
                 <div className="font-heading text-lg font-black tracking-tight truncate">{active.contact?.nome || "—"}</div>
-                <div className="text-xs font-mono text-slate-500 truncate">{active.contact?.numero_whatsapp}</div>
+                <div className="text-xs font-mono text-ink-3 truncate">{active.contact?.numero_whatsapp}</div>
                 <div className="mt-2 flex items-center gap-2 flex-wrap">
                   <StatusBadge status={active.status_atendimento} />
                   {active.connection && <ConnectionBadge connection={active.connection} />}
                   {active.department && (
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-900 text-white" style={{ background: active.department.cor }}>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-line-strong text-white rounded-full" style={{ background: active.department.cor }}>
                       {active.department.nome}
                     </span>
                   )}
                   {active.agent && (
-                    <span className="text-[10px] text-slate-500">👤 {active.agent.name}</span>
+                    <span className="text-[10px] text-ink-3">👤 {active.agent.name}</span>
                   )}
                 </div>
               </div>
-              <button onClick={() => setActiveId(null)} className="p-1.5 hover:bg-slate-100" data-testid="close-chat"><X size={16} weight="bold" /></button>
+              <button onClick={() => setActiveId(null)} className="p-1.5 hover:bg-surface-2" data-testid="close-chat"><X size={16} weight="bold" /></button>
             </div>
 
-            <div className="px-3 py-2 border-b border-slate-200 flex items-center gap-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Depto:</label>
+            <div className="px-3 py-2 border-b border-line flex items-center gap-2">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3">Depto:</label>
               <select className="zz-input" style={{ padding: "0.3rem 0.5rem" }} value={active.departamento_id || ""} onChange={(e) => reassign(e.target.value)} data-testid="reassign-dept">
                 <option value="">— nenhum —</option>
                 {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
@@ -178,7 +178,7 @@ export default function AtendimentoPage() {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-[#F0F4F8]">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-surface-2">
               {messages.map((m) => (
                 <MessageBubble key={m.id} m={m} />
               ))}

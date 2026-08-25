@@ -51,8 +51,8 @@ export default function InboxPage() {
 
   return (
     <div className="h-screen flex flex-col" data-testid="inbox-page">
-      <div className="border-b border-slate-900 bg-white px-6 py-4">
-        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Central</div>
+      <div className="border-b border-line-strong bg-surface px-6 py-4">
+        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Central</div>
         <h1 className="font-heading text-2xl font-black tracking-tighter mb-4">Atendimento</h1>
         <div className="flex items-center gap-2 flex-wrap">
           {STATUS.map((s) => {
@@ -67,22 +67,22 @@ export default function InboxPage() {
                 key={s.key}
                 onClick={() => { setStage(s.key); setActiveId(null); }}
                 data-testid={`stage-btn-${s.key}`}
-                className={`flex items-center gap-2 px-3 py-2 border-2 font-bold text-xs uppercase tracking-wider transition-colors ${alerting && !isActive ? "zz-alert-pulse" : ""}`}
+                className={`flex items-center gap-2 px-3 py-2 border rounded-lg font-bold text-xs uppercase tracking-wider transition-colors ${alerting && !isActive ? "zz-alert-pulse" : ""}`}
                 style={
                   alerting
                     // Aba selecionada continua distinguível pela borda escura,
                     // mesmo quando o vermelho de alerta assume o fundo.
-                    ? { background: "#EF4444", borderColor: isActive ? "#0F172A" : "#B91C1C", color: "#fff" }
+                    ? { background: "var(--danger-solid)", borderColor: isActive ? "var(--text)" : "var(--danger)", color: "var(--danger-fg)" }
                     : isActive
                       ? { background: s.color, borderColor: s.color, color: "#fff" }
-                      : { background: "#fff", borderColor: "#e2e8f0", color: "#64748B" }
+                      : { background: "var(--surface)", borderColor: "var(--line)", color: "var(--text-3)" }
                 }
               >
                 <Icon size={14} weight="bold" />
                 {s.label}
                 <span
-                  className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[11px] font-bold ${alerting ? "rounded-full bg-white text-red-600" : "font-mono border"}`}
-                  style={alerting ? undefined : { borderColor: isActive ? "#fff" : "#cbd5e1" }}
+                  className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[11px] font-bold ${alerting ? "rounded-full bg-surface text-danger" : "font-mono border rounded-full"}`}
+                  style={alerting ? undefined : { borderColor: isActive ? "#fff" : "var(--line-strong)" }}
                 >
                   {n}
                 </span>
@@ -96,7 +96,7 @@ export default function InboxPage() {
         <button
           onClick={() => { setStage("aguardando"); setActiveId(null); }}
           data-testid="queue-banner"
-          className="w-full shrink-0 flex items-center justify-center gap-2 px-6 py-2 bg-red-500 text-white text-sm font-bold border-b-2 border-red-700 hover:bg-red-600 zz-alert-blink"
+          className="w-full shrink-0 flex items-center justify-center gap-2 px-6 py-2 bg-danger-solid text-danger-fg text-sm font-bold border-b border-danger-solid hover:bg-danger zz-alert-blink"
         >
           <Warning size={16} weight="fill" />
           {counts.aguardando === 1
@@ -107,10 +107,10 @@ export default function InboxPage() {
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-80 border-r border-slate-200 bg-white flex flex-col">
+        <div className="w-80 border-r border-line bg-surface flex flex-col">
           <div className="flex-1 overflow-y-auto">
             {visible.length === 0 && (
-              <div className="text-xs text-slate-400 text-center pt-6">Nenhuma conversa aqui.</div>
+              <div className="text-xs text-ink-4 text-center pt-6">Nenhuma conversa aqui.</div>
             )}
             {visible.map((s) => (
               <SessionListItem key={s.id} session={s} active={activeId === s.id} onClick={() => setActiveId(s.id)} />
@@ -119,13 +119,13 @@ export default function InboxPage() {
         </div>
 
         {activeId && active ? (
-          <div className="flex-1 bg-white flex flex-col" data-testid="chat-panel">
-            <div className="p-3 border-b border-slate-900 flex items-start justify-between gap-3">
+          <div className="flex-1 bg-surface flex flex-col" data-testid="chat-panel">
+            <div className="p-3 border-b border-line-strong flex items-start justify-between gap-3">
               <div className="flex items-start gap-3 min-w-0">
                 <Avatar name={active.contact?.nome || active.contact?.numero_whatsapp || "—"} photoUrl={active.contact?.foto_url} size={40} />
                 <div className="min-w-0">
                   <div className="font-heading text-lg font-black tracking-tight truncate">{active.contact?.nome || "—"}</div>
-                  <div className="text-xs font-mono text-slate-500 truncate">{active.contact?.numero_whatsapp}</div>
+                  <div className="text-xs font-mono text-ink-3 truncate">{active.contact?.numero_whatsapp}</div>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -139,11 +139,11 @@ export default function InboxPage() {
                     <CheckCircle size={12} weight="bold" /> Finalizar
                   </button>
                 )}
-                <button onClick={() => setActiveId(null)} className="p-1.5 hover:bg-slate-100" data-testid="close-chat"><X size={16} weight="bold" /></button>
+                <button onClick={() => setActiveId(null)} className="p-1.5 hover:bg-surface-2" data-testid="close-chat"><X size={16} weight="bold" /></button>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-[#F0F4F8]">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-surface-2">
               {messages.map((m) => (
                 <MessageBubble key={m.id} m={m} />
               ))}
@@ -153,7 +153,7 @@ export default function InboxPage() {
             <ChatComposer sessionId={activeId} canSend={canSend} onSent={refreshActive} />
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-500 bg-white">
+          <div className="flex-1 flex items-center justify-center text-ink-3 bg-surface">
             <div className="text-center">
               <div>Selecione uma conversa para começar a atender</div>
             </div>

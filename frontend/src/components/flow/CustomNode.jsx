@@ -39,38 +39,38 @@ function CustomNode({ id, data, selected, type }) {
 
       <div className="zz-node-body">
         {type === "start" && (
-          <div className="text-xs text-slate-500">
-            Gatilho: <span className="font-mono text-slate-800">{data.trigger || "first_message"}</span>
+          <div className="text-xs text-ink-3">
+            Gatilho: <span className="font-mono text-ink">{data.trigger || "first_message"}</span>
           </div>
         )}
         {type === "text" && (
-          <div className="text-xs text-slate-700 line-clamp-3 whitespace-pre-wrap">
-            {data.text || <span className="text-slate-400 italic">Nenhuma mensagem definida</span>}
+          <div className="text-xs text-ink line-clamp-3 whitespace-pre-wrap">
+            {data.text || <span className="text-ink-4 italic">Nenhuma mensagem definida</span>}
           </div>
         )}
         {type === "menu" && (
           <div className="space-y-1">
-            <div className="text-xs text-slate-700 line-clamp-2">{data.text || "Pergunta do menu"}</div>
-            <div className="text-[10px] font-mono text-slate-500">{(data.options || []).length} opções</div>
+            <div className="text-xs text-ink line-clamp-2">{data.text || "Pergunta do menu"}</div>
+            <div className="text-[10px] font-mono text-ink-3">{(data.options || []).length} opções</div>
           </div>
         )}
         {type === "save_variable" && (
           <div className="text-xs font-mono">
-            <span className="text-slate-500">{"{"}</span>
-            <span className="text-orange-600 font-bold">{data.variable_name || "?"}</span>
-            <span className="text-slate-500">{"}"}</span>
-            <span className="text-slate-500"> = </span>
-            <span className="text-slate-800">{data.source === "fixed" ? `"${data.value}"` : "resposta"}</span>
+            <span className="text-ink-3">{"{"}</span>
+            <span className="text-warning font-bold">{data.variable_name || "?"}</span>
+            <span className="text-ink-3">{"}"}</span>
+            <span className="text-ink-3"> = </span>
+            <span className="text-ink">{data.source === "fixed" ? `"${data.value}"` : "resposta"}</span>
           </div>
         )}
         {type === "condition" && (
-          <div className="text-xs font-mono text-slate-800">
+          <div className="text-xs font-mono text-ink">
             {data.variable_name || "?"} {data.operator || "=="} "{data.value}"
           </div>
         )}
         {type === "media" && (
-          <div className="text-xs text-slate-700">
-            {data.media_type || "image"} · {data.url ? "url definida" : <span className="italic text-slate-400">sem url</span>}
+          <div className="text-xs text-ink">
+            {data.media_type || "image"} · {data.url ? "url definida" : <span className="italic text-ink-4">sem url</span>}
           </div>
         )}
         {type === "delay" && (
@@ -78,24 +78,24 @@ function CustomNode({ id, data, selected, type }) {
         )}
         {type === "webhook" && (
           <div className="text-xs font-mono truncate">
-            <span className="text-blue-600 font-bold">{data.method || "GET"}</span> {data.url || "https://..."}
+            <span className="text-info font-bold">{data.method || "GET"}</span> {data.url || "https://..."}
           </div>
         )}
         {type === "human_handoff" && (
-          <div className="text-xs text-slate-700">
+          <div className="text-xs text-ink">
             Vai para a fila de{" "}
             {data.department_id
-              ? <span className="font-mono text-red-700">{data.department_name || data.department_id}</span>
-              : <span className="italic text-slate-500">departamento padrão da conexão</span>}
+              ? <span className="font-mono text-danger">{data.department_name || data.department_id}</span>
+              : <span className="italic text-ink-3">departamento padrão da conexão</span>}
           </div>
         )}
         {type === "transfer_bot" && (
-          <div className="text-xs text-slate-700">
-            Passa a conversa para: <span className="font-mono text-violet-700">{data.target_bot_name || data.target_bot_id || <span className="italic text-slate-400">selecione um bot</span>}</span>
+          <div className="text-xs text-ink">
+            Passa a conversa para: <span className="font-mono text-info">{data.target_bot_name || data.target_bot_id || <span className="italic text-ink-4">selecione um bot</span>}</span>
           </div>
         )}
         {type === "end" && (
-          <div className="text-xs text-slate-700">A sessão do contato é finalizada.</div>
+          <div className="text-xs text-ink">A sessão do contato é finalizada.</div>
         )}
       </div>
 
@@ -109,11 +109,11 @@ function CustomNode({ id, data, selected, type }) {
         />
       )}
       {outputs.length > 1 && (
-        <div className="border-t border-slate-200 bg-slate-50">
+        <div className="border-t border-line bg-surface-2">
           {outputs.map((o, i) => (
             <div
               key={o.id}
-              className="relative text-[11px] font-medium px-3 py-1.5 border-b border-slate-100 last:border-b-0 text-slate-700"
+              className="relative text-[11px] font-medium px-3 py-1.5 border-b border-line last:border-b-0 text-ink"
               style={{ paddingRight: 20 }}
             >
               {o.label}

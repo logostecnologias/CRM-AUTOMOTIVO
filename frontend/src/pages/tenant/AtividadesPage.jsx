@@ -113,9 +113,9 @@ export default function AtividadesPage() {
     <div className="p-8 max-w-5xl" data-testid="atividades-page">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Agenda</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Agenda</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Atividades</h1>
-          <p className="text-slate-600 mt-2 text-sm">
+          <p className="text-ink-2 mt-2 text-sm">
             O que precisa acontecer, e com quem. Ao concluir, agende o próximo passo na mesma tela.
           </p>
         </div>
@@ -134,42 +134,42 @@ export default function AtividadesPage() {
       </div>
 
       <div className="grid grid-cols-4 gap-2 mb-6">
-        {[["Atrasadas", resumo.atrasadas, "border-red-500 bg-red-50"],
-          ["Para hoje", resumo.hoje, "border-amber-500 bg-amber-50"],
-          ["Próximos 7 dias", resumo.semana, "border-slate-300 bg-white"],
-          ["Total pendente", resumo.pendentes, "border-slate-300 bg-white"]].map(([r, v, cls]) => (
-          <div key={r} className={`border px-4 py-3 ${cls}`}>
-            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-600">{r}</div>
+        {[["Atrasadas", resumo.atrasadas, "border-danger bg-danger-soft"],
+          ["Para hoje", resumo.hoje, "border-warning bg-warning-soft"],
+          ["Próximos 7 dias", resumo.semana, "border-line bg-surface"],
+          ["Total pendente", resumo.pendentes, "border-line bg-surface"]].map(([r, v, cls]) => (
+          <div key={r} className={`border rounded-lg px-4 py-3 ${cls}`}>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-ink-2">{r}</div>
             <div className="font-heading text-2xl font-black tracking-tighter">{v}</div>
           </div>
         ))}
       </div>
 
       {criando && (
-        <form onSubmit={criar} className="border border-slate-900 bg-white p-4 mb-6 grid grid-cols-4 gap-3 items-end zz-panel-hard"
+        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-6 grid grid-cols-4 gap-3 items-end zz-panel-hard rounded-lg"
           data-testid="nova-atividade-form">
           <div className="col-span-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
               O que precisa ser feito
             </label>
             <input required autoFocus className="zz-input" data-testid="nova-atividade-titulo"
               value={criando.titulo} onChange={(e) => setCriando({ ...criando, titulo: e.target.value })} />
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Tipo</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Tipo</label>
             <select className="zz-input" value={criando.tipo}
               onChange={(e) => setCriando({ ...criando, tipo: e.target.value })}>
               {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Quando</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Quando</label>
             <input required type="datetime-local" className="zz-input" data-testid="nova-atividade-quando"
               value={criando.vence_em}
               onChange={(e) => setCriando({ ...criando, vence_em: e.target.value })} />
           </div>
           <div className="col-span-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
               Responsável
             </label>
             <select className="zz-input" value={criando.responsavel_id}
@@ -187,55 +187,55 @@ export default function AtividadesPage() {
         </form>
       )}
 
-      <div className="flex gap-1 mb-4 border-b border-slate-200">
+      <div className="flex gap-1 mb-4 border-b border-line">
         {ABAS.map(([v, r]) => (
           <button key={v} onClick={() => setAba(v)} data-testid={`aba-${v}`}
             className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 -mb-px ${
-              aba === v ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"
+              aba === v ? "border-info text-ink" : "border-transparent text-ink-3 hover:text-ink"
             }`}>
             {r}
             {v === "atrasadas" && resumo.atrasadas > 0 && (
-              <span className="ml-1.5 text-red-600">{resumo.atrasadas}</span>
+              <span className="ml-1.5 text-danger">{resumo.atrasadas}</span>
             )}
           </button>
         ))}
       </div>
 
       {itens.length === 0 ? (
-        <div className="border border-dashed border-slate-300 bg-white p-16 text-center">
-          <CalendarBlank size={28} weight="bold" className="mx-auto mb-3 text-slate-400" />
+        <div className="border border-dashed border-line rounded-xl bg-surface p-16 text-center">
+          <CalendarBlank size={28} weight="bold" className="mx-auto mb-3 text-ink-4" />
           <div className="font-heading text-2xl font-black tracking-tighter mb-2">
             {aba === "atrasadas" ? "Nada atrasado." : aba === "concluidas" ? "Nada concluído ainda."
               : "Nenhuma atividade nesta janela."}
           </div>
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-ink-2">
             {aba === "atrasadas" ? "Agenda em dia." : "Crie uma atividade ou mude a janela."}
           </div>
         </div>
       ) : (
-        <div className="border border-slate-200 bg-white">
+        <div className="border border-line bg-surface rounded-lg">
           {itens.map((a) => (
-            <div key={a.id} className={`border-b border-slate-100 last:border-b-0 ${
-              a.atrasada ? "bg-red-50" : ""
+            <div key={a.id} className={`border-b border-line last:border-b-0 ${
+              a.atrasada ? "bg-danger-soft" : ""
             }`} data-testid={`atividade-linha-${a.id}`}>
               <div className="flex items-start gap-3 px-4 py-3">
                 {aba === "concluidas" ? (
-                  <Check size={16} weight="bold" className="text-green-700 shrink-0 mt-0.5" />
+                  <Check size={16} weight="bold" className="text-success shrink-0 mt-0.5" />
                 ) : (
                   <button onClick={() => abrirConclusao(a)} title="Concluir"
                     data-testid={`linha-concluir-${a.id}`}
-                    className="w-5 h-5 border border-slate-400 hover:bg-green-100 hover:border-green-600 shrink-0 mt-0.5" />
+                    className="w-5 h-5 border border-line-strong hover:bg-success-soft hover:border-success shrink-0 mt-0.5 rounded-sm" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className={`text-sm font-semibold ${aba === "concluidas" ? "line-through text-slate-500" : ""}`}>
+                  <div className={`text-sm font-semibold ${aba === "concluidas" ? "line-through text-ink-3" : ""}`}>
                     {a.titulo}
                   </div>
                   <div className="flex items-center gap-2 text-[11px] mt-0.5 flex-wrap">
-                    <span className="text-slate-500 flex items-center gap-1">
+                    <span className="text-ink-3 flex items-center gap-1">
                       <IconeTipo tipo={a.tipo} size={11} />
                       {(TIPOS.find(([v]) => v === a.tipo) || [])[1]}
                     </span>
-                    <span className={`font-mono ${a.atrasada ? "text-red-700 font-bold" : "text-slate-500"}`}>
+                    <span className={`font-mono ${a.atrasada ? "text-danger font-bold" : "text-ink-3"}`}>
                       {aba === "concluidas"
                         ? `concluída ${quando(a.concluida_em)}`
                         : quando(a.vence_em)}
@@ -243,33 +243,33 @@ export default function AtividadesPage() {
                     </span>
                     {a.contact && (
                       <a href={`/app/contacts?contato=${a.contact.id}`}
-                        className="text-slate-700 flex items-center gap-1 hover:underline">
+                        className="text-ink flex items-center gap-1 hover:underline">
                         <User size={11} weight="bold" /> {a.contact.nome}
                       </a>
                     )}
                     {a.deal && (
                       <a href={`/app/funil?negocio=${a.deal.id}`}
-                        className="text-slate-700 flex items-center gap-1 hover:underline">
+                        className="text-ink flex items-center gap-1 hover:underline">
                         <Funnel size={11} weight="bold" /> {a.deal.titulo}
                       </a>
                     )}
                   </div>
-                  {a.descricao && <div className="text-xs text-slate-600 mt-1">{a.descricao}</div>}
+                  {a.descricao && <div className="text-xs text-ink-2 mt-1">{a.descricao}</div>}
                 </div>
                 {aba === "concluidas" && (
-                  <button onClick={() => reabrir(a.id)} title="Reabrir" className="p-1 hover:bg-slate-200">
+                  <button onClick={() => reabrir(a.id)} title="Reabrir" className="p-1 hover:bg-surface-3">
                     <ArrowCounterClockwise size={13} weight="bold" />
                   </button>
                 )}
-                <button onClick={() => excluir(a)} className="p-1 hover:bg-red-100 text-red-600 shrink-0">
+                <button onClick={() => excluir(a)} className="p-1 hover:bg-danger-soft text-danger shrink-0">
                   <Trash size={13} weight="bold" />
                 </button>
               </div>
 
               {concluindo === a.id && proxima && (
                 <div className="px-4 pb-3 pl-12">
-                  <div className="border border-slate-300 bg-slate-50 p-3">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">
+                  <div className="border border-line bg-surface-2 p-4 rounded-lg">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-ink-2 mb-2">
                       Qual é o próximo passo?
                     </div>
                     <div className="flex gap-2 mb-2">
@@ -291,12 +291,12 @@ export default function AtividadesPage() {
                         Concluir e agendar
                       </button>
                       <button onClick={() => concluir(a.id, false)}
-                        className="text-[11px] text-slate-600 underline" data-testid="concluir-so">
+                        className="text-[11px] text-ink-2 underline" data-testid="concluir-so">
                         Concluir sem próximo passo
                       </button>
                       <div className="flex-1" />
                       <button onClick={() => { setConcluindo(null); setProxima(null); }}
-                        className="p-1 hover:bg-slate-200"><X size={13} weight="bold" /></button>
+                        className="p-1 hover:bg-surface-3"><X size={13} weight="bold" /></button>
                     </div>
                   </div>
                 </div>
@@ -308,7 +308,7 @@ export default function AtividadesPage() {
 
       {resumo.atrasadas > 0 && aba !== "atrasadas" && (
         <button onClick={() => setAba("atrasadas")}
-          className="mt-4 flex items-center gap-2 text-sm text-red-700 hover:underline">
+          className="mt-4 flex items-center gap-2 text-sm text-danger hover:underline">
           <Warning size={14} weight="bold" />
           {resumo.atrasadas} atividade(s) atrasada(s) esperando
         </button>

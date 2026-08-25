@@ -18,18 +18,18 @@ export default function SuperAdminDashboard() {
   return (
     <div className="p-8" data-testid="admin-dashboard">
       <div className="mb-8">
-        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Painel Super Admin</div>
+        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Painel Super Admin</div>
         <h1 className="font-heading text-4xl font-black tracking-tighter">Métricas Globais</h1>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 border border-slate-200 bg-white">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 border border-line bg-surface rounded-lg">
         {items.map((it) => {
           const Icon = it.icon;
           return (
-            <div key={it.key} className="border-r border-b border-slate-200 p-6 last:border-r-0" data-testid={`admin-metric-${it.key}`}>
+            <div key={it.key} className="border-r border-b border-line p-6 last:border-r-0" data-testid={`admin-metric-${it.key}`}>
               <div className="flex items-center justify-between mb-4">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-500">{it.label}</div>
-                <div className="w-8 h-8 flex items-center justify-center border border-slate-900 text-white" style={{ background: it.color }}>
+                <div className="text-xs font-bold uppercase tracking-wider text-ink-3">{it.label}</div>
+                <div className="w-8 h-8 flex items-center justify-center border border-line-strong text-white rounded-lg" style={{ background: it.color }}>
                   <Icon size={16} weight="bold" />
                 </div>
               </div>

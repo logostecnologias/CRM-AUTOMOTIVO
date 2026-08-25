@@ -47,7 +47,7 @@ function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar" }) {
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); onSalvar(form); }}
-      className="border border-slate-300 bg-slate-50 p-2 space-y-2"
+      className="border border-line bg-surface-2 p-3 space-y-2 rounded-lg"
       data-testid="atividade-form"
     >
       <input required autoFocus className="zz-input h-8 py-1 text-sm" data-testid="atividade-titulo"
@@ -65,7 +65,7 @@ function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar" }) {
       <div className="flex gap-1.5">
         {[[1, "amanhã"], [3, "3 dias"], [7, "1 semana"]].map(([d, r]) => (
           <button key={d} type="button" onClick={() => setForm({ ...form, vence_em: emDias(d) })}
-            className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-slate-300 bg-white hover:bg-slate-100">
+            className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-line bg-surface hover:bg-surface-2 rounded-full">
             {r}
           </button>
         ))}
@@ -163,46 +163,46 @@ export default function Atividades({ vinculo = {}, onMudou, mostrarVinculos = fa
       )}
 
       {itens.length === 0 && !criando && (
-        <div className="text-xs text-slate-400 mb-2">
+        <div className="text-xs text-ink-4 mb-2">
           Nenhum próximo passo agendado.
         </div>
       )}
 
       <div className="space-y-1.5">
         {itens.map((a) => (
-          <div key={a.id} className={`border px-3 py-2 ${
-            a.atrasada ? "border-red-400 bg-red-50" : "border-slate-200 bg-white"
+          <div key={a.id} className={`border rounded-lg px-3 py-2 ${
+            a.atrasada ? "border-danger bg-danger-soft" : "border-line bg-surface"
           }`} data-testid={`atividade-${a.id}`}>
             <div className="flex items-start gap-2">
               <button onClick={() => setConcluindo(concluindo === a.id ? null : a.id)}
                 title="Concluir" data-testid={`concluir-${a.id}`}
-                className="w-5 h-5 border border-slate-400 hover:bg-green-100 hover:border-green-600 flex items-center justify-center shrink-0 mt-0.5">
-                {concluindo === a.id && <Check size={12} weight="bold" className="text-green-700" />}
+                className="w-5 h-5 border border-line-strong hover:bg-success-soft hover:border-success flex items-center justify-center shrink-0 mt-0.5 rounded-sm">
+                {concluindo === a.id && <Check size={12} weight="bold" className="text-success" />}
               </button>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold leading-tight">{a.titulo}</div>
                 <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
-                  <span className="text-slate-500"><IconeTipo tipo={a.tipo} size={11} /></span>
-                  <span className={`font-mono ${a.atrasada ? "text-red-700 font-bold" : "text-slate-500"}`}>
+                  <span className="text-ink-3"><IconeTipo tipo={a.tipo} size={11} /></span>
+                  <span className={`font-mono ${a.atrasada ? "text-danger font-bold" : "text-ink-3"}`}>
                     {quando(a.vence_em)}{a.atrasada ? " · atrasada" : ""}
                   </span>
                   {mostrarVinculos && a.contact && (
-                    <span className="text-slate-600 truncate">· {a.contact.nome}</span>
+                    <span className="text-ink-2 truncate">· {a.contact.nome}</span>
                   )}
                   {mostrarVinculos && a.deal && (
-                    <span className="text-slate-600 truncate">· {a.deal.titulo}</span>
+                    <span className="text-ink-2 truncate">· {a.deal.titulo}</span>
                   )}
                 </div>
-                {a.descricao && <div className="text-xs text-slate-600 mt-1">{a.descricao}</div>}
+                {a.descricao && <div className="text-xs text-ink-2 mt-1">{a.descricao}</div>}
               </div>
-              <button onClick={() => excluir(a)} className="p-0.5 hover:bg-red-100 text-red-600 shrink-0">
+              <button onClick={() => excluir(a)} className="p-0.5 hover:bg-danger-soft text-danger shrink-0">
                 <Trash size={12} weight="bold" />
               </button>
             </div>
 
             {concluindo === a.id && (
-              <div className="mt-2 pt-2 border-t border-slate-200">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+              <div className="mt-2 pt-2 border-t border-line">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-ink-2 mb-1.5">
                   Qual é o próximo passo?
                 </div>
                 <FormAtividade rotulo="Concluir e agendar"
@@ -210,7 +210,7 @@ export default function Atividades({ vinculo = {}, onMudou, mostrarVinculos = fa
                   onSalvar={(form) => concluir(a.id, form)}
                   onCancelar={() => setConcluindo(null)} />
                 <button onClick={() => concluir(a.id, null)}
-                  className="text-[11px] text-slate-600 underline mt-1.5"
+                  className="text-[11px] text-ink-2 underline mt-1.5"
                   data-testid={`concluir-sem-proxima-${a.id}`}>
                   Concluir sem agendar próximo passo
                 </button>
@@ -223,14 +223,14 @@ export default function Atividades({ vinculo = {}, onMudou, mostrarVinculos = fa
       {verConcluidas && (
         <div className="mt-3 space-y-1">
           {concluidas.map((a) => (
-            <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 border border-slate-100 bg-slate-50"
+            <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 border border-line bg-surface-2 rounded-lg"
               data-testid={`concluida-${a.id}`}>
-              <Check size={12} weight="bold" className="text-green-700 shrink-0" />
-              <span className="text-xs text-slate-500 line-through flex-1 truncate">{a.titulo}</span>
-              <span className="text-[10px] font-mono text-slate-400 shrink-0">
+              <Check size={12} weight="bold" className="text-success shrink-0" />
+              <span className="text-xs text-ink-3 line-through flex-1 truncate">{a.titulo}</span>
+              <span className="text-[10px] font-mono text-ink-4 shrink-0">
                 {new Date(a.concluida_em).toLocaleDateString("pt-BR")}
               </span>
-              <button onClick={() => reabrir(a.id)} title="Reabrir" className="p-0.5 hover:bg-slate-200">
+              <button onClick={() => reabrir(a.id)} title="Reabrir" className="p-0.5 hover:bg-surface-3">
                 <ArrowCounterClockwise size={11} weight="bold" />
               </button>
             </div>

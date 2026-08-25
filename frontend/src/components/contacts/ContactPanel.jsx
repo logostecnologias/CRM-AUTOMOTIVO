@@ -18,9 +18,9 @@ const KANBAN_LABEL = {
 
 function Bloco({ titulo, children, acao }) {
   return (
-    <div className="border-t border-slate-200 px-5 py-4">
+    <div className="border-t border-line px-5 py-4">
       <div className="flex items-center justify-between mb-3">
-        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{titulo}</div>
+        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3">{titulo}</div>
         {acao}
       </div>
       {children}
@@ -31,7 +31,7 @@ function Bloco({ titulo, children, acao }) {
 function Linha({ label, children }) {
   return (
     <div className="grid grid-cols-3 gap-2 items-center py-1">
-      <label className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</label>
+      <label className="text-xs font-bold uppercase tracking-wider text-ink-3">{label}</label>
       <div className="col-span-2">{children}</div>
     </div>
   );
@@ -201,8 +201,8 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
 
   if (!ficha || !form) {
     return (
-      <aside className="fixed right-0 top-0 h-screen w-[520px] bg-white border-l-2 border-slate-900 z-40 flex items-center justify-center">
-        <div className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">Carregando ficha…</div>
+      <aside className="fixed right-0 top-0 h-screen w-[520px] bg-surface border-l border-line shadow-pop z-40 flex items-center justify-center">
+        <div className="text-xs font-bold uppercase tracking-[0.25em] text-ink-3">Carregando ficha…</div>
       </aside>
     );
   }
@@ -212,36 +212,36 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
   const conectadas = conexoes.filter((x) => x.status === "conectado");
 
   return (
-    <aside className="fixed right-0 top-0 h-screen w-[520px] bg-white border-l-2 border-slate-900 z-40 flex flex-col"
+    <aside className="fixed right-0 top-0 h-screen w-[520px] bg-surface border-l border-line shadow-pop z-40 flex flex-col"
       data-testid="contact-panel">
-      <div className="px-5 py-4 border-b border-slate-900 flex items-start gap-3">
+      <div className="px-5 py-4 border-b border-line-strong flex items-start gap-3">
         {c.foto_url
-          ? <img src={c.foto_url} alt="" className="w-11 h-11 border border-slate-900 object-cover" />
-          : <div className="w-11 h-11 bg-slate-900 text-white flex items-center justify-center font-heading font-black">
+          ? <img src={c.foto_url} alt="" className="w-11 h-11 border border-line-strong object-cover rounded-full" />
+          : <div className="w-11 h-11 bg-brand text-brand-fg flex items-center justify-center font-heading font-black">
               {(c.nome || "?").charAt(0).toUpperCase()}
             </div>}
         <div className="flex-1 min-w-0">
           <div className="font-heading text-xl font-black tracking-tighter truncate">{c.nome}</div>
-          <div className="font-mono text-xs text-slate-600">{c.numero_whatsapp}</div>
+          <div className="font-mono text-xs text-ink-2">{c.numero_whatsapp}</div>
         </div>
-        <button onClick={onClose} data-testid="contact-panel-close" className="p-1.5 hover:bg-slate-200">
+        <button onClick={onClose} data-testid="contact-panel-close" className="p-1.5 hover:bg-surface-3">
           <X size={16} weight="bold" />
         </button>
       </div>
 
       {c.opt_out && (
-        <div className="px-5 py-2 bg-red-50 border-b border-red-300 text-xs text-red-800 flex items-center gap-2">
+        <div className="px-5 py-2 bg-danger-soft border-b border-danger text-xs text-danger flex items-center gap-2">
           <Prohibit size={13} weight="bold" />
           Não recebe campanhas{c.opt_out_em ? ` desde ${new Date(c.opt_out_em).toLocaleDateString("pt-BR")}` : ""}.
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto">
-        <div className="grid grid-cols-4 border-b border-slate-200">
+        <div className="grid grid-cols-4 border-b border-line">
           {[["Conversas", r.conversas], ["Mensagens", r.mensagens],
             ["Campanhas", r.campanhas_recebidas], ["Respostas", r.campanhas_respondidas]].map(([k, v]) => (
-            <div key={k} className="px-3 py-2.5 border-r border-slate-200 last:border-r-0">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{k}</div>
+            <div key={k} className="px-3 py-2.5 border-r border-line last:border-r-0">
+              <div className="text-[9px] font-bold uppercase tracking-wider text-ink-3">{k}</div>
               <div className="font-heading text-lg font-black tracking-tighter">{v}</div>
             </div>
           ))}
@@ -286,8 +286,8 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
           </Linha>
           <Linha label="Campanhas">
             <button onClick={alternarOptOut} data-testid="contact-optout-toggle"
-              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-bold uppercase tracking-wider border ${
-                c.opt_out ? "border-red-500 bg-red-50 text-red-700" : "border-green-500 bg-green-50 text-green-700"
+              className={`flex items-center gap-1.5 px-2 py-1 text-xs font-bold uppercase tracking-wider border rounded-full ${
+                c.opt_out ? "border-danger bg-danger-soft text-danger" : "border-success bg-success-soft text-success"
               }`}>
               {c.opt_out ? <Prohibit size={12} weight="bold" /> : <Check size={12} weight="bold" />}
               {c.opt_out ? "não recebe" : "recebe"}
@@ -303,7 +303,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                   onChange={(v) => setForm({ ...form, campos: { ...form.campos, [campo.id]: v } })} />
               </Linha>
             ))}
-            <div className="text-[10px] text-slate-500 mt-2">Salve em "Dados" para gravar também estes campos.</div>
+            <div className="text-[10px] text-ink-3 mt-2">Salve em "Dados" para gravar também estes campos.</div>
           </Bloco>
         )}
 
@@ -314,17 +314,17 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
               value={nota} onChange={(e) => setNota(e.target.value)} />
             <button type="submit" className="zz-btn text-xs py-1"><NotePencil size={13} weight="bold" /></button>
           </form>
-          {ficha.notas.length === 0 && <div className="text-xs text-slate-400">Nenhuma anotação.</div>}
+          {ficha.notas.length === 0 && <div className="text-xs text-ink-4">Nenhuma anotação.</div>}
           <div className="space-y-2">
             {ficha.notas.map((n) => (
-              <div key={n.id} className="border border-slate-200 bg-slate-50 px-3 py-2" data-testid={`note-${n.id}`}>
+              <div key={n.id} className="border border-line bg-surface-2 px-3 py-2 rounded-lg" data-testid={`note-${n.id}`}>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="text-sm text-slate-800 whitespace-pre-wrap flex-1">{n.texto}</div>
-                  <button onClick={() => removerNota(n.id)} className="p-0.5 hover:bg-red-100 text-red-600 shrink-0">
+                  <div className="text-sm text-ink whitespace-pre-wrap flex-1">{n.texto}</div>
+                  <button onClick={() => removerNota(n.id)} className="p-0.5 hover:bg-danger-soft text-danger shrink-0">
                     <Trash size={12} weight="bold" />
                   </button>
                 </div>
-                <div className="text-[10px] font-mono text-slate-500 mt-1">
+                <div className="text-[10px] font-mono text-ink-3 mt-1">
                   {n.autor_nome} · {new Date(n.created_at).toLocaleString("pt-BR")}
                 </div>
               </div>
@@ -346,7 +346,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
           )
         }>
           {criandoNegocio && (
-            <form onSubmit={criarNegocio} className="border border-slate-300 bg-slate-50 p-2 mb-3 space-y-2"
+            <form onSubmit={criarNegocio} className="border border-line bg-surface-2 p-3 mb-3 space-y-2 rounded-lg"
               data-testid="contact-deal-form">
               <input required autoFocus className="zz-input h-8 py-1 text-sm" value={criandoNegocio.titulo}
                 onChange={(e) => setCriandoNegocio({ ...criandoNegocio, titulo: e.target.value })} />
@@ -369,22 +369,22 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
             </form>
           )}
           {negocios.length === 0 && !criandoNegocio && (
-            <div className="text-xs text-slate-400">Nenhum negócio para este contato.</div>
+            <div className="text-xs text-ink-4">Nenhum negócio para este contato.</div>
           )}
           <div className="space-y-1.5">
             {negocios.map((n) => (
               <a key={n.id} href={`/app/funil?negocio=${n.id}`}
-                className="flex items-center gap-2 border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                className="flex items-center gap-2 border border-line px-3 py-2 hover:bg-surface-2 rounded-lg"
                 data-testid={`contact-deal-${n.id}`}>
-                <Funnel size={14} weight="bold" className="text-slate-500 shrink-0" />
+                <Funnel size={14} weight="bold" className="text-ink-3 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold truncate">{n.titulo}</div>
-                  <div className="text-[10px] font-mono text-slate-500">{formatBRL(n.valor)}</div>
+                  <div className="text-[10px] font-mono text-ink-3">{formatBRL(n.valor)}</div>
                 </div>
-                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 border shrink-0 ${
-                  n.status === "ganho" ? "border-green-500 bg-green-50 text-green-700"
-                    : n.status === "perdido" ? "border-red-500 bg-red-50 text-red-700"
-                    : "border-slate-300 bg-slate-50 text-slate-600"
+                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 border rounded-full shrink-0 ${
+                  n.status === "ganho" ? "border-success bg-success-soft text-success"
+                    : n.status === "perdido" ? "border-danger bg-danger-soft text-danger"
+                    : "border-line bg-surface-2 text-ink-2"
                 }`}>
                   {n.status}
                 </span>
@@ -394,23 +394,23 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
         </Bloco>
 
         <Bloco titulo={`Conversas (${ficha.conversas.length})`}>
-          {ficha.conversas.length === 0 && <div className="text-xs text-slate-400">Nenhuma conversa ainda.</div>}
+          {ficha.conversas.length === 0 && <div className="text-xs text-ink-4">Nenhuma conversa ainda.</div>}
           <div className="space-y-1.5">
             {ficha.conversas.map((s) => (
               <a key={s.id} href={`/app/inbox?session=${s.id}`}
-                className="flex items-center gap-2 border border-slate-200 px-3 py-2 hover:bg-slate-50">
-                <ChatCircleDots size={14} weight="bold" className="text-slate-500 shrink-0" />
+                className="flex items-center gap-2 border border-line px-3 py-2 hover:bg-surface-2 rounded-lg">
+                <ChatCircleDots size={14} weight="bold" className="text-ink-3 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs truncate text-slate-700">
+                  <div className="text-xs truncate text-ink">
                     {s.last_message?.content || "(sem mensagens)"}
                   </div>
-                  <div className="text-[10px] font-mono text-slate-500">
+                  <div className="text-[10px] font-mono text-ink-3">
                     {KANBAN_LABEL[s.status_atendimento] || s.status_atendimento}
                     {s.origem === "campanha" ? " · via campanha" : s.origem === "direta" ? " · iniciada por nós" : ""}
                     {" · "}{new Date(s.updated_at).toLocaleDateString("pt-BR")}
                   </div>
                 </div>
-                <ArrowSquareOut size={12} weight="bold" className="text-slate-400 shrink-0" />
+                <ArrowSquareOut size={12} weight="bold" className="text-ink-4 shrink-0" />
               </a>
             ))}
           </div>
@@ -420,17 +420,17 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
           <Bloco titulo={`Campanhas recebidas (${ficha.campanhas.length})`}>
             <div className="space-y-1.5">
               {ficha.campanhas.map((k) => (
-                <div key={`${k.campaign_id}-${k.sent_at}`} className="flex items-center gap-2 border border-slate-200 px-3 py-2">
-                  <Megaphone size={14} weight="bold" className="text-slate-500 shrink-0" />
+                <div key={`${k.campaign_id}-${k.sent_at}`} className="flex items-center gap-2 border border-line px-3 py-2 rounded-lg">
+                  <Megaphone size={14} weight="bold" className="text-ink-3 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-semibold truncate">{k.nome}</div>
-                    <div className="text-[10px] font-mono text-slate-500">
+                    <div className="text-[10px] font-mono text-ink-3">
                       {k.status}{k.sent_at ? ` · ${new Date(k.sent_at).toLocaleDateString("pt-BR")}` : ""}
                       {k.erro ? ` · ${k.erro}` : ""}
                     </div>
                   </div>
                   {k.respondeu && (
-                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 border border-green-500 bg-green-50 text-green-700 shrink-0">
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 border border-success bg-success-soft text-success shrink-0 rounded-full">
                       respondeu
                     </span>
                   )}
@@ -443,18 +443,18 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
         <Bloco titulo="Dados do titular (LGPD)">
           {!excluindo ? (
             <button onClick={() => setExcluindo(true)} data-testid="abrir-exclusao"
-              className="zz-btn zz-btn-secondary text-xs py-1 text-red-600 border-red-300 hover:bg-red-50">
+              className="zz-btn zz-btn-secondary text-xs py-1 text-danger border-danger hover:bg-danger-soft">
               <TrashIcon size={12} weight="bold" /> Remover este contato
             </button>
           ) : (
             <div className="space-y-2">
               <button onClick={() => excluir("anonimizar")} data-testid="anonimizar"
-                className="w-full text-left border border-slate-300 bg-white px-3 py-2 hover:border-slate-900">
+                className="w-full text-left border border-line bg-surface px-3 py-2 hover:border-line-strong rounded-lg">
                 <div className="flex items-center gap-1.5 text-sm font-semibold">
-                  <ShieldCheck size={13} weight="bold" className="text-green-700" />
+                  <ShieldCheck size={13} weight="bold" className="text-success" />
                   Remover dados pessoais
                 </div>
-                <div className="text-[11px] text-slate-600 mt-0.5">
+                <div className="text-[11px] text-ink-2 mt-0.5">
                   Nome, número, e-mail, campos e notas somem; o texto das mensagens é redigido e a
                   mídia sai do disco. As conversas e os negócios continuam existindo, para os
                   relatórios de meses passados não mudarem. <strong>É esta que atende ao pedido
@@ -462,32 +462,32 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                 </div>
               </button>
               <button onClick={() => excluir("apagar")} data-testid="apagar"
-                className="w-full text-left border border-red-300 bg-red-50 px-3 py-2 hover:border-red-600">
-                <div className="flex items-center gap-1.5 text-sm font-semibold text-red-700">
+                className="w-full text-left border border-danger bg-danger-soft px-3 py-2 hover:border-danger rounded-lg">
+                <div className="flex items-center gap-1.5 text-sm font-semibold text-danger">
                   <TrashIcon size={13} weight="bold" /> Apagar tudo
                 </div>
-                <div className="text-[11px] text-slate-700 mt-0.5">
+                <div className="text-[11px] text-ink mt-0.5">
                   Leva conversas, mensagens, negócios e histórico. A receita desses negócios sai
                   dos relatórios. Use para contato de teste ou importação errada.
                 </div>
               </button>
               <button onClick={() => setExcluindo(false)}
-                className="text-[11px] text-slate-600 underline">Cancelar</button>
+                className="text-[11px] text-ink-2 underline">Cancelar</button>
             </div>
           )}
         </Bloco>
       </div>
 
-      <form onSubmit={enviar} className="border-t-2 border-slate-900 p-3 bg-slate-50" data-testid="contact-send-form">
+      <form onSubmit={enviar} className="border-t border-line p-3 bg-surface-2" data-testid="contact-send-form">
         {conectadas.length === 0 ? (
-          <div className="text-xs text-slate-600 flex items-center gap-2">
-            <Warning size={14} weight="bold" className="text-amber-600" />
+          <div className="text-xs text-ink-2 flex items-center gap-2">
+            <Warning size={14} weight="bold" className="text-warning" />
             Nenhuma conexão de WhatsApp conectada — não é possível enviar agora.
           </div>
         ) : (
           <>
             {c.opt_out && (
-              <div className="text-[11px] text-amber-800 mb-2 flex items-start gap-1.5">
+              <div className="text-[11px] text-warning mb-2 flex items-start gap-1.5">
                 <Warning size={12} weight="bold" className="mt-0.5 shrink-0" />
                 Este contato pediu para não receber campanhas. Mensagem direta ainda é permitida —
                 a recusa vale para disparo em massa, não para atendimento.

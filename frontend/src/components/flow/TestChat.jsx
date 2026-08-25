@@ -57,32 +57,32 @@ export default function TestChat({ flowId, onClose }) {
   };
 
   return (
-    <div className="w-[380px] border-l border-slate-900 bg-white flex flex-col h-full" data-testid="test-chat">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-900 bg-slate-900 text-white">
+    <div className="w-[380px] border-l border-line-strong bg-surface flex flex-col h-full" data-testid="test-chat">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-line-strong bg-brand text-brand-fg">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300">Simulação</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-4">Simulação</div>
           <div className="font-heading text-lg font-black tracking-tight">Testar Fluxo</div>
         </div>
         <div className="flex gap-2">
-          <button data-testid="restart-test" onClick={startSim} className="p-1.5 hover:bg-slate-800" title="Reiniciar">
+          <button data-testid="restart-test" onClick={startSim} className="p-1.5 hover:bg-brand" title="Reiniciar">
             <ArrowClockwise size={16} weight="bold" />
           </button>
-          <button data-testid="close-test-chat" onClick={onClose} className="p-1.5 hover:bg-slate-800">
+          <button data-testid="close-test-chat" onClick={onClose} className="p-1.5 hover:bg-brand">
             <X size={16} weight="bold" />
           </button>
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#F0F4F8]">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-2">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[80%] px-3 py-2 text-sm border ${
+              className={`max-w-[80%] px-3 py-2 text-sm border rounded-2xl ${
                 m.role === "user"
-                  ? "bg-green-100 border-green-600 text-slate-900"
+                  ? "bg-success-soft border-success text-ink"
                   : m.role === "system"
-                  ? "bg-white border-slate-300 text-slate-500 italic text-xs mx-auto"
-                  : "bg-white border-slate-900 text-slate-900"
+                  ? "bg-surface border-line text-ink-3 italic text-xs mx-auto"
+                  : "bg-surface border-line text-ink"
               }`}
             >
               <div className="whitespace-pre-wrap">{m.text}</div>
@@ -92,7 +92,7 @@ export default function TestChat({ flowId, onClose }) {
                     <button
                       key={j}
                       onClick={() => send(String(j + 1))}
-                      className="block w-full text-left text-xs px-2 py-1 bg-slate-50 border border-slate-400 hover:bg-slate-100"
+                      className="block w-full text-left text-xs px-2 py-1 bg-surface-2 border border-line-strong hover:bg-surface-2 rounded-lg"
                       data-testid={`menu-option-${j}`}
                     >
                       {j + 1}. {o}
@@ -103,10 +103,10 @@ export default function TestChat({ flowId, onClose }) {
             </div>
           </div>
         ))}
-        {loading && <div className="text-xs text-slate-500 text-center">processando...</div>}
+        {loading && <div className="text-xs text-ink-3 text-center">processando...</div>}
       </div>
 
-      <div className="p-3 border-t border-slate-200 flex gap-2">
+      <div className="p-3 border-t border-line flex gap-2">
         <input
           data-testid="test-chat-input"
           className="zz-input" value={input}

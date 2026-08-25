@@ -5,22 +5,126 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import '@xyflow/react/dist/style.css';
 
+/* ===========================================================================
+   Tokens
+   ---------------------------------------------------------------------------
+   O desenho anterior era brutalista de propósito: canto reto, borda preta de
+   1px e sombra dura deslocada 4px. Esta é a versão suave — mesma tipografia e
+   mesma família de cor, mas raio arredondado, borda cinza e sombra difusa.
+
+   Toda cor mora aqui, em variável, porque é o que torna o tema escuro possível:
+   cor cravada no JSX (`bg-white`, `text-slate-500`) não tem equivalente escuro,
+   e era exatamente o que travava o tema antes. O JSX usa os tokens do Tailwind
+   (`bg-surface`, `text-ink-3`, `border-line`), que apontam para estas variáveis.
+
+   O par claro/escuro de cada papel é escolhido junto — tema escuro não é o
+   claro invertido.
+   =========================================================================== */
 :root {
-  --brand: #0F172A;
-  --brand-2: #2563EB;
-  --bg: #F8F9FA;
+  color-scheme: light;
+
+  --bg: #F6F7F9;
   --surface: #FFFFFF;
-  --border: #E2E8F0;
-  --border-heavy: #0F172A;
+  --surface-2: #F8FAFC;
+  --surface-3: #EEF2F7;
+
+  --line: #E3E8EF;
+  --line-strong: #CBD5E1;
+
   --text: #0F172A;
   --text-2: #475569;
-  --text-3: #94A3B8;
-  --success: #10B981;
-  --danger: #EF4444;
-  --warning: #F59E0B;
+  --text-3: #64748B;
+  --text-4: #7E8B9E;
+
+  /* O botão sólido continua azul-marinho no claro. No escuro ele vira azul:
+     um bloco quase preto sobre fundo escuro não se destaca de nada. */
+  --brand: #0F172A;
+  --brand-fg: #FFFFFF;
+  --brand-soft: #EEF2F7;
+
+  --danger: #C81E1E;
+  --danger-soft: #FEF2F2;
+  /* `-solid` e o preenchimento cheio (barra de alerta, selo). Vem com o próprio
+     `-fg` porque no tema escuro o vermelho/verde legível é claro, e texto
+     branco sobre ele daria contraste de ~2:1 — o erro clássico de tema escuro
+     feito por inversão. */
+  --danger-solid: #DC2626;
+  --danger-fg: #FFFFFF;
+  --success: #15803D;
+  --success-soft: #F0FDF4;
+  --success-solid: #15803D;
+  --success-fg: #FFFFFF;
+  --warning: #B45309;
+  --warning-soft: #FFFBEB;
+  --warning-solid: #FBBF24;
+  --warning-fg: #0F172A;   /* texto sobre o amarelo cheio, igual nos dois temas */
+  --info: #2563EB;
+  --info-soft: #EFF6FF;
+
+  /* Séries do gráfico. Validadas pelo validador de paleta contra a superfície
+     de cada tema (banda de luminosidade, piso de croma, separação para
+     daltonismo e contraste >= 3:1) — nunca escolhidas a olho. Os passos claros
+     são os que já existiam no produto; os escuros foram escolhidos para a
+     `--surface` do tema escuro, onde os claros reprovam na banda. */
+  --serie-1: #2563EB;
+  --serie-2: #EA580C;
+  --grade: #E2E8F0;
+  --eixo: #7E8B9E;
+
+  --sombra-1: rgba(15, 23, 42, 0.06);
+  --sombra-2: rgba(15, 23, 42, 0.18);
+
+  --radius: 10px;   /* consumido pelos componentes shadcn em components/ui/ */
+
   --font-heading: 'Cabinet Grotesk', 'IBM Plex Sans', system-ui, sans-serif;
   --font-body: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --bg: #0B1020;
+  --surface: #141B2D;
+  --surface-2: #1B2438;
+  --surface-3: #253048;
+
+  --line: #2A3550;
+  --line-strong: #3C4A6B;
+
+  --text: #E8EDF6;
+  --text-2: #B6C2D6;
+  --text-3: #8B97AD;
+  --text-4: #6C7791;
+
+  --brand: #2F6FE4;
+  --brand-fg: #FFFFFF;
+  --brand-soft: #1B2A4A;
+
+  --danger: #F87171;
+  --danger-soft: #3A1D22;
+  --danger-solid: #B42318;
+  --danger-fg: #FFFFFF;
+  --success: #4ADE80;
+  --success-soft: #14301F;
+  --success-solid: #4ADE80;
+  --success-fg: #06251A;
+  --warning: #FBBF24;
+  --warning-soft: #36270B;
+  --warning-solid: #FBBF24;
+  --warning-fg: #0F172A;
+  --info: #60A5FA;
+  --info-soft: #16253F;
+
+  --serie-1: #3B82F6;
+  --serie-2: #E06D1F;
+  --grade: #2A3550;
+  --eixo: #4A5878;
+
+  /* No escuro a sombra preta é quase invisível; o relevo vem da borda mais
+     clara, e a sombra fica só como profundidade de sobreposição. */
+  --sombra-1: rgba(0, 0, 0, 0.30);
+  --sombra-2: rgba(0, 0, 0, 0.55);
 }
 
 body {
@@ -28,61 +132,117 @@ body {
   font-family: var(--font-body);
   background: var(--bg);
   color: var(--text);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* A troca de tema anima só cor. Com `transition: all` a transição pegaria
+   layout também, e cada navegação repintaria a tela inteira com atraso. */
+body, .zz-panel, .zz-panel-hard, .zz-input, .zz-btn, .zz-nav-item {
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 
 .font-heading { font-family: var(--font-heading); letter-spacing: -0.02em; }
 .font-mono { font-family: var(--font-mono); }
 
-/* Grid-borders card */
+/* ===========================================================================
+   Superfícies
+   =========================================================================== */
 .zz-panel {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
+  border-radius: 14px;
 }
+/* Continua chamado `-hard` porque é o painel de destaque e o nome está em ~22
+   telas; o que era sombra dura deslocada virou sombra difusa. */
 .zz-panel-hard {
   background: var(--surface);
-  border: 1px solid var(--border-heavy);
-  box-shadow: 4px 4px 0 rgba(15,23,42,1);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px var(--sombra-1), 0 8px 24px -14px var(--sombra-2);
 }
 
-/* Sharp inputs */
+/* ===========================================================================
+   Controles
+   =========================================================================== */
 .zz-input {
-  border: 1px solid #cbd5e1;
-  border-radius: 0;
-  padding: 0.55rem 0.7rem;
-  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  color: var(--text);
   font-size: 0.875rem;
+  font-family: inherit;
   width: 100%;
   outline: none;
-  transition: border-color .12s, box-shadow .12s;
+  transition: border-color .12s, box-shadow .12s, background-color .15s;
 }
-.zz-input:focus { border-color: #0F172A; box-shadow: 0 0 0 2px #0F172A; }
+.zz-input::placeholder { color: var(--text-4); }
+/* O foco era borda preta + anel preto de 2px. Agora é o azul de informação com
+   anel translúcido — mesma força de sinal, sem o peso do contorno cheio. */
+.zz-input:focus {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 22%, transparent);
+}
+.zz-input:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }
+select.zz-input { cursor: pointer; }
+textarea.zz-input { line-height: 1.55; }
 
 .zz-btn {
   display: inline-flex; align-items: center; gap: .5rem;
-  padding: 0.55rem 1rem; font-weight: 600; font-size: 0.85rem;
-  border: 1px solid #0F172A; background: #0F172A; color: #fff;
-  border-radius: 0; transition: transform .1s, background .12s;
+  padding: 0.6rem 1.1rem; font-weight: 600; font-size: 0.85rem;
+  font-family: inherit;
+  border: 1px solid var(--brand); background: var(--brand); color: var(--brand-fg);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px var(--sombra-1);
+  transition: background .12s, box-shadow .12s, transform .1s, border-color .12s, filter .12s;
   cursor: pointer;
 }
-.zz-btn:hover { background: #1e293b; }
-.zz-btn:active { transform: translate(1px,1px); }
-.zz-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.zz-btn-secondary {
-  background: #fff; color: #0F172A; border: 1px solid #cbd5e1;
+.zz-btn:hover { box-shadow: 0 2px 8px -2px var(--sombra-2); filter: brightness(1.12); }
+/* O empurrãozinho de 1px no clique era a única parte tátil do desenho antigo
+   que valia manter. */
+.zz-btn:active { transform: translateY(1px); box-shadow: none; filter: none; }
+.zz-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; filter: none; }
+.zz-btn:disabled:active { transform: none; }
+.zz-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 35%, transparent);
 }
-.zz-btn-secondary:hover { background: #f1f5f9; border-color: #0F172A; }
-.zz-btn-danger { background: #EF4444; border-color: #EF4444; }
-.zz-btn-danger:hover { background: #dc2626; }
 
-/* Sidebar nav */
-.zz-nav-item {
-  display:flex; align-items:center; gap:0.75rem; padding:0.6rem 1rem;
-  color:#475569; font-size:0.875rem; font-weight:500; border-left:2px solid transparent;
-  cursor:pointer; transition:background .1s;
+.zz-btn-secondary {
+  background: var(--surface); color: var(--text); border-color: var(--line-strong);
 }
-.zz-nav-item:hover { background:#f1f5f9; color:#0F172A; }
-.zz-nav-item.active { color:#0F172A; background:#f1f5f9; border-left-color:#0F172A; font-weight:600; }
+.zz-btn-secondary:hover { background: var(--surface-2); border-color: var(--text-4); filter: none; }
+.zz-btn-danger { background: var(--danger-solid); border-color: var(--danger-solid); color: var(--danger-fg); }
+
+/* Botão-pílula para ação redonda de barra (seletor de tema, por exemplo). */
+.zz-btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.25rem; height: 2.25rem; padding: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--line);
+  background: var(--surface); color: var(--text-2);
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.zz-btn-icon:hover { background: var(--surface-3); color: var(--text); border-color: var(--line-strong); }
+
+/* ===========================================================================
+   Navegação
+   ---------------------------------------------------------------------------
+   O item ativo era marcado por uma barra reta de 2px na borda esquerda. Agora é
+   uma pílula preenchida — mesmo sinal, coerente com o resto arredondado.
+   =========================================================================== */
+.zz-nav-item {
+  display:flex; align-items:center; gap:0.75rem;
+  margin: 0.15rem 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  color: var(--text-3); font-size: 0.875rem; font-weight: 500;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.zz-nav-item:hover { background: var(--surface-3); color: var(--text); }
+.zz-nav-item.active { color: var(--brand-fg); background: var(--brand); font-weight: 600; }
+.zz-nav-item.active:hover { background: var(--brand); color: var(--brand-fg); }
 
 /* Sinalização de fila — conversas aguardando atendimento precisam saltar aos
    olhos de qualquer canto do sistema, não só na tela da Central. */
@@ -104,43 +264,66 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .zz-alert-pulse, .zz-alert-blink { animation: none; }
+  body, .zz-panel, .zz-panel-hard, .zz-input, .zz-btn, .zz-nav-item { transition: none; }
 }
 
-/* React Flow overrides */
-.react-flow__background { background-color: #f8f9fa; }
+/* ===========================================================================
+   Editor de fluxos (React Flow)
+   =========================================================================== */
+.react-flow__background { background-color: var(--bg); }
 .react-flow__handle {
-  width: 12px; height: 12px; background: #fff; border: 2px solid #0F172A;
+  width: 12px; height: 12px;
+  background: var(--surface); border: 2px solid var(--line-strong);
 }
-.react-flow__handle:hover { background: #dbeafe; }
-.react-flow__edge-path { stroke: #94A3B8; stroke-width: 2; }
-.react-flow__edge.selected .react-flow__edge-path { stroke: #2563EB; stroke-width: 3; }
+.react-flow__handle:hover { background: var(--info-soft); border-color: var(--info); }
+.react-flow__edge-path { stroke: var(--text-4); stroke-width: 2; }
+.react-flow__edge.selected .react-flow__edge-path { stroke: var(--info); stroke-width: 3; }
 .react-flow__controls, .react-flow__minimap {
-  border: 1px solid #0F172A; background: #fff; box-shadow: 2px 2px 0 rgba(15,23,42,0.15);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px -4px var(--sombra-2);
 }
+.react-flow__controls-button {
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  color: var(--text); fill: var(--text);
+}
+.react-flow__controls-button:hover { background: var(--surface-3); }
+.react-flow__attribution { background: transparent; color: var(--text-4); }
 
-/* Node containers */
 .zz-node {
-  background: #fff; border: 2px solid #0F172A; min-width: 240px;
-  box-shadow: 2px 2px 0 rgba(15,23,42,0.15);
-  border-radius: 6px; overflow: hidden; transition: transform .12s;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  min-width: 240px;
+  box-shadow: 0 1px 2px var(--sombra-1), 0 8px 20px -14px var(--sombra-2);
+  border-radius: 14px; overflow: hidden;
+  transition: transform .12s, box-shadow .12s;
 }
-.zz-node:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 rgba(15,23,42,0.2); }
-.zz-node.selected { box-shadow: 0 0 0 3px #2563EB, 4px 4px 0 rgba(37,99,235,0.25); }
+.zz-node:hover { transform: translateY(-2px); box-shadow: 0 4px 16px -6px var(--sombra-2); }
+.zz-node.selected {
+  border-color: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 30%, transparent);
+}
 .zz-node-header {
-  display:flex; align-items:center; gap:0.5rem; padding: 0.5rem 0.75rem;
-  border-bottom: 2px solid #0F172A; font-weight: 700; font-size: 0.85rem;
+  display:flex; align-items:center; gap:0.5rem; padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--line); font-weight: 700; font-size: 0.85rem;
 }
-.zz-node-body { padding: 0.75rem; font-size: 0.8rem; color: #334155; }
+.zz-node-body { padding: 0.85rem; font-size: 0.8rem; color: var(--text-2); }
 .zz-node-warning {
-  position: absolute; top: -8px; right: -8px; background: #F59E0B;
-  border: 1px solid #0F172A; padding: 1px 5px; font-size: 10px; font-weight: 700;
+  position: absolute; top: -8px; right: -8px;
+  background: var(--warning-solid); color: var(--warning-fg);
+  border-radius: 9999px; padding: 1px 7px; font-size: 10px; font-weight: 700;
+  box-shadow: 0 1px 3px var(--sombra-2);
 }
 
-/* Toasts (Sonner) */
+/* ===========================================================================
+   Toasts (Sonner)
+   =========================================================================== */
 .zz-toast {
-  border-radius: 0 !important;
-  border: 1px solid var(--border-heavy) !important;
-  box-shadow: 4px 4px 0 rgba(15, 23, 42, 1) !important;
+  border-radius: 14px !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: 0 2px 6px var(--sombra-1), 0 16px 40px -12px var(--sombra-2) !important;
   background: var(--surface) !important;
   padding: 0.9rem 1rem !important;
 }
@@ -149,30 +332,41 @@ body {
 .zz-toast-success { border-left: 4px solid var(--success) !important; }
 .zz-toast-error { border-left: 4px solid var(--danger) !important; }
 .zz-toast-warning { border-left: 4px solid var(--warning) !important; }
-.zz-toast-info { border-left: 4px solid var(--brand-2) !important; }
+.zz-toast-info { border-left: 4px solid var(--info) !important; }
 .zz-toast-action {
-  border-radius: 0 !important; font-weight: 600 !important; font-size: 0.8rem !important;
-  background: var(--brand) !important; border: 1px solid var(--brand) !important; color: #fff !important;
+  border-radius: 9px !important; font-weight: 600 !important; font-size: 0.8rem !important;
+  background: var(--brand) !important; border: 1px solid var(--brand) !important;
+  color: var(--brand-fg) !important;
 }
-.zz-toast-action:hover { background: #1e293b !important; }
-.zz-toast-action-danger { background: var(--danger) !important; border-color: var(--danger) !important; }
-.zz-toast-action-danger:hover { background: #dc2626 !important; }
+.zz-toast-action:hover { filter: brightness(1.12); }
+.zz-toast-action-danger { background: var(--danger-solid) !important; border-color: var(--danger-solid) !important; color: var(--danger-fg) !important; }
 .zz-toast-cancel {
-  border-radius: 0 !important; font-weight: 600 !important; font-size: 0.8rem !important;
-  background: #fff !important; border: 1px solid #cbd5e1 !important; color: var(--text) !important;
+  border-radius: 9px !important; font-weight: 600 !important; font-size: 0.8rem !important;
+  background: var(--surface) !important; border: 1px solid var(--line-strong) !important;
+  color: var(--text) !important;
 }
-.zz-toast-cancel:hover { background: #f1f5f9 !important; }
+.zz-toast-cancel:hover { background: var(--surface-2) !important; }
 .zz-toast-close {
-  border-radius: 0 !important; border: 1px solid var(--border-heavy) !important;
-  background: #fff !important; color: var(--text) !important;
+  border-radius: 9999px !important; border: 1px solid var(--line) !important;
+  background: var(--surface) !important; color: var(--text-2) !important;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: #f1f5f9; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 0; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+/* ===========================================================================
+   Barra de rolagem
+   =========================================================================== */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong); border-radius: 9999px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-4); background-clip: content-box; }
+* { scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
 
+/* ===========================================================================
+   Tokens shadcn (components/ui/) — em HSL porque é o formato que aquele
+   conjunto de componentes espera. Espelham os tokens acima.
+   =========================================================================== */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -185,8 +379,7 @@ body {
     --muted-foreground: 215 16% 47%;
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 222 47% 11%;
-    --radius: 0.25rem;
+    --ring: 217 91% 60%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
@@ -195,5 +388,27 @@ body {
     --accent-foreground: 222 47% 11%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
+  }
+
+  .dark {
+    --background: 224 48% 8%;
+    --foreground: 216 44% 94%;
+    --primary: 217 76% 54%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 33% 16%;
+    --secondary-foreground: 216 44% 94%;
+    --muted: 222 33% 16%;
+    --muted-foreground: 218 15% 62%;
+    --border: 222 31% 24%;
+    --input: 222 31% 24%;
+    --ring: 217 89% 68%;
+    --card: 223 37% 13%;
+    --card-foreground: 216 44% 94%;
+    --popover: 223 37% 13%;
+    --popover-foreground: 216 44% 94%;
+    --accent: 222 33% 20%;
+    --accent-foreground: 216 44% 94%;
+    --destructive: 0 74% 60%;
+    --destructive-foreground: 0 0% 100%;
   }
 }

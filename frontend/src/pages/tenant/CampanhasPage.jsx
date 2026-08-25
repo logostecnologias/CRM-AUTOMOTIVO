@@ -8,12 +8,12 @@ import {
 } from "@phosphor-icons/react";
 
 const STATUS_META = {
-  rascunho: { label: "rascunho", classe: "bg-slate-100 border-slate-400 text-slate-700" },
-  agendada: { label: "agendada", classe: "bg-blue-50 border-blue-500 text-blue-700" },
-  enviando: { label: "enviando", classe: "bg-amber-50 border-amber-500 text-amber-700" },
-  pausada: { label: "pausada", classe: "bg-orange-50 border-orange-500 text-orange-700" },
-  concluida: { label: "concluída", classe: "bg-green-50 border-green-500 text-green-700" },
-  cancelada: { label: "cancelada", classe: "bg-red-50 border-red-500 text-red-700" },
+  rascunho: { label: "rascunho", classe: "bg-surface-2 border-line-strong text-ink" },
+  agendada: { label: "agendada", classe: "bg-info-soft border-info text-info" },
+  enviando: { label: "enviando", classe: "bg-warning-soft border-warning text-warning" },
+  pausada: { label: "pausada", classe: "bg-warning-soft border-warning text-warning" },
+  concluida: { label: "concluída", classe: "bg-success-soft border-success text-success" },
+  cancelada: { label: "cancelada", classe: "bg-danger-soft border-danger text-danger" },
 };
 
 const EMPTY = {
@@ -44,9 +44,9 @@ function paraIso(local) {
 function Campo({ label, hint, children, className = "" }) {
   return (
     <div className={className}>
-      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">{label}</label>
+      <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">{label}</label>
       {children}
-      {hint && <div className="text-[10px] text-slate-500 mt-1">{hint}</div>}
+      {hint && <div className="text-[10px] text-ink-3 mt-1">{hint}</div>}
     </div>
   );
 }
@@ -58,10 +58,10 @@ function Progresso({ campanha }) {
   const pct = total ? Math.round((feitos / total) * 100) : 0;
   return (
     <div>
-      <div className="h-2 bg-slate-200 border border-slate-300">
-        <div className="h-full bg-slate-900" style={{ width: `${pct}%` }} />
+      <div className="h-2 bg-surface-3 border border-line rounded-full">
+        <div className="h-full bg-brand" style={{ width: `${pct}%` }} />
       </div>
-      <div className="text-[10px] font-mono text-slate-600 mt-1">
+      <div className="text-[10px] font-mono text-ink-2 mt-1">
         {feitos}/{total} · {t.enviados || 0} enviados
         {t.falhas ? ` · ${t.falhas} falhas` : ""}
         {t.ignorados ? ` · ${t.ignorados} ignorados` : ""}
@@ -87,21 +87,21 @@ function SeletorContatos({ selecionados, onChange }) {
     onChange(selecionados.includes(id) ? selecionados.filter((x) => x !== id) : [...selecionados, id]);
 
   return (
-    <div className="border border-slate-300 bg-white">
-      <input className="zz-input border-0 border-b border-slate-200" placeholder="Buscar por nome ou número…"
+    <div className="border border-line bg-surface rounded-lg">
+      <input className="zz-input border-0 border-b border-line" placeholder="Buscar por nome ou número…"
         value={busca} onChange={(e) => setBusca(e.target.value)} data-testid="campaign-contact-search" />
       <div className="max-h-44 overflow-y-auto">
-        {achados.length === 0 && <div className="p-3 text-xs text-slate-500">Nenhum contato encontrado.</div>}
+        {achados.length === 0 && <div className="p-3 text-xs text-ink-3">Nenhum contato encontrado.</div>}
         {achados.map((c) => (
-          <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
+          <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 border-b border-line hover:bg-surface-2 cursor-pointer">
             <input type="checkbox" checked={selecionados.includes(c.id)} onChange={() => alterna(c.id)} />
             <span className="text-sm font-semibold flex-1 truncate">{c.nome}</span>
-            <span className="text-xs font-mono text-slate-500">{c.numero_whatsapp}</span>
-            {c.opt_out && <span className="text-[9px] font-bold uppercase text-red-600">optout</span>}
+            <span className="text-xs font-mono text-ink-3">{c.numero_whatsapp}</span>
+            {c.opt_out && <span className="text-[9px] font-bold uppercase text-danger">optout</span>}
           </label>
         ))}
       </div>
-      <div className="px-3 py-1.5 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+      <div className="px-3 py-1.5 bg-surface-2 text-[10px] font-bold uppercase tracking-wider text-ink-2">
         {selecionados.length} selecionado(s)
       </div>
     </div>
@@ -118,7 +118,7 @@ function Detalhe({ campanha }) {
       .then((r) => setFalhas(r.data.items || [])).catch(() => {});
   }, [campanha.id, campanha.updated_at]);
 
-  if (!dados) return <div className="px-4 py-3 text-xs text-slate-500">Carregando…</div>;
+  if (!dados) return <div className="px-4 py-3 text-xs text-ink-3">Carregando…</div>;
 
   const caixas = [
     ["Público", (dados.pendente || 0) + (dados.enviando || 0) + (dados.enviado || 0) + (dados.falha || 0) + (dados.ignorado || 0)],
@@ -131,30 +131,30 @@ function Detalhe({ campanha }) {
   const taxa = dados.enviado ? Math.round(((dados.respostas || 0) / dados.enviado) * 100) : 0;
 
   return (
-    <div className="px-4 py-4 bg-slate-50 border-b border-slate-200">
+    <div className="px-4 py-4 bg-surface-2 border-b border-line">
       <div className="grid grid-cols-6 gap-2 mb-3">
         {caixas.map(([rotulo, valor]) => (
-          <div key={rotulo} className="border border-slate-300 bg-white px-3 py-2">
-            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{rotulo}</div>
+          <div key={rotulo} className="border border-line bg-surface px-3 py-2 rounded-lg">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-ink-3">{rotulo}</div>
             <div className="font-heading text-xl font-black tracking-tighter">{valor}</div>
           </div>
         ))}
       </div>
-      <div className="text-xs text-slate-600 mb-3">
+      <div className="text-xs text-ink-2 mb-3">
         Taxa de resposta: <strong className="font-mono">{taxa}%</strong>
         {campanha.motivo_pausa && (
-          <span className="ml-3 text-orange-700"><Warning size={12} weight="bold" className="inline" /> {campanha.motivo_pausa}</span>
+          <span className="ml-3 text-warning"><Warning size={12} weight="bold" className="inline" /> {campanha.motivo_pausa}</span>
         )}
       </div>
       {falhas.length > 0 && (
-        <div className="border border-slate-300 bg-white">
-          <div className="px-3 py-1.5 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        <div className="border border-line bg-surface rounded-lg">
+          <div className="px-3 py-1.5 border-b border-line text-[10px] font-bold uppercase tracking-wider text-ink-3">
             Falhas recentes
           </div>
           {falhas.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-100 text-xs">
-              <span className="font-mono text-slate-700 w-32 shrink-0">{f.numero_whatsapp}</span>
-              <span className="truncate text-slate-500">{f.erro}</span>
+            <div key={f.id} className="flex items-center gap-3 px-3 py-1.5 border-b border-line text-xs">
+              <span className="font-mono text-ink w-32 shrink-0">{f.numero_whatsapp}</span>
+              <span className="truncate text-ink-3">{f.erro}</span>
             </div>
           ))}
         </div>
@@ -303,9 +303,9 @@ export default function CampanhasPage() {
     <div className="p-8 max-w-6xl" data-testid="campaigns-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Marketing</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Marketing</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Campanhas</h1>
-          <p className="text-slate-600 mt-2 text-sm">
+          <p className="text-ink-2 mt-2 text-sm">
             Dispare uma mensagem para uma lista de contatos e acompanhe quem recebeu e quem respondeu.
           </p>
         </div>
@@ -314,9 +314,9 @@ export default function CampanhasPage() {
         </button>
       </div>
 
-      <div className="border-2 border-amber-400 bg-amber-50 p-4 mb-6 flex gap-3" data-testid="campaign-warning">
-        <Warning size={18} weight="bold" className="text-amber-700 shrink-0 mt-0.5" />
-        <div className="text-sm text-slate-800">
+      <div className="border border-warning bg-warning-soft p-4 mb-6 flex gap-3 rounded-lg" data-testid="campaign-warning">
+        <Warning size={18} weight="bold" className="text-warning shrink-0 mt-0.5" />
+        <div className="text-sm text-ink">
           <strong className="font-bold">Disparo em volume derruba número de WhatsApp.</strong> Esta conexão usa a
           API não oficial: não existe template aprovado nem garantia de entrega, e o bloqueio recai sobre o número
           da empresa. Mande para quem já falou com você, mantenha a cadência baixa e sempre ofereça a saída
@@ -326,13 +326,13 @@ export default function CampanhasPage() {
       </div>
 
       {semConexao && (
-        <div className="border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-600 mb-6">
+        <div className="border border-dashed border-line rounded-xl bg-surface p-8 text-center text-sm text-ink-2 mb-6">
           Conecte um número de WhatsApp antes de criar campanhas.
         </div>
       )}
 
       {editando && (
-        <form onSubmit={salvar} className="border border-slate-900 bg-white p-6 mb-6 grid grid-cols-3 gap-4 zz-panel-hard" data-testid="campaign-form">
+        <form onSubmit={salvar} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-3 gap-4 zz-panel-hard rounded-lg" data-testid="campaign-form">
           <Campo label="Nome da campanha" className="col-span-2">
             <input required autoFocus className="zz-input" data-testid="campaign-name" value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })} />
@@ -361,9 +361,9 @@ export default function CampanhasPage() {
               <Paperclip size={14} weight="bold" /> Anexar arquivo
             </button>
             {anexo && (
-              <span className="text-xs font-mono text-slate-700 flex items-center gap-2">
+              <span className="text-xs font-mono text-ink flex items-center gap-2">
                 {anexo.filename}
-                <button type="button" onClick={removerAnexo} className="text-red-600 hover:bg-red-50 p-0.5">
+                <button type="button" onClick={removerAnexo} className="text-danger hover:bg-danger-soft p-0.5">
                   <X size={12} weight="bold" />
                 </button>
               </span>
@@ -375,8 +375,8 @@ export default function CampanhasPage() {
               {[["todos", "Todos os contatos"], ["tags", "Por etiqueta"], ["selecionados", "Escolher contatos"]].map(([v, r]) => (
                 <button key={v} type="button" data-testid={`campaign-audience-${v}`}
                   onClick={() => setForm({ ...form, publico: { ...form.publico, tipo: v } })}
-                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border ${
-                    form.publico.tipo === v ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border rounded-full ${
+                    form.publico.tipo === v ? "bg-brand text-brand-fg border-brand" : "bg-surface border-line text-ink-2"
                   }`}>
                   {r}
                 </button>
@@ -384,15 +384,15 @@ export default function CampanhasPage() {
             </div>
             {form.publico.tipo === "tags" && (
               tagsDisponiveis.length === 0 ? (
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-ink-3">
                   Nenhuma etiqueta criada ainda — marque contatos na tela de Contatos.
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {tagsDisponiveis.map((t) => (
                     <button key={t} type="button" onClick={() => alternaTag(t)}
-                      className={`px-2 py-1 text-xs font-semibold border ${
-                        form.publico.tags.includes(t) ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-700"
+                      className={`px-2 py-1 text-xs font-semibold border rounded-full ${
+                        form.publico.tags.includes(t) ? "bg-brand text-brand-fg border-brand" : "bg-surface border-line text-ink"
                       }`}>
                       {t}
                     </button>
@@ -405,10 +405,10 @@ export default function CampanhasPage() {
                 onChange={(ids) => setForm({ ...form, publico: { ...form.publico, contact_ids: ids } })} />
             )}
             {previa && (
-              <div className="text-xs mt-2 font-semibold text-slate-700" data-testid="campaign-audience-preview">
+              <div className="text-xs mt-2 font-semibold text-ink" data-testid="campaign-audience-preview">
                 {previa.total.toLocaleString("pt-BR")} contato(s) vão receber
                 {previa.total > previa.limite && (
-                  <span className="text-red-600"> — acima do limite de {previa.limite.toLocaleString("pt-BR")} por campanha</span>
+                  <span className="text-danger"> — acima do limite de {previa.limite.toLocaleString("pt-BR")} por campanha</span>
                 )}
               </div>
             )}
@@ -455,35 +455,35 @@ export default function CampanhasPage() {
         </form>
       )}
 
-      <div className="border border-slate-200 bg-white">
+      <div className="border border-line bg-surface rounded-lg">
         {campanhas.length === 0 && !editando && (
           <div className="p-16 text-center">
-            <div className="w-12 h-12 bg-slate-900 text-white flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 bg-brand text-brand-fg flex items-center justify-center mx-auto mb-3">
               <Megaphone size={22} weight="bold" />
             </div>
             <div className="font-heading text-2xl font-black tracking-tighter mb-2">Nenhuma campanha ainda.</div>
-            <div className="text-sm text-slate-600">Crie a primeira para começar a disparar.</div>
+            <div className="text-sm text-ink-2">Crie a primeira para começar a disparar.</div>
           </div>
         )}
         {campanhas.map((c) => {
           const meta = STATUS_META[c.status] || STATUS_META.rascunho;
           const expandida = aberta === c.id;
           return (
-            <div key={c.id} className="border-b border-slate-100" data-testid={`campaign-row-${c.id}`}>
-              <div className="grid grid-cols-12 gap-3 px-4 py-3 items-center hover:bg-slate-50">
+            <div key={c.id} className="border-b border-line" data-testid={`campaign-row-${c.id}`}>
+              <div className="grid grid-cols-12 gap-3 px-4 py-3 items-center hover:bg-surface-2">
                 <button onClick={() => setAberta(expandida ? null : c.id)} className="col-span-4 flex items-center gap-2 text-left">
                   {expandida ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}
                   <div className="min-w-0">
                     <div className="font-semibold truncate">{c.nome}</div>
-                    <div className="text-[11px] text-slate-500 truncate">{c.conteudo?.texto}</div>
+                    <div className="text-[11px] text-ink-3 truncate">{c.conteudo?.texto}</div>
                   </div>
                 </button>
                 <div className="col-span-2">
-                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${meta.classe}`}>
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full ${meta.classe}`}>
                     {meta.label}
                   </span>
                   {c.agendada_para && c.status === "agendada" && (
-                    <div className="text-[10px] font-mono text-slate-500 mt-1">
+                    <div className="text-[10px] font-mono text-ink-3 mt-1">
                       {new Date(c.agendada_para).toLocaleString("pt-BR")}
                     </div>
                   )}
@@ -495,26 +495,26 @@ export default function CampanhasPage() {
                       onClick={() => acao(c, c.status === "pausada" ? "resume" : "start",
                         (d) => d.status === "agendada" ? "Campanha agendada" : `Disparando para ${d.pendentes} contato(s)`,
                         c.status === "rascunho" ? `Disparar "${c.nome}" agora?` : null)}
-                      className="p-1.5 hover:bg-green-100 text-green-700"><Play size={14} weight="bold" /></button>
+                      className="p-1.5 hover:bg-success-soft text-success"><Play size={14} weight="bold" /></button>
                   )}
                   {["enviando", "agendada"].includes(c.status) && (
                     <button title="Pausar" data-testid={`campaign-pause-${c.id}`}
                       onClick={() => acao(c, "pause", () => "Campanha pausada")}
-                      className="p-1.5 hover:bg-orange-100 text-orange-700"><Pause size={14} weight="bold" /></button>
+                      className="p-1.5 hover:bg-warning-soft text-warning"><Pause size={14} weight="bold" /></button>
                   )}
                   {!["concluida", "cancelada"].includes(c.status) && (
                     <button title="Cancelar" onClick={() => acao(c, "cancel",
                       (d) => `Campanha cancelada (${d.descartados} não enviados)`,
                       `Cancelar "${c.nome}"? Quem ainda não recebeu não vai receber.`)}
-                      className="p-1.5 hover:bg-red-100 text-red-600"><X size={14} weight="bold" /></button>
+                      className="p-1.5 hover:bg-danger-soft text-danger"><X size={14} weight="bold" /></button>
                   )}
                   {["rascunho", "agendada", "pausada"].includes(c.status) && (
-                    <button title="Editar" onClick={() => abrirEdicao(c)} className="p-1.5 hover:bg-slate-200">
+                    <button title="Editar" onClick={() => abrirEdicao(c)} className="p-1.5 hover:bg-surface-3">
                       <PencilSimple size={14} weight="bold" />
                     </button>
                   )}
                   {c.status !== "enviando" && (
-                    <button title="Excluir" onClick={() => excluir(c)} className="p-1.5 hover:bg-red-100 text-red-600">
+                    <button title="Excluir" onClick={() => excluir(c)} className="p-1.5 hover:bg-danger-soft text-danger">
                       <Trash size={14} weight="bold" />
                     </button>
                   )}

@@ -12,7 +12,10 @@ export const NODE_TYPES = {
     default: { label: "Início", trigger: "first_message" },
   },
   text: {
-    label: "Mensagem", color: "#F8F9FA", textColor: "#0F172A", icon: ChatText,
+    // Unico no cuja cor de identidade e "nenhuma": era o quase-branco do fundo
+    // claro, que no tema escuro viraria uma faixa branca no topo de cada no de
+    // mensagem — e mensagem e o no mais usado. Vai de token.
+    label: "Mensagem", color: "var(--surface-3)", textColor: "var(--text)", icon: ChatText,
     outputs: [{ id: "out", label: "Saída" }],
     default: { label: "Enviar Mensagem", text: "Olá, {nome_contato}! 👋" },
   },

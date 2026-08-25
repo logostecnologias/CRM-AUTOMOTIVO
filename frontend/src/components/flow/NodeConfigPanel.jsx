@@ -46,13 +46,13 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   };
 
   return (
-    <div className="w-[340px] border-l border-slate-900 bg-white flex flex-col h-full" data-testid="node-config-panel">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-900">
+    <div className="w-[340px] border-l border-line-strong bg-surface flex flex-col h-full" data-testid="node-config-panel">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-line-strong">
         <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Configuração</div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3">Configuração</div>
           <div className="font-heading text-lg font-black tracking-tight">{meta.label}</div>
         </div>
-        <button data-testid="close-config" onClick={onClose} className="p-1.5 hover:bg-slate-100">
+        <button data-testid="close-config" onClick={onClose} className="p-1.5 hover:bg-surface-2">
           <X size={18} weight="bold" />
         </button>
       </div>
@@ -105,15 +105,15 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
                 onChange={(e) => update({ text: e.target.value })} />
             </Field>
             <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Opções</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-ink-2 mb-2">Opções</div>
               <div className="space-y-2">
                 {(data.options || []).map((o, i) => (
                   <div key={o.id || i} className="flex gap-2 items-center">
-                    <span className="text-xs font-mono text-slate-500 w-6">{i + 1}.</span>
+                    <span className="text-xs font-mono text-ink-3 w-6">{i + 1}.</span>
                     <input className="zz-input" value={o.label}
                       onChange={(e) => updateOption(i, { label: e.target.value })}
                       data-testid={`config-option-${i}`} />
-                    <button onClick={() => removeOption(i)} className="p-2 border border-slate-300 hover:border-red-500 hover:text-red-500">
+                    <button onClick={() => removeOption(i)} className="p-3 border border-line hover:border-danger hover:text-danger rounded-lg">
                       <Trash size={14} />
                     </button>
                   </div>
@@ -240,7 +240,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
         )}
 
         {node.type === "end" && (
-          <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 p-3">
+          <div className="text-xs text-ink-2 bg-surface-2 border border-line p-4 rounded-lg">
             Este bloco não requer configuração adicional.
           </div>
         )}
@@ -262,7 +262,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
         )}
       </div>
 
-      <div className="border-t border-slate-200 p-3">
+      <div className="border-t border-line p-3">
         {node.type !== "start" && (
           <button data-testid="delete-node" onClick={() => onDelete(node.id)}
             className="zz-btn zz-btn-danger w-full justify-center">
@@ -277,9 +277,9 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
 function Field({ label, hint, children }) {
   return (
     <div>
-      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">{label}</label>
+      <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">{label}</label>
       {children}
-      {hint && <div className="text-[11px] text-slate-500 mt-1">{hint}</div>}
+      {hint && <div className="text-[11px] text-ink-3 mt-1">{hint}</div>}
     </div>
   );
 }

@@ -55,12 +55,12 @@ export function SessionCard({ session, active, onClick }) {
     <button
       onClick={onClick}
       data-testid={`session-card-${session.id}`}
-      className={`w-full text-left p-2.5 border ${active ? "border-slate-900 shadow-[2px_2px_0_rgba(15,23,42,0.15)]" : "border-slate-200 bg-white hover:border-slate-400"}`}
+      className={`w-full text-left p-2.5 border rounded-xl ${active ? "border-info ring-1 ring-info bg-surface shadow-card" : "border-line bg-surface hover:border-line-strong"}`}
     >
       <div className="flex items-center justify-between mb-1 gap-1">
         <div className="text-sm font-semibold truncate">{session.contact?.nome || session.contact?.numero_whatsapp || "—"}</div>
         {session.department && (
-          <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 border border-slate-900 text-white shrink-0" style={{ background: session.department.cor }}>
+          <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.5 border border-line-strong text-white shrink-0 rounded-full" style={{ background: session.department.cor }}>
             {session.department.nome.slice(0, 6)}
           </span>
         )}
@@ -68,12 +68,12 @@ export function SessionCard({ session, active, onClick }) {
       {session.connection && (
         <div className="mb-1"><ConnectionBadge connection={session.connection} /></div>
       )}
-      <div className="text-xs text-slate-500 truncate">{lastPreview(last)}</div>
+      <div className="text-xs text-ink-3 truncate">{lastPreview(last)}</div>
       <div className="flex items-center justify-between gap-1 mt-1">
-        <div className="text-[10px] text-slate-400 font-mono">{new Date(session.updated_at).toLocaleString("pt-BR")}</div>
+        <div className="text-[10px] text-ink-4 font-mono">{new Date(session.updated_at).toLocaleString("pt-BR")}</div>
         <WaitingChip session={session} />
       </div>
-      {session.agent && <div className="text-[10px] text-slate-600 mt-0.5">👤 {session.agent.name}</div>}
+      {session.agent && <div className="text-[10px] text-ink-2 mt-0.5">👤 {session.agent.name}</div>}
     </button>
   );
 }
@@ -129,20 +129,20 @@ export function SessionListItem({ session, active, onClick }) {
     <button
       onClick={onClick}
       data-testid={`session-card-${session.id}`}
-      className={`w-full text-left px-3 py-2.5 flex items-center gap-3 border-b border-slate-100 transition-colors ${active ? "bg-slate-100" : "hover:bg-slate-50"}`}
+      className={`w-full text-left px-3 py-2.5 flex items-center gap-3 border-b border-line transition-colors ${active ? "bg-surface-2" : "hover:bg-surface-2"}`}
       style={waiting ? { borderLeft: `4px solid ${waiting.color}`, paddingLeft: "calc(0.75rem - 4px)" } : undefined}
     >
       <Avatar name={name} photoUrl={session.contact?.foto_url} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-semibold truncate">{name}</div>
-          <div className="text-[10px] text-slate-400 shrink-0">{formatListTime(session.updated_at)}</div>
+          <div className="text-[10px] text-ink-4 shrink-0">{formatListTime(session.updated_at)}</div>
         </div>
         {session.agent && (
-          <div className="text-xs font-bold text-slate-700 truncate mt-0.5">{session.agent.name}</div>
+          <div className="text-xs font-bold text-ink truncate mt-0.5">{session.agent.name}</div>
         )}
         <div className="flex items-center justify-between gap-2 mt-0.5">
-          <div className="text-xs text-slate-500 truncate">{lastPreview(last)}</div>
+          <div className="text-xs text-ink-3 truncate">{lastPreview(last)}</div>
           {session.unread_count > 0 && (
             <span className="inline-flex items-center justify-center min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-[#25D366] text-white text-[10px] font-bold shrink-0">
               {session.unread_count > 99 ? "99+" : session.unread_count}
@@ -201,7 +201,7 @@ function ImageLightbox({ src, filename, onClose }) {
         <a
           href={src}
           download={filename || "imagem"}
-          className="flex items-center gap-1 px-2 py-1.5 bg-white border-2 border-slate-900 text-xs font-bold uppercase tracking-wider hover:bg-slate-100"
+          className="flex items-center gap-1 px-2 py-1.5 bg-surface border border-line-strong text-xs font-bold uppercase tracking-wider hover:bg-surface-2 rounded-lg"
           data-testid="lightbox-download"
         >
           <FileArrowDown size={16} weight="bold" /> Baixar
@@ -210,7 +210,7 @@ function ImageLightbox({ src, filename, onClose }) {
           type="button"
           onClick={onClose}
           aria-label="Fechar"
-          className="p-1.5 bg-white border-2 border-slate-900 hover:bg-slate-100"
+          className="p-1.5 bg-surface border border-line-strong hover:bg-surface-2 rounded-lg"
           data-testid="lightbox-close"
         >
           <X size={18} weight="bold" />
@@ -236,7 +236,7 @@ function ImageBubble({ src, media }) {
         <img
           src={src}
           alt={media.filename || "imagem"}
-          className="max-w-full max-h-72 border border-slate-300 object-contain cursor-zoom-in"
+          className="max-w-full max-h-72 border border-line object-contain cursor-zoom-in rounded-lg"
         />
       </button>
       {aberta && <ImageLightbox src={src} filename={media.filename} onClose={() => setAberta(false)} />}
@@ -253,7 +253,7 @@ function MediaContent({ media }) {
   // bolha antiga não virar imagem quebrada.
   if (media.expired) {
     return (
-      <div className="flex items-center gap-2 px-2 py-1.5 border border-dashed border-slate-400 bg-slate-50 text-slate-500"
+      <div className="flex items-center gap-2 px-2 py-1.5 border border-dashed border-line-strong rounded-xl bg-surface-2 text-ink-3"
            data-testid="media-expired">
         <Prohibit size={16} weight="bold" className="shrink-0" />
         <div className="min-w-0">
@@ -268,18 +268,18 @@ function MediaContent({ media }) {
     return <ImageBubble src={src} media={media} />;
   }
   if (media.kind === "video") {
-    return <video src={src} controls className="max-w-full max-h-72 border border-slate-300" />;
+    return <video src={src} controls className="max-w-full max-h-72 border border-line rounded-lg" />;
   }
   if (media.kind === "audio") {
     return <audio src={src} controls className="max-w-full" />;
   }
   return (
     <a href={src} target="_blank" rel="noreferrer" download={media.filename}
-       className="flex items-center gap-2 px-2 py-1.5 border border-slate-400 bg-white hover:bg-slate-50">
+       className="flex items-center gap-2 px-2 py-1.5 border border-line-strong bg-surface hover:bg-surface-2 rounded-lg">
       <FileArrowDown size={18} weight="bold" className="shrink-0" />
       <div className="min-w-0">
         <div className="text-xs font-semibold truncate">{media.filename || "arquivo"}</div>
-        {media.size ? <div className="text-[10px] text-slate-500 font-mono">{formatBytes(media.size)}</div> : null}
+        {media.size ? <div className="text-[10px] text-ink-3 font-mono">{formatBytes(media.size)}</div> : null}
       </div>
     </a>
   );
@@ -287,19 +287,19 @@ function MediaContent({ media }) {
 
 export function MessageBubble({ m }) {
   if (m.direction === "sistema" || m.type === "system") {
-    return <div className="text-[11px] text-slate-500 italic text-center py-1">— {m.content} —</div>;
+    return <div className="text-[11px] text-ink-3 italic text-center py-1">— {m.content} —</div>;
   }
   const isOut = m.direction === "enviada";
   const media = m.meta?.media;
   return (
     <div className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[80%] px-3 py-2 text-sm border ${isOut ? "bg-green-100 border-green-600" : "bg-white border-slate-300"}`}>
+      <div className={`max-w-[80%] px-3 py-2 text-sm border rounded-2xl ${isOut ? "bg-success-soft border-success" : "bg-surface border-line"}`}>
         {m.meta?.agent_name && (
-          <div className="text-xs font-bold text-slate-700 mb-0.5">{m.meta.agent_name}</div>
+          <div className="text-xs font-bold text-ink mb-0.5">{m.meta.agent_name}</div>
         )}
         {media && <div className="mb-1"><MediaContent media={media} /></div>}
         {m.content && <div className="whitespace-pre-wrap">{m.content}</div>}
-        <div className="text-[9px] text-slate-500 mt-1 font-mono">{new Date(m.timestamp).toLocaleTimeString("pt-BR")}</div>
+        <div className="text-[9px] text-ink-3 mt-1 font-mono">{new Date(m.timestamp).toLocaleTimeString("pt-BR")}</div>
       </div>
     </div>
   );
@@ -375,18 +375,18 @@ export function ChatComposer({ sessionId, canSend, onSent }) {
   };
 
   return (
-    <div className="border-t border-slate-200">
+    <div className="border-t border-line">
       {file && (
         <div className="px-2 pt-2 flex items-center gap-2" data-testid="attachment-preview">
           {preview
-            ? <img src={preview} alt="" className="w-12 h-12 object-cover border border-slate-400 shrink-0" />
-            : <div className="w-12 h-12 flex items-center justify-center border border-slate-400 bg-slate-50 shrink-0"><Paperclip size={18} weight="bold" /></div>}
+            ? <img src={preview} alt="" className="w-12 h-12 object-cover border border-line-strong shrink-0 rounded-lg" />
+            : <div className="w-12 h-12 flex items-center justify-center border border-line-strong bg-surface-2 shrink-0 rounded-lg"><Paperclip size={18} weight="bold" /></div>}
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold truncate">{file.name}</div>
-            <div className="text-[10px] text-slate-500 font-mono">{formatBytes(file.size)}</div>
+            <div className="text-[10px] text-ink-3 font-mono">{formatBytes(file.size)}</div>
           </div>
           <button onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ""; }}
-            className="p-1 hover:bg-slate-100" data-testid="attachment-clear">
+            className="p-1 hover:bg-surface-2" data-testid="attachment-clear">
             <X size={14} weight="bold" />
           </button>
         </div>
@@ -417,7 +417,7 @@ export function StatusBadge({ status }) {
   const s = STATUS.find((x) => x.key === status);
   if (!s) return null;
   return (
-    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-900 text-white" style={{ background: s.color }}>
+    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-line-strong text-white rounded-full" style={{ background: s.color }}>
       {s.label}
     </span>
   );
@@ -425,7 +425,7 @@ export function StatusBadge({ status }) {
 
 export function ConnectionBadge({ connection }) {
   return (
-    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-slate-300 bg-slate-50 text-slate-700">
+    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-line bg-surface-2 text-ink rounded-full">
       {connection.nome}
     </span>
   );

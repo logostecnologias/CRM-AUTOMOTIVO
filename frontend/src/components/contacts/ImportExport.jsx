@@ -113,11 +113,11 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
     .map((c) => [`campo:${c.id}`, `${c.nome} (personalizado)`])];
 
   return (
-    <div className="border border-slate-900 bg-white p-5 mb-6 zz-panel-hard" data-testid="import-export">
+    <div className="border border-line-strong bg-surface p-6 mb-6 zz-panel-hard rounded-lg" data-testid="import-export">
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="font-heading text-xl font-black tracking-tighter">Importar e exportar</div>
-          <p className="text-xs text-slate-600 mt-1">
+          <p className="text-xs text-ink-2 mt-1">
             CSV separado por ponto e vírgula ou vírgula. A primeira linha precisa ser o cabeçalho
             com o nome das colunas.
           </p>
@@ -127,47 +127,47 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
             data-testid="exportar-btn">
             <DownloadSimple size={13} weight="bold" /> Exportar {filtros && Object.keys(filtros).length > 0 ? "o filtrado" : "tudo"}
           </button>
-          <button onClick={onClose} className="p-1.5 hover:bg-slate-200"><X size={15} weight="bold" /></button>
+          <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
         </div>
       </div>
 
       {!previa ? (
-        <div className="border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+        <div className="border border-dashed border-line rounded-xl bg-surface-2 p-8 text-center">
           <input ref={entradaRef} type="file" accept=".csv,text/csv" className="hidden"
             data-testid="import-file" onChange={(e) => escolher(e.target.files?.[0])} />
-          <UploadSimple size={26} weight="bold" className="mx-auto mb-2 text-slate-400" />
+          <UploadSimple size={26} weight="bold" className="mx-auto mb-2 text-ink-4" />
           <button onClick={() => entradaRef.current?.click()} disabled={ocupado}
             className="zz-btn disabled:opacity-40" data-testid="escolher-arquivo">
             {ocupado ? "Lendo arquivo…" : "Escolher arquivo CSV"}
           </button>
-          <div className="text-[11px] text-slate-500 mt-2">
+          <div className="text-[11px] text-ink-3 mt-2">
             Nada é gravado até você conferir a prévia.
           </div>
         </div>
       ) : (
         <div>
           <div className="grid grid-cols-4 gap-2 mb-4">
-            {[["Linhas no arquivo", previa.linhas, "border-slate-300 bg-white"],
-              ["Novos", previa.novos, "border-green-500 bg-green-50"],
-              ["Já existem", previa.duplicados, "border-amber-500 bg-amber-50"],
-              ["Com erro", previa.erros, previa.erros ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"],
+            {[["Linhas no arquivo", previa.linhas, "border-line bg-surface"],
+              ["Novos", previa.novos, "border-success bg-success-soft"],
+              ["Já existem", previa.duplicados, "border-warning bg-warning-soft"],
+              ["Com erro", previa.erros, previa.erros ? "border-danger bg-danger-soft" : "border-line bg-surface"],
             ].map(([r, v, cls]) => (
-              <div key={r} className={`border px-3 py-2 ${cls}`}>
-                <div className="text-[9px] font-bold uppercase tracking-wider text-slate-600">{r}</div>
+              <div key={r} className={`border rounded-lg px-3 py-2 ${cls}`}>
+                <div className="text-[9px] font-bold uppercase tracking-wider text-ink-2">{r}</div>
                 <div className="font-heading text-xl font-black tracking-tighter">{v}</div>
               </div>
             ))}
           </div>
 
           <div className="mb-4">
-            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">
               De qual coluna vem cada campo
             </div>
-            <div className="border border-slate-200">
+            <div className="border border-line rounded-lg">
               {previa.colunas.map((coluna) => (
-                <div key={coluna} className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-100 last:border-b-0">
+                <div key={coluna} className="flex items-center gap-3 px-3 py-1.5 border-b border-line last:border-b-0">
                   <span className="text-sm font-semibold w-52 truncate" title={coluna}>{coluna}</span>
-                  <ArrowRight size={12} weight="bold" className="text-slate-400 shrink-0" />
+                  <ArrowRight size={12} weight="bold" className="text-ink-4 shrink-0" />
                   <select className="zz-input h-7 py-0 text-xs max-w-[240px]"
                     data-testid={`mapa-${coluna}`}
                     value={mapa[coluna] || ""}
@@ -180,21 +180,21 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
           </div>
 
           <div className="mb-4">
-            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">
               Quem já está na base
             </div>
             <div className="flex gap-2">
               {[["ignorar", "Não mexer"], ["atualizar", "Atualizar os dados"]].map(([v, r]) => (
                 <button key={v} onClick={() => { setDuplicados(v); }}
-                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border ${
-                    duplicados === v ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"
+                  className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border rounded-full ${
+                    duplicados === v ? "bg-brand text-brand-fg border-brand" : "bg-surface border-line text-ink-2"
                   }`}>
                   {r}
                 </button>
               ))}
             </div>
             {duplicados === "atualizar" && (
-              <div className="text-[11px] text-slate-500 mt-1.5">
+              <div className="text-[11px] text-ink-3 mt-1.5">
                 Só sobrescreve o que vem preenchido na planilha. Etiquetas são somadas, não
                 substituídas.
               </div>
@@ -202,22 +202,22 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
           </div>
 
           {previa.erros > 0 && (
-            <div className="border-2 border-red-300 bg-red-50 p-3 mb-4">
+            <div className="border border-danger bg-danger-soft p-3 mb-4 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <Warning size={14} weight="bold" className="text-red-700" />
+                <Warning size={14} weight="bold" className="text-danger" />
                 <span className="text-sm font-bold">
                   {previa.erros} linha(s) não serão importadas
                 </span>
               </div>
               <div className="max-h-32 overflow-y-auto space-y-0.5">
                 {previa.erros_detalhe.map((e) => (
-                  <div key={e.linha} className="text-xs text-slate-700 font-mono">
+                  <div key={e.linha} className="text-xs text-ink font-mono">
                     linha {e.linha}: {e.erro}
                   </div>
                 ))}
               </div>
               {previa.erros_omitidos > 0 && (
-                <div className="text-[11px] text-slate-600 mt-1.5">
+                <div className="text-[11px] text-ink-2 mt-1.5">
                   e outras {previa.erros_omitidos} não listadas aqui.
                 </div>
               )}
@@ -226,15 +226,15 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
 
           {previa.amostra.length > 0 && (
             <div className="mb-4">
-              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">
+              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">
                 Como vão entrar (primeiras linhas)
               </div>
-              <div className="border border-slate-200 overflow-x-auto">
+              <div className="border border-line overflow-x-auto rounded-lg">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50">
+                    <tr className="border-b border-line bg-surface-2">
                       {["Nome", "WhatsApp", "E-mail", "Empresa", "Etiquetas"].map((h) => (
-                        <th key={h} className="text-left px-2 py-1 font-bold uppercase tracking-wider text-[9px] text-slate-500">
+                        <th key={h} className="text-left px-3 py-2.5.5 font-bold uppercase tracking-wider text-[9px] text-ink-3">
                           {h}
                         </th>
                       ))}
@@ -242,12 +242,12 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
                   </thead>
                   <tbody>
                     {previa.amostra.map((a, i) => (
-                      <tr key={i} className="border-b border-slate-100 last:border-b-0">
-                        <td className="px-2 py-1 font-semibold">{a.nome}</td>
-                        <td className="px-2 py-1 font-mono">{a.numero_whatsapp}</td>
-                        <td className="px-2 py-1">{a.email || "—"}</td>
-                        <td className="px-2 py-1">{a.empresa || "—"}</td>
-                        <td className="px-2 py-1">{(a.tags || []).join(", ") || "—"}</td>
+                      <tr key={i} className="border-b border-line last:border-b-0">
+                        <td className="px-3 py-2.5.5 font-semibold">{a.nome}</td>
+                        <td className="px-3 py-2.5.5 font-mono">{a.numero_whatsapp}</td>
+                        <td className="px-3 py-2.5.5">{a.email || "—"}</td>
+                        <td className="px-3 py-2.5.5">{a.empresa || "—"}</td>
+                        <td className="px-3 py-2.5.5">{(a.tags || []).join(", ") || "—"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -257,7 +257,7 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
           )}
 
           <div className="flex gap-2 justify-end items-center">
-            <span className="text-xs text-slate-500 mr-auto">{arquivo?.name}</span>
+            <span className="text-xs text-ink-3 mr-auto">{arquivo?.name}</span>
             <button onClick={limpar} className="zz-btn zz-btn-secondary">Escolher outro</button>
             <button onClick={confirmar} disabled={ocupado || (previa.novos === 0 && duplicados === "ignorar")}
               className="zz-btn disabled:opacity-40" data-testid="confirmar-import">

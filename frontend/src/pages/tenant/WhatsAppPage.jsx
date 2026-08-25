@@ -95,9 +95,9 @@ export default function WhatsAppPage() {
     <div className="p-8 max-w-4xl" data-testid="whatsapp-page">
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Integração</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Integração</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Conexões WhatsApp</h1>
-          <p className="text-slate-600 mt-2 max-w-2xl">
+          <p className="text-ink-2 mt-2 max-w-2xl">
             Cada conexão é um número de WhatsApp independente, com sua própria instância e departamento padrão. Os robôs são vinculados na tela de Robôs.
           </p>
         </div>
@@ -107,15 +107,15 @@ export default function WhatsAppPage() {
       </div>
 
       {creating && (
-        <form onSubmit={createConnection} className="mb-6 border border-slate-900 bg-white p-4 grid grid-cols-3 gap-4 zz-panel-hard">
+        <form onSubmit={createConnection} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-3 gap-4 zz-panel-hard rounded-lg">
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Nome da conexão</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome da conexão</label>
             <input autoFocus required data-testid="new-connection-name" className="zz-input"
               value={newForm.nome} onChange={(e) => setNewForm({ ...newForm, nome: e.target.value })}
               placeholder="Ex: Vendas, Suporte, Loja 2" />
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Departamento padrão</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Departamento padrão</label>
             <select className="zz-input" value={newForm.departamento_padrao_id}
               onChange={(e) => setNewForm({ ...newForm, departamento_padrao_id: e.target.value })}>
               <option value="">— nenhum —</option>
@@ -130,9 +130,9 @@ export default function WhatsAppPage() {
       )}
 
       {connections.length === 0 && !creating && (
-        <div className="border border-dashed border-slate-300 bg-white p-16 text-center">
+        <div className="border border-dashed border-line rounded-xl bg-surface p-16 text-center">
           <div className="font-heading text-2xl font-black tracking-tighter mb-2">Nenhuma conexão ainda.</div>
-          <div className="text-sm text-slate-600">Crie a primeira conexão de WhatsApp da empresa.</div>
+          <div className="text-sm text-ink-2">Crie a primeira conexão de WhatsApp da empresa.</div>
         </div>
       )}
 
@@ -169,24 +169,24 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
   );
 
   return (
-    <div className="border border-slate-900 bg-white p-5 zz-panel-hard" data-testid={`connection-card-${conn.id}`}>
+    <div className="border border-line-strong bg-surface p-6 zz-panel-hard rounded-lg" data-testid={`connection-card-${conn.id}`}>
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 bg-green-500 text-white flex items-center justify-center border border-slate-900 shrink-0">
+          <div className="w-11 h-11 bg-success-solid text-success-fg flex items-center justify-center border border-line-strong shrink-0 rounded-full">
             <WhatsappLogo size={24} weight="bold" />
           </div>
           <div>
             <div className="font-heading text-xl font-black tracking-tighter">{conn.nome}</div>
-            <div className="text-xs font-mono text-slate-500">
+            <div className="text-xs font-mono text-ink-3">
               Status: <StatusBadge status={conn.status} />
             </div>
-            {conn.numero && <div className="text-xs text-slate-700 mt-1">Número: <span className="font-mono">{conn.numero}</span></div>}
+            {conn.numero && <div className="text-xs text-ink mt-1">Número: <span className="font-mono">{conn.numero}</span></div>}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {conn.status === "pareando" && (
-            <button onClick={onToggleExpand} className="p-2 border border-slate-300 hover:bg-slate-50" title="Ver QR Code" data-testid={`toggle-qr-${conn.id}`}>
+            <button onClick={onToggleExpand} className="p-3 border border-line hover:bg-surface-2 rounded-lg" title="Ver QR Code" data-testid={`toggle-qr-${conn.id}`}>
               <QrCode size={14} weight="bold" />
             </button>
           )}
@@ -200,35 +200,35 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
               <XCircle size={14} weight="bold" /> Desconectar
             </button>
           )}
-          <button onClick={onRemove} disabled={busy} className="p-2 border border-slate-300 hover:bg-red-100 text-red-600" title="Excluir conexão" data-testid={`delete-btn-${conn.id}`}>
+          <button onClick={onRemove} disabled={busy} className="p-3 border border-line hover:bg-danger-soft text-danger rounded-lg" title="Excluir conexão" data-testid={`delete-btn-${conn.id}`}>
             <Trash size={14} weight="bold" />
           </button>
         </div>
       </div>
 
       {conn.status === "pareando" && expanded && (
-        <div className="flex gap-8 items-start flex-wrap mt-4 pt-4 border-t border-slate-200">
+        <div className="flex gap-8 items-start flex-wrap mt-4 pt-4 border-t border-line">
           {qrSrc ? (
-            <img src={qrSrc} alt="QR Code" className="w-56 h-56 border-2 border-slate-900 bg-white p-2" data-testid={`qr-image-${conn.id}`} />
+            <img src={qrSrc} alt="QR Code" className="w-56 h-56 border border-line-strong bg-surface p-2 rounded-lg" data-testid={`qr-image-${conn.id}`} />
           ) : (
-            <div className="w-56 h-56 border-2 border-dashed border-slate-400 flex items-center justify-center text-slate-500 text-sm">
+            <div className="w-56 h-56 border-2 border-dashed border-line-strong rounded-lg flex items-center justify-center text-ink-3 text-sm">
               Aguardando QR Code...
             </div>
           )}
           <div className="flex-1 min-w-[220px] space-y-2">
-            <div className="text-sm text-slate-700">
+            <div className="text-sm text-ink">
               Escaneie com o WhatsApp deste número. A tela atualiza sozinha quando a conexão for concluída.
             </div>
-            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-500 p-2">
+            <div className="text-xs text-warning bg-warning-soft border border-warning p-2 rounded-lg">
               O QR expira em ~60s — se expirar, desconecte e conecte novamente.
             </div>
           </div>
         </div>
       )}
 
-      <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-3 gap-4">
+      <div className="mt-4 pt-4 border-t border-line grid grid-cols-3 gap-4">
         <div>
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Departamento padrão</label>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">Departamento padrão</label>
           <select className="zz-input" style={{ padding: "0.4rem 0.6rem" }}
             value={conn.departamento_padrao_id || ""}
             onChange={(e) => onUpdateField({ departamento_padrao_id: e.target.value || null })}
@@ -240,7 +240,7 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
       </div>
 
       {!temBotPrimeiraMensagem && (
-        <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-500 p-2" data-testid={`no-first-bot-warning-${conn.id}`}>
+        <div className="mt-3 text-xs text-warning bg-warning-soft border border-warning p-2 rounded-lg" data-testid={`no-first-bot-warning-${conn.id}`}>
           <strong>Sem bot de primeira mensagem.</strong> Mensagens que não casarem com a palavra-chave vão
           direto para a fila de atendimento humano, sem nenhuma resposta automática para o contato.
         </div>
@@ -251,13 +251,13 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
 
 function StatusBadge({ status }) {
   const map = {
-    conectado: "text-green-700",
-    pareando: "text-amber-700",
-    desconectado: "text-slate-500",
+    conectado: "text-success",
+    pareando: "text-warning",
+    desconectado: "text-ink-3",
   };
   const label = { conectado: "conectado", pareando: "pareando", desconectado: "desconectado" }[status] || "—";
   return (
-    <span className={`inline-flex items-center gap-1 font-bold ${map[status] || "text-slate-500"}`}>
+    <span className={`inline-flex items-center gap-1 font-bold ${map[status] || "text-ink-3"}`}>
       {status === "conectado" && <CheckCircle size={12} weight="bold" />}
       {status === "pareando" && <ArrowClockwise size={12} weight="bold" />}
       {label}

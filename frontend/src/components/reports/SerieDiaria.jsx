@@ -5,22 +5,29 @@ import { layout, LARGURA_VB, MARGEM } from "./geometria";
 /**
  * Colunas por dia, uma ou duas séries empilhadas.
  *
- * As cores passaram pelo validador de paleta: separação para daltonismo muito
- * acima do piso e contraste ≥ 3:1 contra a superfície branca. O azul é o mesmo
- * `#2563EB` já usado no resto do produto; o laranja é a variação escura, porque
- * o `#F97316` do sistema **reprova** no contraste contra fundo claro. Ficam em
- * constante para serem trocadas num lugar só.
+ * As cores **não são hex aqui, são variável CSS** (`--serie-1`, `--serie-2`),
+ * definidas em `index.css` com um valor por tema. O SVG aceita `var()` em
+ * `fill`, então o gráfico troca de paleta junto com a tela sem re-render.
+ *
+ * Os dois pares passaram pelo validador de paleta contra a superfície do
+ * respectivo tema. O par claro é o que já existia (`#2563EB` + `#EA580C`); o
+ * escuro **não é ele clareado**: os passos claros reprovam na banda de
+ * luminosidade do tema escuro, então lá são `#3B82F6` + `#E06D1F`, validados
+ * como conjunto contra a `--surface` escura.
  *
  * Duas medidas de escalas diferentes (conversas e mensagens) nunca compartilham
  * o mesmo gráfico com dois eixos — são dois gráficos lado a lado. Eixo duplo
  * inventa uma correlação que não está no dado.
  */
 const SERIES = {
-  1: "#2563EB",
-  2: "#EA580C",
+  1: "var(--serie-1)",
+  2: "var(--serie-2)",
 };
-const GRADE = "#E2E8F0";
-const EIXO = "#94A3B8";
+const GRADE = "var(--grade)";
+const EIXO = "var(--eixo)";
+// Realce da faixa sob o cursor: no tema claro é uma sombra sobre branco, no
+// escuro precisa ser luz sobre escuro. Uma cor fixa desapareceria num dos dois.
+const REALCE = "var(--text)";
 
 function rotuloDia(dia) {
   const [, m, d] = dia.split("-");
@@ -34,24 +41,24 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
 
   if (dados.length === 0) {
     return (
-      <div className="border border-slate-200 bg-white p-4" data-testid={`serie-${titulo}`}>
-        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-2">{titulo}</div>
-        <div className="text-xs text-slate-400 py-8 text-center">Sem dados no período.</div>
+      <div className="border border-line bg-surface p-5 rounded-lg" data-testid={`serie-${titulo}`}>
+        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">{titulo}</div>
+        <div className="text-xs text-ink-4 py-8 text-center">Sem dados no período.</div>
       </div>
     );
   }
 
   return (
-    <div className="border border-slate-200 bg-white p-4" data-testid={`serie-${titulo}`}>
+    <div className="border border-line bg-surface p-5 rounded-lg" data-testid={`serie-${titulo}`}>
       <div className="flex items-center justify-between mb-3 gap-3">
-        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{titulo}</div>
+        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3">{titulo}</div>
         <div className="flex items-center gap-3">
           {/* Legenda sempre presente com duas séries ou mais: identidade nunca
               pode depender só da cor. */}
           {series.length > 1 && (
             <div className="flex items-center gap-2.5">
               {series.map((s) => (
-                <span key={s.chave} className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                <span key={s.chave} className="flex items-center gap-1.5 text-[11px] text-ink-2">
                   <span className="w-2.5 h-2.5 shrink-0" style={{ background: SERIES[s.slot] }} />
                   {s.rotulo}
                 </span>
@@ -60,7 +67,7 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
           )}
           <button onClick={() => setTabela((v) => !v)}
             title={tabela ? "Ver gráfico" : "Ver tabela"}
-            className={`p-1 hover:bg-slate-200 ${tabela ? "text-slate-900 bg-slate-100" : "text-slate-500"}`}
+            className={`p-1 hover:bg-surface-3 ${tabela ? "text-ink bg-surface-2" : "text-ink-3"}`}
             data-testid={`tabela-${titulo}`}>
             <Table size={13} weight="bold" />
           </button>
@@ -68,13 +75,13 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
       </div>
 
       {tabela ? (
-        <div className="max-h-[164px] overflow-y-auto border border-slate-200">
+        <div className="max-h-[164px] overflow-y-auto border border-line rounded-lg">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-slate-50">
-              <tr className="border-b border-slate-200">
-                <th className="text-left px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">Dia</th>
+            <thead className="sticky top-0 bg-surface-2">
+              <tr className="border-b border-line">
+                <th className="text-left px-3 py-2.5.5 text-[9px] font-bold uppercase tracking-wider text-ink-3">Dia</th>
                 {series.map((s) => (
-                  <th key={s.chave} className="text-right px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                  <th key={s.chave} className="text-right px-3 py-2.5.5 text-[9px] font-bold uppercase tracking-wider text-ink-3">
                     {s.rotulo}
                   </th>
                 ))}
@@ -82,10 +89,10 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
             </thead>
             <tbody>
               {dados.map((d) => (
-                <tr key={d.dia} className="border-b border-slate-100 last:border-b-0">
-                  <td className="px-2 py-1 font-mono">{rotuloDia(d.dia)}</td>
+                <tr key={d.dia} className="border-b border-line last:border-b-0">
+                  <td className="px-3 py-2.5.5 font-mono">{rotuloDia(d.dia)}</td>
                   {series.map((s) => (
-                    <td key={s.chave} className="px-2 py-1 text-right font-mono">{d[s.chave] || 0}</td>
+                    <td key={s.chave} className="px-3 py-2.5.5 text-right font-mono">{d[s.chave] || 0}</td>
                   ))}
                 </tr>
               ))}
@@ -101,7 +108,7 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
                 {/* Grade fina, sólida e discreta — tracejado só acrescenta ruído. */}
                 <line x1={MARGEM.esq} x2={LARGURA_VB} y1={t.y} y2={t.y} stroke={GRADE} strokeWidth="1" />
                 <text x={MARGEM.esq - 8} y={t.y + 3.5} textAnchor="end"
-                  className="fill-slate-400" style={{ fontSize: 10 }}>
+                  className="fill-ink-4" style={{ fontSize: 10 }}>
                   {Math.round(t.valor).toLocaleString("pt-BR")}
                 </text>
               </g>
@@ -114,7 +121,7 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
                 {/* Alvo de mouse do tamanho da faixa, não da barra: coluna fina
                     não pode exigir precisão de mira. */}
                 <rect x={c.alvo.x} y={MARGEM.topo} width={c.alvo.largura} height={g.areaA}
-                  fill="#0F172A" fillOpacity={sobre?.indice === c.indice ? 0.04 : 0} />
+                  fill={REALCE} fillOpacity={sobre?.indice === c.indice ? 0.06 : 0} />
                 {c.partes.map((p) => (
                   p.d ? <path key={p.chave} d={p.d} fill={SERIES[p.slot]} /> : null
                 ))}
@@ -125,32 +132,32 @@ export default function SerieDiaria({ titulo, dados, series, altura = 180 }) {
 
             {g.colunas.map((c) => (c.indice % g.cadaN === 0 ? (
               <text key={c.dia} x={c.centro} y={altura - 6} textAnchor="middle"
-                className="fill-slate-400" style={{ fontSize: 10 }}>
+                className="fill-ink-4" style={{ fontSize: 10 }}>
                 {rotuloDia(c.dia)}
               </text>
             ) : null))}
           </svg>
 
           {sobre && (
-            <div className="absolute pointer-events-none border border-slate-900 bg-white px-2 py-1 z-10"
+            <div className="absolute pointer-events-none border border-line-strong bg-surface px-2 py-1 z-10 rounded-lg"
               style={{
                 left: `${(sobre.centro / LARGURA_VB) * 100}%`,
                 top: 0,
                 transform: "translate(-50%, -100%)",
               }}
               data-testid="serie-tooltip">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-ink-3">
                 {rotuloDia(sobre.dia)}
               </div>
               {sobre.partes.map((p) => (
                 <div key={p.chave} className="flex items-center gap-1.5 text-xs whitespace-nowrap">
                   <span className="w-2 h-2 shrink-0" style={{ background: SERIES[p.slot] }} />
-                  <span className="text-slate-600">{p.rotulo}</span>
+                  <span className="text-ink-2">{p.rotulo}</span>
                   <span className="font-mono font-bold ml-auto">{p.valor}</span>
                 </div>
               ))}
               {sobre.partes.length > 1 && (
-                <div className="text-[10px] font-mono text-slate-500 border-t border-slate-200 mt-0.5 pt-0.5">
+                <div className="text-[10px] font-mono text-ink-3 border-t border-line mt-0.5 pt-0.5">
                   total {sobre.total}
                 </div>
               )}

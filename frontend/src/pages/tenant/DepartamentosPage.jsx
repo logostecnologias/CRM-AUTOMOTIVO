@@ -41,25 +41,25 @@ export default function DepartamentosPage() {
     <div className="p-8 max-w-4xl" data-testid="departments-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Organização</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Organização</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Departamentos</h1>
-          <p className="text-slate-600 mt-2 text-sm">Agrupe conexões e conversas por área (ex: Vendas, Suporte, Financeiro).</p>
+          <p className="text-ink-2 mt-2 text-sm">Agrupe conexões e conversas por área (ex: Vendas, Suporte, Financeiro).</p>
         </div>
         <button data-testid="new-dept-btn" onClick={openNew} className="zz-btn"><Plus size={14} weight="bold" /> Novo</button>
       </div>
 
       {editing && (
-        <form onSubmit={save} className="mb-6 border border-slate-900 bg-white p-4 flex gap-3 items-end zz-panel-hard" data-testid="dept-form">
+        <form onSubmit={save} className="mb-6 border border-line-strong bg-surface p-5 flex gap-3 items-end zz-panel-hard rounded-lg" data-testid="dept-form">
           <div className="flex-1">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Nome</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome</label>
             <input required autoFocus className="zz-input" data-testid="dept-name" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Cor</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Cor</label>
             <div className="flex gap-1">
               {DEFAULT_COLORS.map((c) => (
                 <button key={c} type="button" onClick={() => setForm({ ...form, cor: c })}
-                  className={`w-7 h-7 border-2 ${form.cor === c ? "border-slate-900" : "border-slate-300"}`}
+                  className={`w-7 h-7 rounded-md border-2 ${form.cor === c ? "border-ink" : "border-line"}`}
                   style={{ background: c }} />
               ))}
             </div>
@@ -69,18 +69,18 @@ export default function DepartamentosPage() {
         </form>
       )}
 
-      <div className="border border-slate-200 bg-white">
-        {depts.length === 0 && <div className="p-6 text-sm text-slate-500 text-center">Nenhum departamento cadastrado.</div>}
+      <div className="border border-line bg-surface rounded-lg">
+        {depts.length === 0 && <div className="p-6 text-sm text-ink-3 text-center">Nenhum departamento cadastrado.</div>}
         {depts.map((d) => (
-          <div key={d.id} className="flex items-center justify-between px-4 py-3 border-b border-slate-100 hover:bg-slate-50" data-testid={`dept-row-${d.id}`}>
+          <div key={d.id} className="flex items-center justify-between px-4 py-3 border-b border-line hover:bg-surface-2" data-testid={`dept-row-${d.id}`}>
             <div className="flex items-center gap-3">
-              <div className="w-4 h-4 border border-slate-900" style={{ background: d.cor }} />
+              <div className="w-4 h-4 border border-line-strong rounded-sm" style={{ background: d.cor }} />
               <span className="font-semibold">{d.nome}</span>
-              <span className="text-xs font-mono text-slate-500">{d.cor}</span>
+              <span className="text-xs font-mono text-ink-3">{d.cor}</span>
             </div>
             <div className="flex gap-1">
-              <button onClick={() => openEdit(d)} className="p-1.5 hover:bg-slate-200"><PencilSimple size={14} weight="bold" /></button>
-              <button onClick={() => remove(d.id)} className="p-1.5 hover:bg-red-100 text-red-600"><Trash size={14} weight="bold" /></button>
+              <button onClick={() => openEdit(d)} className="p-1.5 hover:bg-surface-3"><PencilSimple size={14} weight="bold" /></button>
+              <button onClick={() => remove(d.id)} className="p-1.5 hover:bg-danger-soft text-danger"><Trash size={14} weight="bold" /></button>
             </div>
           </div>
         ))}

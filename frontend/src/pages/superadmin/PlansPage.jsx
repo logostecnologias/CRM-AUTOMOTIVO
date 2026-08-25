@@ -72,15 +72,15 @@ export default function PlansPage() {
     <div className="p-8" data-testid="admin-plans-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Gestão</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Gestão</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Planos</h1>
-          <p className="text-slate-600 mt-2 text-sm">Cadastre os planos disponíveis para as empresas.</p>
+          <p className="text-ink-2 mt-2 text-sm">Cadastre os planos disponíveis para as empresas.</p>
         </div>
         <button data-testid="new-plan-btn" onClick={openNew} className="zz-btn"><Plus size={14} weight="bold" /> Novo Plano</button>
       </div>
 
       {editing && (
-        <form onSubmit={save} className="border border-slate-900 bg-white p-6 mb-6 grid grid-cols-3 gap-4 zz-panel-hard" data-testid="plan-form">
+        <form onSubmit={save} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-3 gap-4 zz-panel-hard rounded-lg" data-testid="plan-form">
           <Field label="Nome">
             <input required autoFocus data-testid="plan-name" className="zz-input" value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })} />
@@ -112,13 +112,13 @@ export default function PlansPage() {
             <input type="number" min="0" data-testid="plan-retencao-midia" className="zz-input"
               placeholder="padrão do servidor" value={form.retencao_midia_dias}
               onChange={(e) => setForm({ ...form, retencao_midia_dias: e.target.value })} />
-            <div className="text-[10px] text-slate-500 mt-1">Vazio = padrão do servidor · 0 = nunca apaga</div>
+            <div className="text-[10px] text-ink-3 mt-1">Vazio = padrão do servidor · 0 = nunca apaga</div>
           </Field>
           <Field label="Disparos de campanha/mês">
             <input type="number" min="0" data-testid="plan-max-disparos" className="zz-input"
               placeholder="ilimitado" value={form.max_disparos_mes}
               onChange={(e) => setForm({ ...form, max_disparos_mes: e.target.value })} />
-            <div className="text-[10px] text-slate-500 mt-1">Vazio ou 0 = ilimitado · conta mensagem entregue</div>
+            <div className="text-[10px] text-ink-3 mt-1">Vazio ou 0 = ilimitado · conta mensagem entregue</div>
           </Field>
           <div className="col-span-3 flex gap-2 justify-end">
             <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
@@ -127,8 +127,8 @@ export default function PlansPage() {
         </form>
       )}
 
-      <div className="border border-slate-200 bg-white">
-        <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+      <div className="border border-line bg-surface rounded-lg">
+        <div className="grid grid-cols-12 px-4 py-2 border-b border-line text-[10px] font-bold uppercase tracking-wider text-ink-3">
           <div className="col-span-2">Nome</div>
           <div className="col-span-2">Preço/mês</div>
           <div className="col-span-1">Robôs</div>
@@ -139,24 +139,24 @@ export default function PlansPage() {
           <div className="col-span-1">Status</div>
           <div className="col-span-1 text-right">Ações</div>
         </div>
-        {plans.length === 0 && <div className="p-6 text-center text-sm text-slate-500">Nenhum plano cadastrado.</div>}
+        {plans.length === 0 && <div className="p-6 text-center text-sm text-ink-3">Nenhum plano cadastrado.</div>}
         {plans.map((p) => (
-          <div key={p.id} className="grid grid-cols-12 px-4 py-3 border-b border-slate-100 items-center hover:bg-slate-50" data-testid={`plan-row-${p.id}`}>
+          <div key={p.id} className="grid grid-cols-12 px-4 py-3 border-b border-line items-center hover:bg-surface-2" data-testid={`plan-row-${p.id}`}>
             <div className="col-span-2 font-semibold">{p.nome}</div>
             <div className="col-span-2 text-sm font-mono">{formatBRL(p.preco_mensal)}</div>
             <div className="col-span-1 text-sm font-mono">{p.max_bots}</div>
             <div className="col-span-1 text-sm font-mono">{p.max_conexoes}</div>
             <div className="col-span-1 text-sm font-mono">{p.max_usuarios}</div>
-            <div className="col-span-1 text-sm font-mono text-slate-600">{disparosLabel(p.max_disparos_mes)}</div>
-            <div className="col-span-2 text-sm font-mono text-slate-600">{retentionLabel(p.retencao_midia_dias)}</div>
+            <div className="col-span-1 text-sm font-mono text-ink-2">{disparosLabel(p.max_disparos_mes)}</div>
+            <div className="col-span-2 text-sm font-mono text-ink-2">{retentionLabel(p.retencao_midia_dias)}</div>
             <div className="col-span-1">
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${p.status === "active" ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700"}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full ${p.status === "active" ? "bg-success-soft border-success text-success" : "bg-danger-soft border-danger text-danger"}`}>
                 {p.status === "active" ? "ativo" : "inativo"}
               </span>
             </div>
             <div className="col-span-1 flex gap-1 justify-end">
-              <button onClick={() => openEdit(p)} className="p-1.5 hover:bg-slate-200"><PencilSimple size={14} weight="bold" /></button>
-              <button onClick={() => remove(p.id)} className="p-1.5 hover:bg-red-100 text-red-600"><Trash size={14} weight="bold" /></button>
+              <button onClick={() => openEdit(p)} className="p-1.5 hover:bg-surface-3"><PencilSimple size={14} weight="bold" /></button>
+              <button onClick={() => remove(p.id)} className="p-1.5 hover:bg-danger-soft text-danger"><Trash size={14} weight="bold" /></button>
             </div>
           </div>
         ))}
@@ -168,7 +168,7 @@ export default function PlansPage() {
 function Field({ label, children }) {
   return (
     <div>
-      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">{label}</label>
+      <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">{label}</label>
       {children}
     </div>
   );

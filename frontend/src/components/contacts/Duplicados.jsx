@@ -50,25 +50,25 @@ export default function Duplicados({ onClose, onMesclou }) {
   };
 
   return (
-    <div className="border border-slate-900 bg-white p-5 mb-6 zz-panel-hard" data-testid="duplicados">
+    <div className="border border-line-strong bg-surface p-6 mb-6 zz-panel-hard rounded-lg" data-testid="duplicados">
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="font-heading text-xl font-black tracking-tighter">Possíveis duplicados</div>
-          <p className="text-xs text-slate-600 mt-1">
+          <p className="text-xs text-ink-2 mt-1">
             Fichas com o mesmo e-mail ou o mesmo nome. Escolha qual fica — as outras são
             absorvidas e apagadas, e conversas, negócios, atividades e notas passam para ela.
           </p>
         </div>
-        <button onClick={onClose} className="p-1.5 hover:bg-slate-200"><X size={15} weight="bold" /></button>
+        <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
       </div>
 
-      {grupos === null && <div className="text-xs text-slate-500 py-4">Procurando…</div>}
+      {grupos === null && <div className="text-xs text-ink-3 py-4">Procurando…</div>}
 
       {grupos?.length === 0 && (
-        <div className="border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-          <CheckCircle size={24} weight="bold" className="mx-auto mb-2 text-green-600" />
+        <div className="border border-dashed border-line rounded-xl bg-surface-2 p-8 text-center">
+          <CheckCircle size={24} weight="bold" className="mx-auto mb-2 text-success" />
           <div className="font-heading text-lg font-black tracking-tighter">Nenhum duplicado.</div>
-          <div className="text-xs text-slate-600 mt-1">
+          <div className="text-xs text-ink-2 mt-1">
             Não há fichas com e-mail ou nome repetido.
           </div>
         </div>
@@ -76,10 +76,10 @@ export default function Duplicados({ onClose, onMesclou }) {
 
       <div className="space-y-3">
         {(grupos || []).map((g, i) => (
-          <div key={`${g.criterio}-${g.valor}`} className="border border-slate-300"
+          <div key={`${g.criterio}-${g.valor}`} className="border border-line rounded-lg"
             data-testid={`grupo-${i}`}>
-            <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <span className="text-xs text-slate-600">
+            <div className="px-3 py-2 bg-surface-2 border-b border-line flex items-center justify-between">
+              <span className="text-xs text-ink-2">
                 {g.contatos.length} fichas com {CRITERIO[g.criterio] || g.criterio}:{" "}
                 <strong className="font-semibold">{g.valor}</strong>
               </span>
@@ -90,20 +90,20 @@ export default function Duplicados({ onClose, onMesclou }) {
             </div>
             {g.contatos.map((c) => (
               <label key={c.id}
-                className={`flex items-center gap-3 px-3 py-2 border-b border-slate-100 last:border-b-0 cursor-pointer ${
-                  principal[i] === c.id ? "bg-green-50" : "hover:bg-slate-50"
+                className={`flex items-center gap-3 px-3 py-2 border-b border-line last:border-b-0 cursor-pointer ${
+                  principal[i] === c.id ? "bg-success-soft" : "hover:bg-surface-2"
                 }`}>
                 <input type="radio" name={`principal-${i}`} checked={principal[i] === c.id}
                   onChange={() => setPrincipal({ ...principal, [i]: c.id })} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold truncate">{c.nome}</div>
-                  <div className="text-[11px] font-mono text-slate-500">
+                  <div className="text-[11px] font-mono text-ink-3">
                     {c.numero_whatsapp}
                     {c.empresa ? ` · ${c.empresa}` : ""}
                     {c.created_at ? ` · desde ${new Date(c.created_at).toLocaleDateString("pt-BR")}` : ""}
                   </div>
                 </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 shrink-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-ink-3 shrink-0">
                   {principal[i] === c.id ? "fica" : "será absorvida"}
                 </span>
               </label>

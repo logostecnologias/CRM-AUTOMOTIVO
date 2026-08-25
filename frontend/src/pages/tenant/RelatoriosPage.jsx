@@ -34,10 +34,10 @@ function duracao(s) {
 
 function Tile({ rotulo, valor, hint, destaque }) {
   return (
-    <div className={`border px-4 py-3 ${destaque ? "border-slate-900 bg-white" : "border-slate-300 bg-white"}`}>
-      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{rotulo}</div>
+    <div className={`border rounded-lg px-4 py-3 ${destaque ? "border-info bg-surface" : "border-line bg-surface"}`}>
+      <div className="text-[9px] font-bold uppercase tracking-wider text-ink-3">{rotulo}</div>
       <div className="font-heading text-2xl font-black tracking-tighter">{valor}</div>
-      {hint && <div className="text-[10px] text-slate-500 mt-0.5">{hint}</div>}
+      {hint && <div className="text-[10px] text-ink-3 mt-0.5">{hint}</div>}
     </div>
   );
 }
@@ -46,7 +46,7 @@ function Tile({ rotulo, valor, hint, destaque }) {
 function BarraLinha({ valor, maximo, cor = "#2563EB" }) {
   const pct = maximo ? Math.max(2, (valor / maximo) * 100) : 0;
   return (
-    <div className="h-1.5 bg-slate-100">
+    <div className="h-1.5 bg-surface-2">
       <div className="h-full" style={{ width: `${pct}%`, background: cor }} />
     </div>
   );
@@ -82,13 +82,13 @@ function Atendimento({ janela }) {
 
   if (erro) {
     return (
-      <div className="border-2 border-amber-400 bg-amber-50 p-4 flex gap-3">
-        <Warning size={18} weight="bold" className="text-amber-700 shrink-0 mt-0.5" />
-        <div className="text-sm text-slate-800">{erro}</div>
+      <div className="border border-warning bg-warning-soft p-4 flex gap-3 rounded-lg">
+        <Warning size={18} weight="bold" className="text-warning shrink-0 mt-0.5" />
+        <div className="text-sm text-ink">{erro}</div>
       </div>
     );
   }
-  if (!dados) return <div className="text-xs text-slate-500 py-6">Carregando…</div>;
+  if (!dados) return <div className="text-xs text-ink-3 py-6">Carregando…</div>;
 
   const { resumo, tempos } = dados;
   const maxAtendente = Math.max(1, ...dados.por_atendente.map((a) => a.assumidas));
@@ -137,32 +137,32 @@ function Atendimento({ janela }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="border border-slate-200 bg-white p-4">
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">
+        <div className="border border-line bg-surface p-5 rounded-lg">
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-3">
             Por atendente
           </div>
           {dados.por_atendente.length === 0 ? (
-            <div className="text-xs text-slate-400">Nenhuma conversa assumida no período.</div>
+            <div className="text-xs text-ink-4">Nenhuma conversa assumida no período.</div>
           ) : (
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left pb-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">Atendente</th>
-                  <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">Assumidas</th>
-                  <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">Finalizadas</th>
-                  <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-slate-500">Tempo médio</th>
+                <tr className="border-b border-line">
+                  <th className="text-left pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Atendente</th>
+                  <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Assumidas</th>
+                  <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Finalizadas</th>
+                  <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Tempo médio</th>
                 </tr>
               </thead>
               <tbody>
                 {dados.por_atendente.map((a) => (
-                  <tr key={a.atendente_id} className="border-b border-slate-100 last:border-b-0">
-                    <td className="py-1.5 pr-2">
+                  <tr key={a.atendente_id} className="border-b border-line last:border-b-0">
+                    <td className="py-2.5.5 pr-2">
                       <div className="font-semibold truncate">{a.nome}</div>
                       <BarraLinha valor={a.assumidas} maximo={maxAtendente} />
                     </td>
-                    <td className="py-1.5 text-right font-mono">{a.assumidas}</td>
-                    <td className="py-1.5 text-right font-mono">{a.finalizadas}</td>
-                    <td className="py-1.5 text-right font-mono">{duracao(a.atendimento_medio_s)}</td>
+                    <td className="py-2.5.5 text-right font-mono">{a.assumidas}</td>
+                    <td className="py-2.5.5 text-right font-mono">{a.finalizadas}</td>
+                    <td className="py-2.5.5 text-right font-mono">{duracao(a.atendimento_medio_s)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -171,12 +171,12 @@ function Atendimento({ janela }) {
         </div>
 
         <div className="space-y-3">
-          <div className="border border-slate-200 bg-white p-4">
-            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">
+          <div className="border border-line bg-surface p-5 rounded-lg">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-3">
               Por departamento
             </div>
             {dados.por_departamento.length === 0 ? (
-              <div className="text-xs text-slate-400">Nenhuma conversa com departamento.</div>
+              <div className="text-xs text-ink-4">Nenhuma conversa com departamento.</div>
             ) : dados.por_departamento.map((d) => (
               <div key={d.id} className="mb-2 last:mb-0">
                 <div className="flex justify-between text-xs mb-0.5">
@@ -189,12 +189,12 @@ function Atendimento({ janela }) {
             ))}
           </div>
 
-          <div className="border border-slate-200 bg-white p-4">
-            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">
+          <div className="border border-line bg-surface p-5 rounded-lg">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-3">
               Por conexão
             </div>
             {dados.por_conexao.length === 0 ? (
-              <div className="text-xs text-slate-400">Nenhuma conversa no período.</div>
+              <div className="text-xs text-ink-4">Nenhuma conversa no período.</div>
             ) : dados.por_conexao.map((c) => (
               <div key={c.id} className="mb-2 last:mb-0">
                 <div className="flex justify-between text-xs mb-0.5">
@@ -220,7 +220,7 @@ function Campanhas({ janela }) {
       .then((r) => setDados(r.data)).catch(() => setDados(null));
   }, [janela]);
 
-  if (!dados) return <div className="text-xs text-slate-500 py-6">Carregando…</div>;
+  if (!dados) return <div className="text-xs text-ink-3 py-6">Carregando…</div>;
   const { resumo } = dados;
   const maxValor = Math.max(1, ...dados.itens.map((i) => i.valor));
 
@@ -236,8 +236,8 @@ function Campanhas({ janela }) {
           hint="negócios fechados vindos de campanha" />
       </div>
 
-      <div className="border border-slate-200 bg-white">
-        <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+      <div className="border border-line bg-surface rounded-lg">
+        <div className="grid grid-cols-12 px-4 py-2 border-b border-line text-[9px] font-bold uppercase tracking-wider text-ink-3">
           <div className="col-span-4">Campanha</div>
           <div className="col-span-1 text-right">Entregues</div>
           <div className="col-span-1 text-right">Falhas</div>
@@ -247,19 +247,19 @@ function Campanhas({ janela }) {
           <div className="col-span-3 text-right">Receita</div>
         </div>
         {dados.itens.length === 0 && (
-          <div className="p-8 text-center text-sm text-slate-500">
+          <div className="p-8 text-center text-sm text-ink-3">
             Nenhuma campanha com disparo ou negócio fechado no período.
           </div>
         )}
         {dados.itens.map((i) => (
-          <div key={i.campanha_id} className="grid grid-cols-12 px-4 py-2.5 border-b border-slate-100 last:border-b-0 items-center"
+          <div key={i.campanha_id} className="grid grid-cols-12 px-4 py-2.5 border-b border-line last:border-b-0 items-center"
             data-testid={`rel-campanha-${i.campanha_id}`}>
             <div className="col-span-4 pr-3">
               <div className="text-sm font-semibold truncate">{i.nome}</div>
               <BarraLinha valor={i.valor} maximo={maxValor} />
             </div>
             <div className="col-span-1 text-right font-mono text-xs">{i.enviados}</div>
-            <div className="col-span-1 text-right font-mono text-xs text-slate-500">{i.falhas || "—"}</div>
+            <div className="col-span-1 text-right font-mono text-xs text-ink-3">{i.falhas || "—"}</div>
             <div className="col-span-1 text-right font-mono text-xs">{i.respostas}</div>
             <div className="col-span-1 text-right font-mono text-xs">
               {i.taxa_resposta != null ? `${i.taxa_resposta}%` : "—"}
@@ -286,7 +286,7 @@ function FunilAba() {
     }).catch(() => {});
   }, []);
 
-  if (!funilId) return <div className="text-xs text-slate-500 py-6">Carregando…</div>;
+  if (!funilId) return <div className="text-xs text-ink-3 py-6">Carregando…</div>;
   return (
     <div>
       {funis.length > 1 && (
@@ -314,9 +314,9 @@ export default function RelatoriosPage() {
     <div className="p-8 max-w-7xl" data-testid="relatorios-page">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Números</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Números</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Relatórios</h1>
-          <p className="text-slate-600 mt-2 text-sm">
+          <p className="text-ink-2 mt-2 text-sm">
             O que a operação produziu no período — atendimento, campanhas e funil.
           </p>
         </div>
@@ -324,8 +324,8 @@ export default function RelatoriosPage() {
           <div className="flex gap-1">
             {JANELAS.map(([v, r]) => (
               <button key={v} onClick={() => setJanela(v)} data-testid={`janela-${v}`}
-                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border ${
-                  janela === v ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-600"
+                className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border rounded-full ${
+                  janela === v ? "bg-brand text-brand-fg border-brand" : "bg-surface border-line text-ink-2"
                 }`}>
                 {r}
               </button>
@@ -334,11 +334,11 @@ export default function RelatoriosPage() {
         )}
       </div>
 
-      <div className="flex gap-1 mb-4 border-b border-slate-200">
+      <div className="flex gap-1 mb-4 border-b border-line">
         {ABAS.map(([v, r, Icone]) => (
           <button key={v} onClick={() => setAba(v)} data-testid={`aba-${v}`}
             className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 -mb-px flex items-center gap-1.5 ${
-              aba === v ? "border-slate-900 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"
+              aba === v ? "border-info text-ink" : "border-transparent text-ink-3 hover:text-ink"
             }`}>
             <Icone size={13} weight="bold" /> {r}
           </button>

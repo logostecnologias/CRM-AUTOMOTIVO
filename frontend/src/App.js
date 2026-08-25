@@ -32,7 +32,7 @@ const FlowEditorPage = lazy(() => import("@/pages/tenant/FlowEditorPage"));
 function EditorLoading() {
   return (
     <div className="h-screen flex items-center justify-center" data-testid="editor-loading">
-      <div className="text-xs font-bold uppercase tracking-[0.25em] text-slate-500">
+      <div className="text-xs font-bold uppercase tracking-[0.25em] text-ink-3">
         Carregando editor…
       </div>
     </div>

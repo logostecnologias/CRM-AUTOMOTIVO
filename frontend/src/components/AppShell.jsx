@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import { useAtividadesAtrasadas } from "@/hooks/useAtividadesAtrasadas";
+import BotaoTema from "@/components/BotaoTema";
 import {
   ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
@@ -56,9 +57,9 @@ export default function AppShell({ variant = "tenant" }) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
+    <div className="min-h-screen flex flex-col bg-canvas">
       {impersonatedFrom === "super_admin" && variant === "tenant" && (
-        <div className="w-full bg-amber-400 border-b-2 border-slate-900 px-6 py-2 flex items-center justify-between text-slate-900" data-testid="impersonation-bar">
+        <div className="w-full bg-warning-solid border-b border-line px-6 py-2 flex items-center justify-between text-warning-fg" data-testid="impersonation-bar">
           <div className="text-sm font-bold tracking-wide">
             ⚠ MODO SUPORTE — Você está navegando como Admin desta empresa
           </div>
@@ -69,15 +70,15 @@ export default function AppShell({ variant = "tenant" }) {
       )}
 
       <div className="flex flex-1 min-h-0">
-        <aside className="w-60 border-r border-slate-900 bg-white flex flex-col" data-testid="sidebar">
-          <div className="px-5 py-5 border-b border-slate-900">
+        <aside className="w-60 border-r border-line bg-surface flex flex-col" data-testid="sidebar">
+          <div className="px-5 py-6 border-b border-line">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-slate-900 text-white flex items-center justify-center">
+              <div className="w-9 h-9 bg-brand text-brand-fg rounded-xl flex items-center justify-center shrink-0">
                 <ChatCircleDots size={20} weight="bold" />
               </div>
               <div>
                 <div className="font-heading font-black text-lg leading-none tracking-tighter">ZappZen</div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold mt-0.5">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-ink-3 font-bold mt-0.5">
                   {variant === "admin" ? "Super Admin" : (user?.role === "agent" ? "Atendente" : "Admin")}
                 </div>
               </div>
@@ -117,11 +118,14 @@ export default function AppShell({ variant = "tenant" }) {
             ))}
           </nav>
 
-          <div className="border-t border-slate-200 p-3">
-            <div className="text-xs text-slate-500 mb-1 truncate">{user?.email}</div>
-            <button data-testid="logout-btn" onClick={handleLogout} className="zz-btn zz-btn-secondary w-full justify-center">
-              <SignOut size={16} weight="bold" /> Sair
-            </button>
+          <div className="border-t border-line p-3">
+            <div className="text-xs text-ink-3 mb-2 truncate">{user?.email}</div>
+            <div className="flex items-center gap-2">
+              <button data-testid="logout-btn" onClick={handleLogout} className="zz-btn zz-btn-secondary flex-1 justify-center">
+                <SignOut size={16} weight="bold" /> Sair
+              </button>
+              <BotaoTema />
+            </div>
           </div>
         </aside>
 

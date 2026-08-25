@@ -85,9 +85,9 @@ export default function ContactsPage() {
     <div className={`p-8 ${aberto ? "pr-[540px]" : ""}`} data-testid="contacts-page">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Base</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Base</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Contatos</h1>
-          <p className="text-slate-600 mt-2 text-sm">
+          <p className="text-ink-2 mt-2 text-sm">
             Clique num contato para abrir a ficha, anotar, atribuir responsável e enviar mensagem.
           </p>
         </div>
@@ -135,15 +135,15 @@ export default function ContactsPage() {
       )}
 
       {novo && (
-        <form onSubmit={criar} className="border border-slate-900 bg-white p-4 mb-6 flex gap-3 items-end zz-panel-hard"
+        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-6 flex gap-3 items-end zz-panel-hard rounded-lg"
           data-testid="new-contact-form">
           <div className="flex-1">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">Nome</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome</label>
             <input required autoFocus className="zz-input" data-testid="new-contact-name"
               value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
           </div>
           <div className="flex-1">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
               WhatsApp (com DDI e DDD)
             </label>
             <input required className="zz-input font-mono" data-testid="new-contact-number"
@@ -157,7 +157,7 @@ export default function ContactsPage() {
 
       <div className="flex gap-3 items-center mb-4 flex-wrap">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
-          <MagnifyingGlass size={14} weight="bold" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <MagnifyingGlass size={14} weight="bold" className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
           <input className="zz-input pl-8" placeholder="Nome, número, e-mail ou empresa…" data-testid="contact-search"
             value={busca} onChange={(e) => setBusca(e.target.value)} />
         </div>
@@ -173,27 +173,27 @@ export default function ContactsPage() {
         </select>
         {(busca || tagFiltro || responsavelFiltro) && (
           <button onClick={() => { setBusca(""); setTagFiltro(""); setResponsavelFiltro(""); }}
-            className="p-1.5 hover:bg-slate-200" title="Limpar filtros">
+            className="p-1.5 hover:bg-surface-3" title="Limpar filtros">
             <X size={14} weight="bold" />
           </button>
         )}
-        <div className="text-xs font-mono text-slate-500 ml-auto">{total.toLocaleString("pt-BR")} contato(s)</div>
+        <div className="text-xs font-mono text-ink-3 ml-auto">{total.toLocaleString("pt-BR")} contato(s)</div>
       </div>
 
       {contatos.length === 0 ? (
-        <div className="border border-dashed border-slate-300 bg-white p-16 text-center">
+        <div className="border border-dashed border-line rounded-xl bg-surface p-16 text-center">
           <div className="font-heading text-2xl font-black tracking-tighter mb-2">
             {busca || tagFiltro || responsavelFiltro ? "Nenhum contato encontrado." : "Nenhum contato ainda."}
           </div>
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-ink-2">
             {busca || tagFiltro || responsavelFiltro
               ? "Ajuste a busca ou os filtros."
               : "Contatos são criados automaticamente quando alguém envia a primeira mensagem — ou cadastre um agora."}
           </div>
         </div>
       ) : (
-        <div className="border border-slate-200 bg-white">
-          <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+        <div className="border border-line bg-surface rounded-lg">
+          <div className="grid grid-cols-12 px-4 py-2 border-b border-line text-[10px] font-bold uppercase tracking-wider text-ink-3">
             <div className="col-span-3">Nome</div>
             <div className="col-span-2">Número</div>
             <div className="col-span-2">Empresa</div>
@@ -202,24 +202,24 @@ export default function ContactsPage() {
           </div>
           {contatos.map((c) => (
             <button key={c.id} onClick={() => setAberto(c.id)} data-testid={`contact-${c.id}`}
-              className={`w-full text-left grid grid-cols-12 px-4 py-2.5 border-b border-slate-100 items-center hover:bg-slate-50 ${
-                aberto === c.id ? "bg-slate-100" : ""
+              className={`w-full text-left grid grid-cols-12 px-4 py-2.5 border-b border-line items-center hover:bg-surface-2 ${
+                aberto === c.id ? "bg-surface-2" : ""
               }`}>
               <div className="col-span-3 font-semibold truncate flex items-center gap-1.5">
-                {c.opt_out && <Prohibit size={12} weight="bold" className="text-red-600 shrink-0"
+                {c.opt_out && <Prohibit size={12} weight="bold" className="text-danger shrink-0"
                   title="Não recebe campanhas" />}
                 {c.nome}
               </div>
-              <div className="col-span-2 font-mono text-sm text-slate-700">{c.numero_whatsapp}</div>
-              <div className="col-span-2 text-sm text-slate-600 truncate">{c.empresa || "—"}</div>
-              <div className="col-span-2 text-xs text-slate-600 truncate">
-                {nomeUsuario(c.responsavel_id) || <span className="text-slate-400">sem responsável</span>}
+              <div className="col-span-2 font-mono text-sm text-ink">{c.numero_whatsapp}</div>
+              <div className="col-span-2 text-sm text-ink-2 truncate">{c.empresa || "—"}</div>
+              <div className="col-span-2 text-xs text-ink-2 truncate">
+                {nomeUsuario(c.responsavel_id) || <span className="text-ink-4">sem responsável</span>}
               </div>
               <div className="col-span-3 flex items-center gap-1 flex-wrap">
                 {(c.tags || []).length === 0
-                  ? <span className="text-xs text-slate-400">—</span>
+                  ? <span className="text-xs text-ink-4">—</span>
                   : c.tags.map((t) => (
-                      <span key={t} className="text-[11px] font-semibold px-1.5 py-0.5 border border-slate-300 bg-slate-50">
+                      <span key={t} className="text-[11px] font-semibold px-1.5 py-0.5 border border-line bg-surface-2 rounded-full">
                         {t}
                       </span>
                     ))}
@@ -233,7 +233,7 @@ export default function ContactsPage() {
         <div className="flex items-center justify-between mt-4">
           <button disabled={pagina === 0} onClick={() => setPagina((p) => p - 1)}
             className="zz-btn zz-btn-secondary disabled:opacity-40">Anterior</button>
-          <span className="text-xs font-mono text-slate-500">Página {pagina + 1} de {paginas}</span>
+          <span className="text-xs font-mono text-ink-3">Página {pagina + 1} de {paginas}</span>
           <button disabled={pagina + 1 >= paginas} onClick={() => setPagina((p) => p + 1)}
             className="zz-btn zz-btn-secondary disabled:opacity-40">Próxima</button>
         </div>

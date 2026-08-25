@@ -75,7 +75,7 @@ export default function TenantsPage() {
     <div className="p-8" data-testid="admin-tenants-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-slate-500 mb-2">Gestão</div>
+          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Gestão</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Empresas</h1>
         </div>
         <button data-testid="new-tenant-btn" onClick={() => setShowForm(!showForm)} className="zz-btn">
@@ -84,11 +84,11 @@ export default function TenantsPage() {
       </div>
 
       {showForm && (
-        <form onSubmit={create} className="border border-slate-900 bg-white p-6 mb-6 grid grid-cols-2 gap-4 zz-panel-hard">
+        <form onSubmit={create} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-2 gap-4 zz-panel-hard rounded-lg">
           <Field label="Nome da Empresa"><input required data-testid="tenant-name" className="zz-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Plano">
             {plans.length === 0 ? (
-              <div className="text-xs text-slate-500 italic py-2">Nenhum plano cadastrado — crie um em "Planos" primeiro.</div>
+              <div className="text-xs text-ink-3 italic py-2">Nenhum plano cadastrado — crie um em "Planos" primeiro.</div>
             ) : (
               <select required data-testid="tenant-plan" className="zz-input" value={form.plan_id} onChange={(e) => setForm({ ...form, plan_id: e.target.value })}>
                 <option value="" disabled>Selecione um plano</option>
@@ -102,15 +102,15 @@ export default function TenantsPage() {
           <Field label="Email do Admin"><input required type="email" data-testid="admin-email" className="zz-input" value={form.admin_email} onChange={(e) => setForm({ ...form, admin_email: e.target.value })} /></Field>
           <Field label="Senha inicial do Admin"><input required data-testid="admin-password" className="zz-input" value={form.admin_password} onChange={(e) => setForm({ ...form, admin_password: e.target.value })} /></Field>
           <div className="col-span-2 flex gap-2 justify-end items-center">
-            {err && <div className="text-sm text-red-600 mr-auto">{err}</div>}
+            {err && <div className="text-sm text-danger mr-auto">{err}</div>}
             <button type="button" onClick={() => setShowForm(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
             <button type="submit" data-testid="tenant-submit" className="zz-btn">Criar Empresa</button>
           </div>
         </form>
       )}
 
-      <div className="border border-slate-200 bg-white">
-        <div className="grid grid-cols-12 px-4 py-2 border-b border-slate-200 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+      <div className="border border-line bg-surface rounded-lg">
+        <div className="grid grid-cols-12 px-4 py-2 border-b border-line text-[10px] font-bold uppercase tracking-wider text-ink-3">
           <div className="col-span-3">Nome</div>
           <div className="col-span-3">Plano</div>
           <div className="col-span-2">Status</div>
@@ -118,13 +118,13 @@ export default function TenantsPage() {
           <div className="col-span-2">Criado em</div>
           <div className="col-span-1 text-right">Ações</div>
         </div>
-        {tenants.length === 0 && <div className="p-6 text-center text-sm text-slate-500">Nenhuma empresa cadastrada.</div>}
+        {tenants.length === 0 && <div className="p-6 text-center text-sm text-ink-3">Nenhuma empresa cadastrada.</div>}
         {tenants.map((t) => (
-          <div key={t.id} className="grid grid-cols-12 px-4 py-3 border-b border-slate-100 items-center hover:bg-slate-50" data-testid={`tenant-row-${t.id}`}>
+          <div key={t.id} className="grid grid-cols-12 px-4 py-3 border-b border-line items-center hover:bg-surface-2" data-testid={`tenant-row-${t.id}`}>
             <div className="col-span-3 font-semibold">{t.name}</div>
             <div className="col-span-3 pr-3">
               {plans.length === 0 ? (
-                <span className="text-xs italic text-slate-400">nenhum plano cadastrado</span>
+                <span className="text-xs italic text-ink-4">nenhum plano cadastrado</span>
               ) : (
                 <select
                   className="zz-input text-xs py-1"
@@ -140,16 +140,16 @@ export default function TenantsPage() {
               )}
             </div>
             <div className="col-span-2">
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border ${t.status === "active" ? "bg-green-50 border-green-500 text-green-700" : "bg-red-50 border-red-500 text-red-700"}`}>{t.status}</span>
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full ${t.status === "active" ? "bg-success-soft border-success text-success" : "bg-danger-soft border-danger text-danger"}`}>{t.status}</span>
             </div>
             <div className="col-span-1 font-mono text-sm">{t.bots_count}</div>
-            <div className="col-span-2 text-xs text-slate-500 font-mono">{new Date(t.created_at).toLocaleDateString("pt-BR")}</div>
+            <div className="col-span-2 text-xs text-ink-3 font-mono">{new Date(t.created_at).toLocaleDateString("pt-BR")}</div>
             <div className="col-span-1 flex gap-1 justify-end">
-              <button onClick={() => impersonate(t)} className="p-1.5 hover:bg-blue-100 text-blue-600" title="Entrar na empresa" data-testid={`impersonate-${t.id}`}><SignIn size={16} weight="bold" /></button>
-              <button onClick={() => toggle(t)} className="p-1.5 hover:bg-slate-200" title={t.status === "active" ? "Suspender" : "Reativar"}>
+              <button onClick={() => impersonate(t)} className="p-1.5 hover:bg-info-soft text-info" title="Entrar na empresa" data-testid={`impersonate-${t.id}`}><SignIn size={16} weight="bold" /></button>
+              <button onClick={() => toggle(t)} className="p-1.5 hover:bg-surface-3" title={t.status === "active" ? "Suspender" : "Reativar"}>
                 {t.status === "active" ? <PauseCircle size={16} weight="bold" /> : <PlayCircle size={16} weight="bold" />}
               </button>
-              <button onClick={() => remove(t.id)} className="p-1.5 hover:bg-red-100 text-red-600" title="Excluir"><Trash size={16} weight="bold" /></button>
+              <button onClick={() => remove(t.id)} className="p-1.5 hover:bg-danger-soft text-danger" title="Excluir"><Trash size={16} weight="bold" /></button>
             </div>
           </div>
         ))}
@@ -161,7 +161,7 @@ export default function TenantsPage() {
 function Field({ label, children }) {
   return (
     <div>
-      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1.5">{label}</label>
+      <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">{label}</label>
       {children}
     </div>
   );

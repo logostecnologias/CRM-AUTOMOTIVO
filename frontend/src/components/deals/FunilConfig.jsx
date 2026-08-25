@@ -57,37 +57,37 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
   const restantes = etapas.filter((e) => e.id);
 
   return (
-    <div className="border border-slate-900 bg-white p-5 mb-4 zz-panel-hard" data-testid="funil-config">
+    <div className="border border-line-strong bg-surface p-6 mb-4 zz-panel-hard rounded-lg" data-testid="funil-config">
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="font-heading text-xl font-black tracking-tighter">Etapas do funil</div>
-          <p className="text-xs text-slate-600 mt-1">
+          <p className="text-xs text-ink-2 mt-1">
             A etapa marcada como <strong>Ganho</strong> ou <strong>Perdido</strong> é a que fecha o
             negócio e alimenta os relatórios de conversão.
           </p>
         </div>
-        <button onClick={onClose} className="p-1.5 hover:bg-slate-200"><X size={15} weight="bold" /></button>
+        <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
       </div>
 
       <form onSubmit={salvar}>
         <div className="mb-4 max-w-sm">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 block mb-1">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">
             Nome do funil
           </label>
           <input required className="zz-input h-8 py-1 text-sm" data-testid="funil-nome"
             value={nome} onChange={(e) => setNome(e.target.value)} />
         </div>
 
-        <div className="border border-slate-200 mb-3">
+        <div className="border border-line mb-3 rounded-lg">
           {etapas.map((etapa, i) => (
             <div key={etapa.id || `nova-${i}`}
-              className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 last:border-b-0"
+              className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-b-0"
               data-testid={`etapa-row-${i}`}>
               <div className="flex gap-0.5">
                 <button type="button" onClick={() => mover(i, -1)} disabled={i === 0}
-                  className="p-0.5 hover:bg-slate-200 disabled:opacity-20"><ArrowUp size={11} weight="bold" /></button>
+                  className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowUp size={11} weight="bold" /></button>
                 <button type="button" onClick={() => mover(i, 1)} disabled={i === etapas.length - 1}
-                  className="p-0.5 hover:bg-slate-200 disabled:opacity-20"><ArrowDown size={11} weight="bold" /></button>
+                  className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowDown size={11} weight="bold" /></button>
               </div>
               <input required className="zz-input h-7 py-0 text-sm flex-1" value={etapa.nome}
                 onChange={(ev) => alterar(i, { nome: ev.target.value })} />
@@ -98,12 +98,12 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
               <div className="flex gap-0.5">
                 {CORES.map((c) => (
                   <button key={c} type="button" onClick={() => alterar(i, { cor: c })}
-                    className={`w-5 h-5 border-2 ${etapa.cor === c ? "border-slate-900" : "border-transparent"}`}
+                    className={`w-5 h-5 rounded-md border-2 ${etapa.cor === c ? "border-ink" : "border-transparent"}`}
                     style={{ background: c }} />
                 ))}
               </div>
               <button type="button" onClick={() => remover(i)} disabled={etapas.length === 1}
-                className="p-1 hover:bg-red-100 text-red-600 disabled:opacity-20">
+                className="p-1 hover:bg-danger-soft text-danger disabled:opacity-20">
                 <Trash size={13} weight="bold" />
               </button>
             </div>
@@ -111,8 +111,8 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
         </div>
 
         {conflito && (
-          <div className="border-2 border-amber-400 bg-amber-50 p-3 mb-3">
-            <div className="text-sm text-slate-800 mb-2">{conflito}</div>
+          <div className="border border-warning bg-warning-soft p-3 mb-3 rounded-lg">
+            <div className="text-sm text-ink mb-2">{conflito}</div>
             <div className="flex gap-2 items-center">
               <select className="zz-input h-8 py-1 text-sm max-w-xs" data-testid="mover-para"
                 value={moverPara} onChange={(e) => setMoverPara(e.target.value)}>
