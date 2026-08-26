@@ -56,3 +56,25 @@ async def campanhas(de: str | None = None, ate: str | None = None,
     db = get_db()
     inicio, fim = await _janela(de, ate)
     return await relatorios.campanhas(db, user["tenant_id"], inicio, fim)
+
+
+@router.get("/agenda")
+async def agenda(de: str | None = None, ate: str | None = None,
+                 user=Depends(require_tenant_member)):
+    """Faltas, receita, ocupação e quem marcou, na janela.
+
+    **Não** passa por `_escopo`, ao contrário do relatório de atendimento, e a
+    diferença não é esquecimento: a agenda é lida pela equipe inteira sem
+    recorte, porque quem atende o telefone precisa saber que "a Ana tem às 15h"
+    (ver o cabeçalho de `routes/scheduling.py`). Um relatório recortado por
+    conexão aqui mostraria menos que a própria tela de agenda, o que faria os
+    dois números discordarem sem explicação.
+    """
+    db = get_db()
+    inicio, fim = await _janela(de, ate)
+    try:
+        return await relatorios.agendamentos(db, user["tenant_id"], inicio, fim)
+    except relatorios.RelatorioError as e:
+        # 413, como no de atendimento: o pedido é válido, o período é que é
+        # grande demais para responder inteiro.
+        raise HTTPException(status_code=413, detail=str(e))

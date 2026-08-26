@@ -1,6 +1,9 @@
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { NODE_TYPES, MENU_FORMATOS, validarMenu, FORMATO_TEXTO, rotuloGatilho } from "./nodeTypes";
+import {
+  NODE_TYPES, MENU_FORMATOS, validarMenu, validarAgendamento, FORMATO_TEXTO,
+  MODOS_PROFISSIONAL, rotuloGatilho,
+} from "./nodeTypes";
 import { Warning } from "@phosphor-icons/react";
 
 function CustomNode({ id, data, selected, type }) {
@@ -25,6 +28,7 @@ function CustomNode({ id, data, selected, type }) {
   // canvas: o problema não dá erro em lugar nenhum, a mensagem só não chega.
   const aviso = data._warning
     || (type === "menu" ? validarMenu(data).join(" · ") : "")
+    || (type === "schedule" ? validarAgendamento(data).join(" · ") : "")
     || null;
 
   return (
@@ -90,6 +94,21 @@ function CustomNode({ id, data, selected, type }) {
         {type === "webhook" && (
           <div className="text-xs font-mono truncate">
             <span className="text-info font-bold">{data.method || "GET"}</span> {data.url || "https://..."}
+          </div>
+        )}
+        {type === "schedule" && (
+          <div className="space-y-1">
+            <div className="text-xs text-ink">
+              {data.service_nome
+                ? <span className="font-semibold">{data.service_nome}</span>
+                : <span className="text-ink-3">pergunta qual serviço</span>}
+            </div>
+            <div className="text-[10px] font-mono text-ink-3">
+              {MODOS_PROFISSIONAL.find((m) => m.valor === (data.modo_profissional || "qualquer"))
+                ?.label.toLowerCase()}
+              {" · "}
+              {data.dias_oferecidos || 5} dias
+            </div>
           </div>
         )}
         {type === "human_handoff" && (

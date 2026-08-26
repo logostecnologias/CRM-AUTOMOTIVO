@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { useAuth } from "@/context/AuthContext";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { Hand, CheckCircle, X, Warning } from "@phosphor-icons/react";
@@ -35,24 +36,23 @@ export default function InboxPage() {
   }, {});
   const visible = sessions.filter((s) => s.status_atendimento === stage);
 
-  const assume = async () => {
+  const [assume, assumindo] = useAcao(async () => {
     await api.post(`/atendimento/sessions/${activeId}/assume`);
     toast.success("Conversa assumida");
     setStage("em_atendimento");
     await refreshActive(); loadSessions();
-  };
-  const finalize = async () => {
+  });
+  const [finalize, finalizando] = useAcao(async () => {
     await api.post(`/atendimento/sessions/${activeId}/finalize`);
     toast.success("Atendimento finalizado");
     await refreshActive(); loadSessions();
-  };
+  });
   const canSend = active?.status_atendimento === "em_atendimento" &&
     (user?.role !== "agent" || active?.atendente_id === user?.id);
 
   return (
     <div className="h-full flex flex-col" data-testid="inbox-page">
       <div className="border-b border-line-strong bg-surface px-6 py-4">
-        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Central</div>
         <h1 className="font-heading text-2xl font-black tracking-tighter mb-4">Atendimento</h1>
         <div className="flex items-center gap-2 flex-wrap">
           {STATUS.map((s) => {
@@ -130,12 +130,14 @@ export default function InboxPage() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {["aguardando"].includes(active.status_atendimento) && (
-                  <button onClick={assume} className="zz-btn text-xs" data-testid="assume-btn">
+                  <button onClick={assume} disabled={assumindo}
+                    className="zz-btn text-xs" data-testid="assume-btn">
                     <Hand size={12} weight="bold" /> Assumir
                   </button>
                 )}
                 {active.status_atendimento === "em_atendimento" && (
-                  <button onClick={finalize} className="zz-btn zz-btn-secondary text-xs" data-testid="finalize-btn">
+                  <button onClick={finalize} disabled={finalizando}
+                    className="zz-btn zz-btn-secondary text-xs" data-testid="finalize-btn">
                     <CheckCircle size={12} weight="bold" /> Finalizar
                   </button>
                 )}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -39,7 +40,7 @@ export default function PlansPage() {
     setEditing(p);
   };
 
-  const save = async (e) => {
+  const [save, salvando] = useAcao(async (e) => {
     e.preventDefault();
     // Campo em branco vira null de propósito: é o que diz "herda o default do
     // servidor", diferente de 0, que manda guardar pra sempre.
@@ -57,14 +58,14 @@ export default function PlansPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao salvar plano");
     }
-  };
+  });
 
-  const remove = async (id) => {
+  const [remove, removendo] = useAcao(async (id) => {
     if (!(await confirmToast("Excluir plano?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/admin/plans/${id}`);
     toast.success("Plano excluído");
     load();
-  };
+  });
 
   const num = (v) => (v === "" ? "" : Number(v));
 
@@ -72,7 +73,6 @@ export default function PlansPage() {
     <div className="zz-page" data-testid="admin-plans-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Gestão</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Planos</h1>
           <p className="text-ink-2 mt-2 text-sm">Cadastre os planos disponíveis para as empresas.</p>
         </div>
@@ -122,7 +122,8 @@ export default function PlansPage() {
           </Field>
           <div className="col-span-3 flex gap-2 justify-end">
             <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" data-testid="plan-submit" className="zz-btn">Salvar</button>
+            <button type="submit" data-testid="plan-submit" className="zz-btn"
+              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
           </div>
         </form>
       )}
@@ -156,7 +157,8 @@ export default function PlansPage() {
             </div>
             <div className="col-span-1 flex gap-1 justify-end">
               <button onClick={() => openEdit(p)} className="p-1.5 hover:bg-surface-3"><PencilSimple size={14} weight="bold" /></button>
-              <button onClick={() => remove(p.id)} className="p-1.5 hover:bg-danger-soft text-danger"><Trash size={14} weight="bold" /></button>
+              <button onClick={() => remove(p.id)} disabled={removendo}
+                className="p-1.5 hover:bg-danger-soft text-danger"><Trash size={14} weight="bold" /></button>
             </div>
           </div>
         ))}

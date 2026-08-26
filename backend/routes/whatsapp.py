@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from db import get_db
-from auth import require_tenant_admin, get_current_user
+from auth import require_tenant_admin, get_current_user, accessible_connection_ids
 from plan_limits import enforce_plan_limit
 import wuzapi_client as wuzapi
 
@@ -16,6 +16,32 @@ router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+# Campos que NUNCA vão para o navegador (ZZ-06). `wuzapi_token` é a credencial
+# de envio da instância — quem a copia fala pela conta do cliente sem passar por
+# nenhuma barreira nossa. `wuzapi_user_id` é o id interno da instância. O
+# frontend não lê nenhum dos dois.
+_CAMPOS_OCULTOS = ("_id", "wuzapi_token", "wuzapi_user_id")
+
+
+def _is_admin(user: dict) -> bool:
+    return user.get("role") in ("tenant_admin", "super_admin")
+
+
+def _serialize(conn: dict | None, is_admin: bool) -> dict | None:
+    """A conexão como ela pode sair para o cliente.
+
+    O QR (`qrcode_atual`) fica só para admin: quem escaneia um QR de pareamento
+    vincula um aparelho à conta de WhatsApp da empresa, então não é dado para um
+    atendente comum — mas a tela de pareamento (admin) precisa dele na lista.
+    """
+    if not conn:
+        return conn
+    saida = {k: v for k, v in conn.items() if k not in _CAMPOS_OCULTOS}
+    if not is_admin:
+        saida.pop("qrcode_atual", None)
+    return saida
 
 
 def _instance_name(tenant_id: str, conn_id: str) -> str:
@@ -64,8 +90,9 @@ async def list_connections(user: dict = Depends(get_current_user)):
             {"tenant_id": user["tenant_id"], "user_id": user["id"]}, {"_id": 0}
         ).to_list(500)
         q["id"] = {"$in": [a["whatsapp_connection_id"] for a in access]}
-    rows = await db.whatsapp_connections.find(q, {"_id": 0}).sort("created_at", 1).to_list(200)
-    return rows
+    rows = await db.whatsapp_connections.find(q).sort("created_at", 1).to_list(200)
+    admin = _is_admin(user)
+    return [_serialize(r, admin) for r in rows]
 
 
 @router.post("/connections")
@@ -87,8 +114,7 @@ async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admi
         "updated_at": _now(),
     }
     await db.whatsapp_connections.insert_one(conn)
-    conn.pop("_id", None)
-    return conn
+    return _serialize(conn, True)
 
 
 @router.get("/connections/{conn_id}")
@@ -99,7 +125,12 @@ async def get_connection(conn_id: str, user: dict = Depends(get_current_user)):
     )
     if not conn:
         raise HTTPException(status_code=404, detail="Conexão não encontrada")
-    return conn
+    # ZZ-06: a rota por id também respeita o escopo do atendente. Sem isto, um
+    # agente sem nenhuma conexão liberada lia qualquer uma da empresa por id.
+    accessible = await accessible_connection_ids(db, user)
+    if accessible is not None and conn_id not in accessible:
+        raise HTTPException(status_code=403, detail="Sem acesso a esta conexão")
+    return _serialize(conn, _is_admin(user))
 
 
 @router.patch("/connections/{conn_id}")
@@ -116,7 +147,7 @@ async def update_connection(conn_id: str, body: ConnectionPatch, user=Depends(re
     )
     if not conn:
         raise HTTPException(status_code=404, detail="Conexão não encontrada")
-    return conn
+    return _serialize(conn, True)
 
 
 @router.delete("/connections/{conn_id}")
@@ -181,7 +212,8 @@ async def connect(conn_id: str, user=Depends(require_tenant_admin)):
             "updated_at": _now(),
         }},
     )
-    return await db.whatsapp_connections.find_one({"id": conn_id}, {"_id": 0})
+    conn = await db.whatsapp_connections.find_one({"id": conn_id}, {"_id": 0})
+    return _serialize(conn, True)
 
 
 @router.post("/connections/{conn_id}/disconnect")
@@ -201,7 +233,8 @@ async def disconnect(conn_id: str, user=Depends(require_tenant_admin)):
         {"id": conn_id},
         {"$set": {"status": "desconectado", "qrcode_atual": None, "numero": None, "updated_at": _now()}},
     )
-    return await db.whatsapp_connections.find_one({"id": conn_id}, {"_id": 0})
+    conn = await db.whatsapp_connections.find_one({"id": conn_id}, {"_id": 0})
+    return _serialize(conn, True)
 
 
 # ---------- Legacy compat (returns first connection) ----------
@@ -218,8 +251,8 @@ async def legacy_status(user=Depends(require_tenant_admin)):
     conn = await _first_conn(db, user["tenant_id"])
     if not conn:
         return {"status": "desconectado", "id": None, "numero": None, "qrcode_atual": None,
-                "wuzapi_user_id": None, "departamento_padrao_id": None}
-    return conn
+                "departamento_padrao_id": None}
+    return _serialize(conn, True)
 
 
 @router.get("/connection")

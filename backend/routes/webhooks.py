@@ -37,7 +37,13 @@ def _now():
 def _validate_hmac(body: bytes, request: Request):
     key = os.environ.get("WUZAPI_GLOBAL_HMAC_KEY")
     if not key:
-        return
+        # Fail-closed (ZZ-11): sem a chave, o webhook alimenta
+        # `handle_incoming_message` sem nenhuma autenticação — dá para forjar
+        # mensagem em qualquer conversa e mexer no estado das conexões. Antes,
+        # a ausência da chave desligava a verificação **em silêncio**; agora a
+        # recusa é explícita. O boot também avisa (ver server.on_startup).
+        logger.error("WUZAPI_GLOBAL_HMAC_KEY ausente — webhooks recusados até configurá-la")
+        raise HTTPException(status_code=503, detail="Webhook signing not configured")
     provided = request.headers.get("x-hmac-signature", "")
     expected = hmac.new(key.encode(), body, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(provided, expected):

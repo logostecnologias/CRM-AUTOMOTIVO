@@ -211,10 +211,10 @@ async def etapa_teste_de_conexao():
     print()
     print("[a chave pode morrer depois de salva]")
 
-    async def responder_ok(db, tenant_id, agente, instrucoes, historico):
+    async def responder_ok(db, tenant_id, agente, instrucoes, historico, **kw):
         return ai_client.Resposta(texto="ok", modelo="claude-haiku-4-5")
 
-    async def responder_morto(db, tenant_id, agente, instrucoes, historico):
+    async def responder_morto(db, tenant_id, agente, instrucoes, historico, **kw):
         raise ai_client.IAError("A conta no provedor esta sem saldo.")
 
     original = ai_runtime.responder_por_agente

@@ -38,7 +38,6 @@ export default function LoginPage() {
         </div>
 
         <div>
-          <div className="text-xs font-bold tracking-[0.25em] uppercase text-ink-3 mb-4">Plataforma</div>
           <h1 className="font-heading text-5xl font-black tracking-tighter leading-[0.95] mb-6">
             Construa bots de WhatsApp<br/>com um <span className="text-info">canvas visual.</span>
           </h1>

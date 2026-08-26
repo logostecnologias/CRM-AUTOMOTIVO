@@ -74,6 +74,9 @@ async def list_sessions(
     elif connection_id:
         q["whatsapp_connection_id"] = connection_id
 
+    # Teto (ZZ-19): as outras listas do sistema já aplicavam isto; esta ficou de
+    # fora, então `?limit=100000` puxava tudo e ainda passava pelo _enrich caro.
+    limit = max(1, min(limit, 500))
     sessions = await db.conversation_sessions.find(q, {"_id": 0}).sort("updated_at", -1).limit(limit).to_list(limit)
     return await _enrich(db, sessions)
 

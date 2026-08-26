@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { MagnifyingGlass, Prohibit, Plus, SlidersHorizontal, X, ArrowsDownUp, ArrowsMerge } from "@phosphor-icons/react";
 import ContactPanel from "@/components/contacts/ContactPanel";
@@ -61,7 +62,7 @@ export default function ContactsPage() {
   }, []);
   useEffect(() => { setPagina(0); }, [busca, tagFiltro, responsavelFiltro]);
 
-  const criar = async (e) => {
+  const [criar, criando] = useAcao(async (e) => {
     e.preventDefault();
     try {
       const r = await api.post("/contacts", novo);
@@ -72,7 +73,7 @@ export default function ContactsPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
   const nomeUsuario = (id) => {
     const u = usuarios.find((x) => x.id === id);
@@ -85,7 +86,6 @@ export default function ContactsPage() {
     <div className={`p-8 ${aberto ? "pr-[540px]" : ""}`} data-testid="contacts-page">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Base</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Contatos</h1>
           <p className="text-ink-2 mt-2 text-sm">
             Clique num contato para abrir a ficha, anotar, atribuir responsável e enviar mensagem.
@@ -150,7 +150,8 @@ export default function ContactsPage() {
               placeholder="5511999998888" value={novo.numero_whatsapp}
               onChange={(e) => setNovo({ ...novo, numero_whatsapp: e.target.value })} />
           </div>
-          <button type="submit" className="zz-btn" data-testid="new-contact-submit">Criar</button>
+          <button type="submit" className="zz-btn" data-testid="new-contact-submit"
+            disabled={criando}>{criando ? "Criando…" : "Criar"}</button>
           <button type="button" onClick={() => setNovo(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
         </form>
       )}

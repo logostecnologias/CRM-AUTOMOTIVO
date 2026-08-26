@@ -5,6 +5,12 @@ $GatewayComposeDir = "/home/ubuntu/evolution"
 $CloudflaredLogOut = Join-Path $env:TEMP "zappzen-cloudflared.out.log"
 $CloudflaredLogErr = Join-Path $env:TEMP "zappzen-cloudflared.err.log"
 
+# Porta do proxy de webhook (backend/webhook_proxy.py). O tunel Cloudflare
+# aponta pra ELE, nao pro backend: assim so /api/webhooks/* fica publico, e o
+# resto da API (login, admin) nunca sai na internet. Ver ZZ-03.
+$WebhookProxyPort = 8099
+$script:ProxyProc = $null
+
 function Stop-StaleProcesses {
     Write-Host "Encerrando tuneis e processos antigos (se houver)..." -ForegroundColor Cyan
 
@@ -57,9 +63,35 @@ function Start-WebhookTunnel {
 
     Remove-Item $CloudflaredLogOut, $CloudflaredLogErr -Force -ErrorAction SilentlyContinue
 
+    # Sobe o proxy de webhook ANTES do tunel: ele e o alvo do tunel, e limita a
+    # superficie publica a /api/webhooks/* (ver backend/webhook_proxy.py e ZZ-03).
+    # O proxy e o tunel sao NAO-fatais de proposito: se qualquer um falhar, a
+    # app ainda sobe local (o `npm run dev` la embaixo roda de qualquer jeito).
+    # So os webhooks reais do WhatsApp deixam de chegar ate resolver — nunca a
+    # aplicacao inteira. Sem este try/catch, com $ErrorActionPreference=Stop um
+    # Start-Process que falhasse abortaria o start inteiro.
+    Write-Host "Subindo proxy de webhook (so /api/webhooks/* fica publico)..." -ForegroundColor Cyan
+    $env:PROXY_PORT = "$WebhookProxyPort"
+    $env:BACKEND_PORT = "8000"
+    try {
+        $script:ProxyProc = Start-Process -FilePath "python" `
+            -ArgumentList "backend/webhook_proxy.py" `
+            -WindowStyle Hidden -PassThru -ErrorAction Stop
+    }
+    catch {
+        Write-Host "Nao foi possivel iniciar o proxy de webhook ($_). Pulando o tunel: a app sobe local, webhooks reais nao chegam ate resolver." -ForegroundColor Yellow
+        return $null
+    }
+    if (-not (Wait-Port $WebhookProxyPort "proxy de webhook")) {
+        Write-Host "Proxy de webhook nao respondeu - pulando o tunel (app sobe local; webhooks reais nao chegam)." -ForegroundColor Yellow
+        if ($script:ProxyProc) { Stop-Process -Id $script:ProxyProc.Id -Force -ErrorAction SilentlyContinue }
+        $script:ProxyProc = $null
+        return $null
+    }
+
     Write-Host "Abrindo tunel Cloudflare para receber webhooks reais do WhatsApp..." -ForegroundColor Cyan
     $proc = Start-Process -FilePath $cfPath `
-        -ArgumentList "tunnel", "--url", "http://localhost:8000" `
+        -ArgumentList "tunnel", "--url", "http://localhost:$WebhookProxyPort" `
         -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $CloudflaredLogOut `
         -RedirectStandardError $CloudflaredLogErr
@@ -131,5 +163,8 @@ finally {
     Stop-Process -Id $wuzapiTunnel.Id -Force -ErrorAction SilentlyContinue
     if ($cloudflaredProc) {
         Stop-Process -Id $cloudflaredProc.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($script:ProxyProc) {
+        Stop-Process -Id $script:ProxyProc.Id -Force -ErrorAction SilentlyContinue
     }
 }

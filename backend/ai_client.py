@@ -31,6 +31,7 @@ Decisões que valem registro:
     faixa de uso e mostrar consumo ao cliente. Ler isso depois, do provedor,
     seria uma segunda integração para reconstruir o que a chamada já disse.
 """
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -143,6 +144,25 @@ def catalogo_publico() -> list[dict]:
 # Resposta
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class Ferramenta:
+    """Uma ação que o modelo pode executar em vez de só descrever.
+
+    `parametros` é JSON Schema, que é o formato que os dois provedores aceitam
+    o que muda entre eles é só o envelope, e é por isso que ele fica aqui.
+    """
+    nome: str
+    descricao: str
+    parametros: dict
+
+
+# Quantas voltas de ferramenta uma resposta pode dar. Uma consulta de agenda
+# seguida da marcação são duas; a terceira é folga para o modelo corrigir um
+# nome errado. Sem teto, um modelo confuso consulta a agenda indefinidamente e
+# cada volta é uma chamada paga, e o contato fica sem resposta enquanto isso.
+MAX_RODADAS_FERRAMENTA = 4
+
+
 @dataclass
 class Resposta:
     texto: str
@@ -151,7 +171,21 @@ class Resposta:
     tokens_saida: int = 0
     tokens_cache_leitura: int = 0
     tokens_cache_escrita: int = 0
+    # Nomes das ferramentas que o modelo chegou a executar nesta resposta. Só
+    # para registro: quem precisa do resultado já o recebeu pelo executor.
+    ferramentas_usadas: list = field(default_factory=list)
     bruto: dict = field(default_factory=dict)
+
+    def somar(self, outra: "Resposta"):
+        """Acumula o consumo de mais uma volta do laço de ferramentas.
+
+        Sem isto, uma resposta que consultou a agenda e marcou o horário
+        cobraria só a última chamada, e a medição de consumo, que é o que
+        fatura, ficaria menor que a fatura do provedor."""
+        self.tokens_entrada += outra.tokens_entrada
+        self.tokens_saida += outra.tokens_saida
+        self.tokens_cache_leitura += outra.tokens_cache_leitura
+        self.tokens_cache_escrita += outra.tokens_cache_escrita
 
     def custo_usd(self, modelo: Modelo) -> float:
         """Custo desta chamada. Separa cache de entrada normal porque a
@@ -183,6 +217,8 @@ async def responder(
     modelo_id: str,
     instrucoes: str,
     historico: list[dict],
+    ferramentas: list | None = None,
+    executar=None,
 ) -> Resposta:
     """Uma resposta do agente.
 
@@ -190,105 +226,225 @@ async def responder(
     conhecimento) — é ele que vai para o cache. `historico` é a conversa em
     formato `[{"role": "user"|"assistant", "content": "..."}]`, com a mensagem
     nova do contato por último.
+
+    **O laço de ferramentas roda aqui dentro**, e não em quem chama. Foi a razão
+    de este módulo existir desde o começo: ninguém mais no backend fala com um
+    provedor de IA. Anthropic e OpenAI não só nomeiam os campos de forma
+    diferente: eles devolvem a chamada em lugares diferentes da resposta e
+    esperam o resultado de volta em formatos diferentes. Com o laço do lado de
+    fora, `ai_agents` teria de conhecer os dois formatos, que é exatamente a
+    duplicação que a camada evita.
+
+    `executar` é `async (nome, argumentos) -> str`: quem chama sabe o que as
+    ferramentas fazem, este módulo só sabe conversá-las com o provedor.
     """
     if not historico:
         raise IAError("Histórico vazio — não há o que responder")
+    if ferramentas and executar is None:
+        raise IAError("Ferramentas informadas sem executor")
     if provedor == "anthropic":
-        return await _responder_anthropic(chave_api, modelo_id, instrucoes, historico)
+        return await _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
+                                          ferramentas, executar)
     if provedor == "openai":
-        return await _responder_openai(chave_api, modelo_id, instrucoes, historico)
+        return await _responder_openai(chave_api, modelo_id, instrucoes, historico,
+                                       ferramentas, executar)
     raise IAError(f"Provedor desconhecido: {provedor}")
 
 
-async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico) -> Resposta:
+async def _rodar_ferramenta(executar, nome: str, argumentos, usadas: list) -> str:
+    """Executa uma ferramenta e devolve **sempre** texto para o modelo.
+
+    Erro vira mensagem, nunca exceção: o modelo é capaz de se recuperar de
+    "não existe serviço com esse nome" pedindo o nome certo ao contato, e
+    derrubar a resposta inteira por isso deixaria a conversa sem nada, que é o
+    caminho que este projeto nunca aceita.
+    """
+    usadas.append(nome)
+    try:
+        saida = await executar(nome, argumentos or {})
+        return str(saida) if saida is not None else "(sem resultado)"
+    except Exception as e:
+        logger.warning("Ferramenta %s falhou: %s", nome, e)
+        return f"ERRO: {e}"
+
+
+def _bloco_anthropic(b) -> dict | None:
+    """Reconstrói só os campos que a API aceita de volta.
+
+    `model_dump()` do SDK carrega campos internos e nulos que mudam de versão
+    para versão; devolvê-los na próxima chamada é o tipo de coisa que passa por
+    meses e quebra num upgrade de biblioteca.
+    """
+    tipo = getattr(b, "type", None)
+    if tipo == "text":
+        return {"type": "text", "text": b.text}
+    if tipo == "tool_use":
+        return {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+    return None
+
+
+async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
+                               ferramentas=None, executar=None) -> Resposta:
     try:
         from anthropic import AsyncAnthropic
     except ImportError:
         raise IAError("SDK da Anthropic não instalado no servidor (pip install anthropic)")
 
+    mensagens = list(historico)
+    total = Resposta(texto="", modelo=modelo_id)
+    extra = {}
+    if ferramentas:
+        extra["tools"] = [{"name": f.nome, "description": f.descricao,
+                           "input_schema": f.parametros} for f in ferramentas]
+
     async with AsyncAnthropic(api_key=chave_api, max_retries=2) as client:
-        try:
-            r = await client.messages.create(
-                model=modelo_id,
-                max_tokens=MAX_SAIDA,
-                # Lista de blocos, não string, porque `cache_control` só existe
-                # no formato de bloco. O prefixo mínimo para o cache pegar é de
-                # ~1024 tokens: instrução mais curta que isso simplesmente não
-                # é cacheada, sem erro nenhum — só não economiza.
-                system=[{
-                    "type": "text",
-                    "text": instrucoes,
-                    "cache_control": {"type": "ephemeral"},
-                }],
-                messages=historico,
-            )
-        except Exception as e:
-            raise IAError(_traduz_erro(e))
+        for _ in range(MAX_RODADAS_FERRAMENTA):
+            try:
+                r = await client.messages.create(
+                    model=modelo_id,
+                    max_tokens=MAX_SAIDA,
+                    # Lista de blocos, não string, porque `cache_control` só
+                    # existe no formato de bloco. O prefixo mínimo para o cache
+                    # pegar é de ~1024 tokens: instrução mais curta que isso
+                    # simplesmente não é cacheada, sem erro nenhum, só não
+                    # economiza.
+                    system=[{
+                        "type": "text",
+                        "text": instrucoes,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                    messages=mensagens,
+                    **extra,
+                )
+            except Exception as e:
+                raise IAError(_traduz_erro(e))
 
-    # `content` é uma união de blocos; num modelo sem thinking vem só texto,
-    # mas filtrar por tipo é o que impede um KeyError se isso mudar.
-    texto = "".join(b.text for b in r.content if getattr(b, "type", None) == "text").strip()
-    if not texto:
+            u = r.usage
+            total.somar(Resposta(
+                texto="", modelo=modelo_id,
+                tokens_entrada=getattr(u, "input_tokens", 0) or 0,
+                tokens_saida=getattr(u, "output_tokens", 0) or 0,
+                tokens_cache_leitura=getattr(u, "cache_read_input_tokens", 0) or 0,
+                tokens_cache_escrita=getattr(u, "cache_creation_input_tokens", 0) or 0,
+            ))
+
+            chamadas = [b for b in r.content if getattr(b, "type", None) == "tool_use"]
+            if not chamadas:
+                # `content` é uma união de blocos; filtrar por tipo é o que
+                # impede um KeyError se o modelo passar a devolver outro.
+                total.texto = "".join(
+                    b.text for b in r.content if getattr(b, "type", None) == "text").strip()
+                break
+
+            mensagens.append({"role": "assistant",
+                              "content": [b for b in (_bloco_anthropic(x) for x in r.content)
+                                          if b]})
+            mensagens.append({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": c.id,
+                 "content": await _rodar_ferramenta(executar, c.name, c.input,
+                                                    total.ferramentas_usadas)}
+                for c in chamadas
+            ]})
+
+    if not total.texto:
         raise IAError("O modelo respondeu vazio")
-
-    u = r.usage
-    return Resposta(
-        texto=texto,
-        modelo=modelo_id,
-        tokens_entrada=getattr(u, "input_tokens", 0) or 0,
-        tokens_saida=getattr(u, "output_tokens", 0) or 0,
-        tokens_cache_leitura=getattr(u, "cache_read_input_tokens", 0) or 0,
-        tokens_cache_escrita=getattr(u, "cache_creation_input_tokens", 0) or 0,
-    )
+    return total
 
 
-async def _responder_openai(chave_api, modelo_id, instrucoes, historico) -> Resposta:
+async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
+                            ferramentas=None, executar=None) -> Resposta:
     try:
         from openai import AsyncOpenAI
     except ImportError:
         raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
 
+    entrada = list(historico)
+    total = Resposta(texto="", modelo=modelo_id)
+    extra = {}
+    if ferramentas:
+        extra["tools"] = [{"type": "function", "name": f.nome,
+                           "description": f.descricao, "parameters": f.parametros}
+                          for f in ferramentas]
+
     async with AsyncOpenAI(api_key=chave_api, max_retries=2) as client:
-        try:
-            r = await client.responses.create(
-                model=modelo_id,
-                # `instructions` fica fora do `input` e é estável entre as
-                # chamadas — é assim que o cache automático da OpenAI pega o
-                # prefixo. Enfiar as instruções como primeira mensagem do
-                # `input` funcionaria, mas embaralharia o prefixo com o
-                # histórico, que muda a cada turno.
-                instructions=instrucoes,
-                input=historico,
-                max_output_tokens=MAX_SAIDA,
-                # Os GPT-5 são modelos de raciocínio. Para atendimento isso é
-                # custo e latência sem retorno: a resposta é curta e a decisão
-                # é simples. `low` é o piso útil.
-                reasoning={"effort": "low"},
-            )
-        except Exception as e:
-            raise IAError(_traduz_erro(e))
+        for _ in range(MAX_RODADAS_FERRAMENTA):
+            try:
+                r = await client.responses.create(
+                    model=modelo_id,
+                    # `instructions` fica fora do `input` e é estável entre as
+                    # chamadas: é assim que o cache automático da OpenAI pega o
+                    # prefixo. Enfiar as instruções como primeira mensagem do
+                    # `input` funcionaria, mas embaralharia o prefixo com o
+                    # histórico, que muda a cada turno.
+                    instructions=instrucoes,
+                    input=entrada,
+                    max_output_tokens=MAX_SAIDA,
+                    # Os GPT-5 são modelos de raciocínio. Para atendimento isso é
+                    # custo e latência sem retorno: a resposta é curta e a decisão
+                    # é simples. `low` é o piso útil.
+                    reasoning={"effort": "low"},
+                    **extra,
+                )
+            except Exception as e:
+                raise IAError(_traduz_erro(e))
 
-    if getattr(r, "status", None) == "incomplete":
-        motivo = getattr(getattr(r, "incomplete_details", None), "reason", "desconhecido")
-        raise IAError(f"Resposta truncada pelo provedor ({motivo})")
+            u = getattr(r, "usage", None)
+            cacheados = getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0
+            bruta = getattr(u, "input_tokens", 0) or 0
+            total.somar(Resposta(
+                texto="", modelo=modelo_id,
+                # A OpenAI reporta `input_tokens` como o total, com os cacheados
+                # *dentro* dele. A Anthropic reporta os dois separados. Descontar
+                # aqui é o que faz `custo_usd` valer para os dois sem um `if` de
+                # provedor.
+                tokens_entrada=max(bruta - cacheados, 0),
+                tokens_cache_leitura=cacheados,
+                tokens_saida=getattr(u, "output_tokens", 0) or 0,
+            ))
 
-    texto = (getattr(r, "output_text", "") or "").strip()
-    if not texto:
+            if getattr(r, "status", None) == "incomplete":
+                motivo = getattr(getattr(r, "incomplete_details", None), "reason", "desconhecido")
+                raise IAError(f"Resposta truncada pelo provedor ({motivo})")
+
+            chamadas = [o for o in (getattr(r, "output", None) or [])
+                        if getattr(o, "type", None) == "function_call"]
+            if not chamadas:
+                total.texto = (getattr(r, "output_text", "") or "").strip()
+                break
+
+            # A volta seguinte manda **só** os resultados, referenciando a
+            # resposta anterior por id. A alternativa: reenviar os itens de
+            # saída: obrigaria a serializar também os itens de raciocínio, que
+            # nos GPT-5 vêm cifrados e são obrigatórios para o modelo continuar
+            # de onde parou. `previous_response_id` é o caminho que o provedor
+            # mantém, e de quebra não reenvia nada já enviado.
+            extra["previous_response_id"] = r.id
+            entrada = [
+                {"type": "function_call_output", "call_id": c.call_id,
+                 "output": await _rodar_ferramenta(
+                     executar, c.name, _json(c.arguments), total.ferramentas_usadas)}
+                for c in chamadas
+            ]
+
+    if not total.texto:
         raise IAError("O modelo respondeu vazio")
+    return total
 
-    u = getattr(r, "usage", None)
-    cacheados = getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0
-    entrada = getattr(u, "input_tokens", 0) or 0
-    return Resposta(
-        texto=texto,
-        modelo=modelo_id,
-        # A OpenAI reporta `input_tokens` como o total, com os cacheados
-        # *dentro* dele. A Anthropic reporta os dois separados. Descontar aqui
-        # é o que faz `custo_usd` valer para os dois sem um `if` de provedor.
-        tokens_entrada=max(entrada - cacheados, 0),
-        tokens_cache_leitura=cacheados,
-        tokens_saida=getattr(u, "output_tokens", 0) or 0,
-    )
+
+def _json(argumentos) -> dict:
+    """Os argumentos da chamada, que a OpenAI entrega como texto JSON.
+
+    Modelo que inventa JSON quebrado existe; devolver `{}` faz a ferramenta
+    reclamar do argumento que falta, e o modelo tenta de novo: melhor que
+    derrubar a resposta.
+    """
+    if isinstance(argumentos, dict):
+        return argumentos
+    try:
+        return json.loads(argumentos or "{}")
+    except (ValueError, TypeError):
+        logger.warning("Argumentos de ferramenta ilegíveis: %r", argumentos)
+        return {}
 
 
 def _traduz_erro(e: Exception) -> str:

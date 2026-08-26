@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import {
   WhatsappLogo, CheckCircle, QrCode, XCircle, ArrowClockwise, Plus, Trash,
 } from "@phosphor-icons/react";
@@ -37,7 +38,7 @@ export default function WhatsAppPage() {
     }
   }, [connections]);
 
-  const createConnection = async (e) => {
+  const [createConnection, criando] = useAcao(async (e) => {
     e.preventDefault();
     if (!newForm.nome.trim()) return;
     try {
@@ -52,7 +53,7 @@ export default function WhatsAppPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao criar conexão");
     }
-  };
+  });
 
   const connect = async (id) => {
     setBusyId(id);
@@ -95,7 +96,6 @@ export default function WhatsAppPage() {
     <div className="zz-page" data-testid="whatsapp-page">
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Integração</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Conexões WhatsApp</h1>
           <p className="text-ink-2 mt-2 max-w-2xl">
             Cada conexão é um número de WhatsApp independente, com sua própria instância e departamento padrão. Os robôs são vinculados na tela de Robôs.
@@ -124,7 +124,8 @@ export default function WhatsAppPage() {
           </div>
           <div className="col-span-3 flex gap-2 justify-end">
             <button type="button" onClick={() => setCreating(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" className="zz-btn" data-testid="new-connection-submit">Criar conexão</button>
+            <button type="submit" className="zz-btn" data-testid="new-connection-submit"
+              disabled={criando}>{criando ? "Criando…" : "Criar conexão"}</button>
           </div>
         </form>
       )}

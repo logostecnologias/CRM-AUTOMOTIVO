@@ -1,22 +1,37 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
+from pymongo.errors import DuplicateKeyError
 
 from db import get_db
-from auth import require_super_admin, hash_password, create_access_token, create_refresh_token, _set_auth_cookies
+from auth import (require_super_admin, hash_password, create_access_token,
+                  create_refresh_token, _set_auth_cookies, _cookie_secure)
 from plan_limits import plan_excess
+import wuzapi_client as wuzapi
+import audit
 
 router = APIRouter(prefix="/api/admin", tags=["super_admin"])
 
+# Piso da senha inicial do admin da empresa. Não existe troca obrigatória no
+# primeiro acesso, então a senha digitada aqui é a que o cliente vai usar por
+# tempo indefinido: aceitar "1" era aceitar isso para sempre. A tela mostra o
+# mesmo número e oferece uma senha gerada, mas a barreira é esta.
+SENHA_MIN = 8
+
+# Texto que sobrevive a espaço em volta: `min_length` sozinho aceita "  " como
+# nome de dois caracteres, e a empresa nasceria sem nome legível na lista.
+Nome = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
+
 
 class TenantCreate(BaseModel):
-    name: str
+    name: Nome
     plan_id: str | None = None
-    admin_name: str
+    admin_name: Nome
     admin_email: EmailStr
-    admin_password: str
+    admin_password: str = Field(min_length=SENHA_MIN, max_length=128)
 
 
 class TenantUpdate(BaseModel):
@@ -86,23 +101,33 @@ async def create_tenant(body: TenantCreate, _=Depends(require_super_admin)):
         "created_at": now,
     }
     await db.tenants.insert_one(tenant)
-    await db.users.insert_one({
-        "id": str(uuid.uuid4()),
-        "tenant_id": tenant_id,
-        "name": body.admin_name,
-        "email": email,
-        "role": "tenant_admin",
-        "status": "active",
-        "password_hash": hash_password(body.admin_password),
-        "created_at": now,
-    })
+    try:
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,
+            "name": body.admin_name,
+            "email": email,
+            "role": "tenant_admin",
+            "status": "active",
+            "password_hash": hash_password(body.admin_password),
+            "created_at": now,
+        })
+    except DuplicateKeyError:
+        # A empresa é gravada antes do admin, então quem perde a corrida no
+        # índice único de `users.email` deixaria uma empresa sem nenhum
+        # usuário: ela apareceria na lista, ninguém entraria nela e nem o
+        # cliente nem o suporte saberiam por quê. Acontece com duas abas
+        # abertas, F5 no meio do envio ou retry de rede: a checagem acima não
+        # cobre esses casos, porque entre ela e o insert existe uma janela.
+        await db.tenants.delete_one({"id": tenant_id})
+        raise HTTPException(status_code=400, detail="Email já cadastrado")
     tenant.pop("_id", None)
     (await _enrich_plan(db, [tenant]))
     return tenant
 
 
 @router.patch("/tenants/{tenant_id}")
-async def update_tenant(tenant_id: str, body: TenantUpdate, _=Depends(require_super_admin)):
+async def update_tenant(tenant_id: str, body: TenantUpdate, admin=Depends(require_super_admin)):
     db = get_db()
     update = {k: v for k, v in body.model_dump().items() if v is not None}
     if not update:
@@ -120,31 +145,95 @@ async def update_tenant(tenant_id: str, body: TenantUpdate, _=Depends(require_su
     if novo_plano:
         # Downgrade não remove nada retroativamente — só avisa quem trocou.
         tenant["plan_warnings"] = await plan_excess(db, tenant_id, novo_plano)
+    # Suspender/reativar uma empresa e trocar o plano são decisões do Super
+    # Admin que precisam de rastro (ZZ-21).
+    if "status" in update or "plan_id" in update:
+        await audit.registrar(db, ator=admin, acao="tenant.update",
+                              tenant_id=tenant_id, meta=update)
     return tenant
 
 
+# Tudo que morre com a empresa, numa lista só. Estava escrito como uma
+# sequência de `delete_many` no corpo da rota, e o jeito de essa sequência ficar
+# defasada é criar uma coleção nova em outro módulo e não lembrar daqui: foi
+# assim que a agenda, os agentes de IA, as mídias, os departamentos, o acesso
+# por conexão e o próprio histórico de mensagens ficaram para trás. Coleção
+# nova com `tenant_id` entra aqui no mesmo commit em que nasce.
+#
+# Fora da lista de propósito:
+#   impersonation_log   é auditoria do super admin, e auditoria que desaparece
+#                       junto com o objeto auditado não serve de nada
+#   processed_messages  não tem `tenant_id` (é dedup por id de mensagem) e
+#                       expira sozinha por TTL em 7 dias
+COLECOES_DA_EMPRESA = (
+    "users",
+    "bots",
+    "flows",
+    "flow_versions",
+    "whatsapp_connections",
+    "user_connection_access",
+    "departments",
+    "conversation_sessions",
+    # O histórico das conversas e a ficha dos arquivos. O binário em disco fica
+    # para a varredura de órfãos do `media_retention`: sem o documento ela
+    # deixa de reconhecer o arquivo e o recolhe na passagem seguinte, 24h
+    # depois. Apagar arquivo aqui dentro trocaria uma exclusão de banco por uma
+    # operação de disco que pode falhar no meio.
+    "messages_log",
+    "media_files",
+    "contacts",
+    "contact_notes",
+    "contact_field_defs",
+    # Campanhas e a lista de destinatários de cada uma. Sem isto o runner
+    # continuaria encontrando campanha em "enviando" de uma empresa que não
+    # existe mais, e tentaria disparar por uma conexão já apagada.
+    "campaigns",
+    "campaign_recipients",
+    "pipelines",
+    "deals",
+    "deal_events",
+    "activities",
+    # Agenda: grade, catálogo e o que estava marcado. O `agenda_worker` varre
+    # os agendamentos de todas as empresas de uma vez, então lembrete de
+    # empresa excluída continuaria saindo por uma conexão que já não existe.
+    "appointments",
+    "resources",
+    "services",
+    "scheduling_settings",
+    # Agentes de IA e o consumo medido deles.
+    "ai_agents",
+    "ai_usage",
+)
+
+
 @router.delete("/tenants/{tenant_id}")
-async def delete_tenant(tenant_id: str, _=Depends(require_super_admin)):
+async def delete_tenant(tenant_id: str, admin=Depends(require_super_admin)):
     db = get_db()
+    alvo = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "name": 1})
+    # Best-effort: derruba as instâncias na WuzAPI antes de apagar as conexões.
+    # Sem isto (ZZ-14), a sessão de WhatsApp continua logada no servidor depois
+    # de a empresa deixar de existir. Falha aqui não impede a exclusão — a
+    # coleção `whatsapp_connections` é apagada logo abaixo de qualquer forma.
+    async for conn in db.whatsapp_connections.find(
+        {"tenant_id": tenant_id, "wuzapi_token": {"$ne": None}},
+        {"_id": 0, "wuzapi_token": 1},
+    ):
+        try:
+            await wuzapi.logout_instance(conn["wuzapi_token"])
+        except Exception:
+            pass
     await db.tenants.delete_one({"id": tenant_id})
-    await db.users.delete_many({"tenant_id": tenant_id})
-    await db.bots.delete_many({"tenant_id": tenant_id})
-    await db.flows.delete_many({"tenant_id": tenant_id})
-    await db.contacts.delete_many({"tenant_id": tenant_id})
-    await db.conversation_sessions.delete_many({"tenant_id": tenant_id})
-    await db.whatsapp_connections.delete_many({"tenant_id": tenant_id})
-    # Campanhas e a lista de destinatarios de cada uma. Sem isto o runner
-    # continuaria encontrando campanha em "enviando" de uma empresa que nao
-    # existe mais — e tentaria disparar por uma conexao ja apagada.
-    await db.campaigns.delete_many({"tenant_id": tenant_id})
-    await db.campaign_recipients.delete_many({"tenant_id": tenant_id})
-    await db.contact_notes.delete_many({"tenant_id": tenant_id})
-    await db.contact_field_defs.delete_many({"tenant_id": tenant_id})
-    await db.pipelines.delete_many({"tenant_id": tenant_id})
-    await db.deals.delete_many({"tenant_id": tenant_id})
-    await db.deal_events.delete_many({"tenant_id": tenant_id})
-    await db.activities.delete_many({"tenant_id": tenant_id})
-    return {"ok": True}
+    apagados = {}
+    for colecao in COLECOES_DA_EMPRESA:
+        res = await db[colecao].delete_many({"tenant_id": tenant_id})
+        if res.deleted_count:
+            apagados[colecao] = res.deleted_count
+    await audit.registrar(
+        db, ator=admin, acao="tenant.delete", tenant_id=tenant_id,
+        alvo=(alvo or {}).get("name"), meta={"apagados": apagados},
+    )
+    # O que saiu, por coleção: também vai para a auditoria, junto de quem apagou.
+    return {"ok": True, "apagados": apagados}
 
 
 @router.post("/tenants/{tenant_id}/impersonate")
@@ -165,14 +254,17 @@ async def impersonate(tenant_id: str, response: Response, super_admin=Depends(re
         "iniciado_em": now,
         "finalizado_em": None,
     })
-    # Issue new access as tenant_admin (borrowing SA identity but with tenant scope)
-    access = create_access_token(super_admin["id"], super_admin["email"], "tenant_admin", tenant_id, log_id)
-    refresh = create_refresh_token(super_admin["id"])
-    # Move existing access_token into sa_token for restoration
+    # Issue new access as tenant_admin (borrowing SA identity but with tenant scope).
+    # `tv` é o do próprio Super Admin: trocar a senha dele invalida também as
+    # sessões de suporte abertas em nome dele (ZZ-09).
+    access = create_access_token(super_admin["id"], super_admin["email"], "tenant_admin",
+                                 tenant_id, log_id, token_version=super_admin.get("token_version", 0))
+    refresh = create_refresh_token(super_admin["id"], super_admin.get("token_version", 0))
     _set_auth_cookies(response, access, refresh)
-    response.set_cookie("impersonation_id", log_id, httponly=True, secure=False,
+    secure = _cookie_secure()
+    response.set_cookie("impersonation_id", log_id, httponly=True, secure=secure,
                         samesite="lax", max_age=12 * 3600, path="/")
-    response.set_cookie("impersonated_role", "super_admin", httponly=False, secure=False,
+    response.set_cookie("impersonated_role", "super_admin", httponly=False, secure=secure,
                         samesite="lax", max_age=12 * 3600, path="/")
     return {"ok": True, "tenant_name": tenant["name"], "impersonation_id": log_id}
 

@@ -7,36 +7,72 @@ import {
   ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
   ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
+  CalendarCheck,
 } from "@phosphor-icons/react";
 
+// A barra lateral e uma lista de grupos, nao uma lista de itens: com 15 telas
+// em sequencia, "Departamentos" e "Funil" ficavam vizinhos sem nada em comum, e
+// achar uma tela era ler a lista inteira. O grupo sem titulo existe para o
+// Painel, que nao pertence a nenhum assunto.
 const adminNav = [
-  { to: "/admin", icon: ChartLine, label: "Métricas Globais", end: true },
-  { to: "/admin/tenants", icon: Buildings, label: "Empresas" },
-  { to: "/admin/plans", icon: CreditCard, label: "Planos" },
+  {
+    itens: [
+      { to: "/admin", icon: ChartLine, label: "Métricas Globais", end: true },
+      { to: "/admin/tenants", icon: Buildings, label: "Empresas" },
+      { to: "/admin/plans", icon: CreditCard, label: "Planos" },
+    ],
+  },
 ];
 
 function tenantNav(role) {
-  const base = [
-    { to: "/app/inbox", icon: Headset, label: "Atendimento" },
-    { to: "/app/atendimento", icon: Kanban, label: "Conversas" },
+  const atendimento = {
+    titulo: "Atendimento",
+    itens: [
+      { to: "/app/inbox", icon: Headset, label: "Atendimento" },
+      { to: "/app/atendimento", icon: Kanban, label: "Conversas" },
+      // Fora do bloco de admin de proposito: quem atende o telefone marca,
+      // remarca e cancela o dia inteiro. So a configuracao (servicos, grade,
+      // feriados) e restrita, e isso e decidido dentro da propria tela.
+      { to: "/app/agenda", icon: CalendarCheck, label: "Agenda" },
+    ],
+  };
+
+  // Atendente ve um grupo so, e titulo de grupo unico e ruido: fica sem titulo.
+  if (role !== "tenant_admin") return [{ itens: atendimento.itens }];
+
+  return [
+    { itens: [{ to: "/app", icon: House, label: "Painel", end: true }] },
+    atendimento,
+    {
+      titulo: "Automação",
+      itens: [
+        { to: "/app/bots", icon: Robot, label: "Robôs" },
+        { to: "/app/ai-agents", icon: Sparkle, label: "Agentes de IA" },
+      ],
+    },
+    {
+      titulo: "Clientes e vendas",
+      itens: [
+        { to: "/app/contacts", icon: UsersThree, label: "Contatos" },
+        { to: "/app/funil", icon: Funnel, label: "Funil" },
+        { to: "/app/atividades", icon: CheckSquareOffset, label: "Atividades" },
+        { to: "/app/campanhas", icon: Megaphone, label: "Campanhas" },
+      ],
+    },
+    {
+      titulo: "Análise",
+      itens: [{ to: "/app/relatorios", icon: ChartBar, label: "Relatórios" }],
+    },
+    {
+      titulo: "Configuração",
+      itens: [
+        { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
+        { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
+        { to: "/app/users", icon: Users, label: "Usuários" },
+        { to: "/app/settings", icon: Gear, label: "Ajustes" },
+      ],
+    },
   ];
-  if (role === "tenant_admin") {
-    base.unshift({ to: "/app", icon: House, label: "Painel", end: true });
-    base.push(
-      { to: "/app/bots", icon: Robot, label: "Robôs" },
-      { to: "/app/ai-agents", icon: Sparkle, label: "Agentes de IA" },
-      { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
-      { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
-      { to: "/app/users", icon: Users, label: "Usuários" },
-      { to: "/app/contacts", icon: UsersThree, label: "Contatos" },
-      { to: "/app/campanhas", icon: Megaphone, label: "Campanhas" },
-      { to: "/app/funil", icon: Funnel, label: "Funil" },
-      { to: "/app/atividades", icon: CheckSquareOffset, label: "Atividades" },
-      { to: "/app/relatorios", icon: ChartBar, label: "Relatórios" },
-      { to: "/app/settings", icon: Gear, label: "Configurações" },
-    );
-  }
-  return base;
 }
 
 export default function AppShell({ variant = "tenant" }) {
@@ -86,35 +122,47 @@ export default function AppShell({ variant = "tenant" }) {
           </div>
 
           <nav className="flex-1 py-3 overflow-y-auto">
-            {nav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                data-testid={`nav-${item.label.toLowerCase().replace(/\s/g, "-")}`}
-                className={({ isActive }) => `zz-nav-item ${isActive ? "active" : ""}`}
-              >
-                <item.icon size={18} weight="bold" />
-                <span>{item.label}</span>
-                {item.to === "/app/atividades" && atrasadas > 0 && (
-                  <span
-                    className="zz-queue-badge ml-auto"
-                    data-testid="nav-atividades-badge"
-                    title={`${atrasadas} atividade(s) atrasada(s)`}
+            {nav.map((grupo, i) => (
+              <div key={grupo.titulo || `grupo-${i}`} className={i > 0 ? "mt-4" : ""}>
+                {grupo.titulo && (
+                  <div
+                    className="zz-nav-grupo"
+                    data-testid={`nav-grupo-${grupo.titulo.toLowerCase().replace(/\s/g, "-")}`}
                   >
-                    {atrasadas > 99 ? "99+" : atrasadas}
-                  </span>
+                    {grupo.titulo}
+                  </div>
                 )}
-                {item.to === "/app/inbox" && aguardando > 0 && (
-                  <span
-                    className="zz-queue-badge zz-alert-pulse ml-auto"
-                    data-testid="nav-queue-badge"
-                    title={`${aguardando} conversa(s) aguardando atendimento`}
+                {grupo.itens.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    data-testid={`nav-${item.label.toLowerCase().replace(/\s/g, "-")}`}
+                    className={({ isActive }) => `zz-nav-item ${isActive ? "active" : ""}`}
                   >
-                    {aguardando > 99 ? "99+" : aguardando}
-                  </span>
-                )}
-              </NavLink>
+                    <item.icon size={18} weight="bold" />
+                    <span>{item.label}</span>
+                    {item.to === "/app/atividades" && atrasadas > 0 && (
+                      <span
+                        className="zz-queue-badge ml-auto"
+                        data-testid="nav-atividades-badge"
+                        title={`${atrasadas} atividade(s) atrasada(s)`}
+                      >
+                        {atrasadas > 99 ? "99+" : atrasadas}
+                      </span>
+                    )}
+                    {item.to === "/app/inbox" && aguardando > 0 && (
+                      <span
+                        className="zz-queue-badge zz-alert-pulse ml-auto"
+                        data-testid="nav-queue-badge"
+                        title={`${aguardando} conversa(s) aguardando atendimento`}
+                      >
+                        {aguardando > 99 ? "99+" : aguardando}
+                      </span>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
             ))}
           </nav>
 

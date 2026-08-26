@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import {
@@ -252,7 +253,7 @@ export default function CampanhasPage() {
     if (arquivoRef.current) arquivoRef.current.value = "";
   };
 
-  const salvar = async (e) => {
+  const [salvar, salvando] = useAcao(async (e) => {
     e.preventDefault();
     const payload = { ...form, agendada_para: paraIso(form.agendada_para) };
     try {
@@ -264,7 +265,7 @@ export default function CampanhasPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
   const acao = async (c, rota, mensagem, confirmar) => {
     if (confirmar && !(await confirmToast(confirmar, { confirmLabel: "Confirmar" }))) return;
@@ -303,7 +304,6 @@ export default function CampanhasPage() {
     <div className="zz-page" data-testid="campaigns-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Marketing</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Campanhas</h1>
           <p className="text-ink-2 mt-2 text-sm">
             Dispare uma mensagem para uma lista de contatos e acompanhe quem recebeu e quem respondeu.
@@ -450,7 +450,8 @@ export default function CampanhasPage() {
 
           <div className="col-span-3 flex gap-2 justify-end">
             <button type="button" onClick={() => setEditando(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" className="zz-btn" data-testid="campaign-submit">Salvar</button>
+            <button type="submit" className="zz-btn" data-testid="campaign-submit"
+              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
           </div>
         </form>
       )}

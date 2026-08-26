@@ -6,7 +6,7 @@
 // que recusa a publicação. Ao mexer num, mexer no outro.
 import {
   Play, ChatText, ListNumbers, Database, GitBranch, Image,
-  Clock, Cloud, UserSwitch, StopCircle, ArrowsLeftRight,
+  Clock, Cloud, UserSwitch, StopCircle, ArrowsLeftRight, CalendarCheck,
 } from "@phosphor-icons/react";
 
 // Gatilhos do nó de Início.
@@ -91,6 +91,48 @@ export function validarMenu(data = {}) {
   return problemas;
 }
 
+// --- Nó de Agendamento -----------------------------------------------------
+//
+// Espelho de `backend/agenda_flow.validar`, pelo mesmo motivo que `validarMenu`
+// espelha `flow_engine.validar_menu`: aqui avisa enquanto a pessoa edita, lá é
+// a barreira que recusa a publicação. Mexer num é mexer no outro.
+
+export const MODOS_PROFISSIONAL = [
+  { valor: "qualquer", label: "A empresa escolhe quem estiver livre",
+    ajuda: "O contato não escolhe profissional. Menos uma pergunta na conversa: use quando tanto faz quem atende." },
+  { valor: "perguntar", label: "O contato escolhe",
+    ajuda: "Mostra a lista de profissionais que atendem o serviço. Com um só cadastrado, a pergunta é pulada." },
+  { valor: "fixo", label: "Sempre o mesmo profissional",
+    ajuda: "Todo agendamento por este nó vai para quem você escolher abaixo." },
+];
+
+export const FORMATOS_AGENDA = [
+  { valor: "lista", label: "Lista de opções",
+    ajuda: "Até 10 opções num menu que abre por um botão. É o formato certo para dias e horários." },
+  { valor: "texto", label: "Texto numerado",
+    ajuda: "As opções no corpo da mensagem; o contato digita o número. Funciona em qualquer aparelho." },
+];
+
+export const MAX_DIAS_AGENDA = 10;
+
+export function validarAgendamento(data = {}) {
+  const problemas = [];
+  const modo = data.modo_profissional || "qualquer";
+  if (modo === "fixo" && !(data.resource_id || "").trim()) {
+    problemas.push("o modo \"sempre o mesmo profissional\" exige escolher qual profissional");
+  }
+  const dias = data.dias_oferecidos;
+  if (dias !== undefined && dias !== null && !(dias >= 1 && dias <= MAX_DIAS_AGENDA)) {
+    problemas.push(`o nó pode oferecer de 1 a ${MAX_DIAS_AGENDA} dias`);
+  }
+  if ((data.formato || "lista") === "botoes") {
+    // Três botões não comportam uma lista de horários: a degradação para texto
+    // aconteceria em quase toda pergunta, e o formato configurado nunca sairia.
+    problemas.push("agendamento não cabe em botões: use Lista de opções ou Texto numerado");
+  }
+  return problemas;
+}
+
 export const NODE_TYPES = {
   start: {
     label: "Início", color: "#10B981", icon: Play,
@@ -153,6 +195,27 @@ export const NODE_TYPES = {
     outputs: [{ id: "success", label: "Sucesso" }, { id: "error", label: "Erro" }],
     default: { label: "Chamar API", method: "GET", url: "https://", body: {}, response_var: "webhook_response" },
   },
+  schedule: {
+    label: "Agendamento", color: "#0D9488", textColor: "#FFFFFF", icon: CalendarCheck,
+    outputs: [{ id: "agendado", label: "Agendou" }, { id: "nao_agendado", label: "Não agendou" }],
+    default: {
+      label: "Agendar horário",
+      // Vazio = pergunta ao contato qual serviço. Com um serviço só cadastrado,
+      // a pergunta é pulada de qualquer forma.
+      service_id: "",
+      modo_profissional: "qualquer",
+      resource_id: "",
+      dias_oferecidos: 5,
+      formato: "lista",
+      botao_texto: "Ver opções",
+      texto_servico: "",
+      texto_profissional: "",
+      texto_dia: "",
+      texto_hora: "",
+      texto_confirmado: "",
+      texto_sem_horario: "",
+    },
+  },
   human_handoff: {
     label: "Atendimento Humano", color: "#EF4444", textColor: "#FFFFFF", icon: UserSwitch,
     outputs: [],
@@ -172,5 +235,5 @@ export const NODE_TYPES = {
 
 export const NODE_ORDER = [
   "start", "text", "menu", "save_variable", "condition",
-  "media", "delay", "webhook", "human_handoff", "transfer_bot", "end",
+  "media", "delay", "webhook", "schedule", "human_handoff", "transfer_bot", "end",
 ];

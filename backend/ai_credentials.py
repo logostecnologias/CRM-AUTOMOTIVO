@@ -25,7 +25,7 @@ Duas regras que não podem ser afrouxadas:
 """
 import os
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 # Versão da chave mestra em uso. Subir este número (e trocar a env) é o que
 # marca as credenciais antigas como irrecuperáveis, de propósito.
@@ -38,17 +38,29 @@ class CredencialError(Exception):
 
 def _fernet() -> Fernet:
     """Lido sob demanda, não no import: o `.env` é carregado pelo server.py
-    depois que este módulo já pode ter sido importado por um teste."""
-    bruta = os.environ.get("AI_CREDENTIALS_KEY")
-    if not bruta:
+    depois que este módulo já pode ter sido importado por um teste.
+
+    Rotação da chave mestra (ZZ-21): devolve um `MultiFernet`. Cifra sempre com
+    a chave **primária** (`AI_CREDENTIALS_KEY`); decifra tentando a primária e
+    depois as **anteriores** (`AI_CREDENTIALS_KEY_PREV`, uma ou mais separadas
+    por vírgula). Assim dá para trocar a chave mestra sem quebrar as credenciais
+    já gravadas: promove-se a nova a primária e mantém-se a antiga em PREV
+    durante a janela de recifragem. Sem isto, trocar a chave fazia toda
+    credencial antiga falhar de uma vez, e o único caminho era pedir a cada
+    cliente que reconectasse."""
+    primaria = os.environ.get("AI_CREDENTIALS_KEY")
+    if not primaria:
         raise CredencialError(
             "AI_CREDENTIALS_KEY não configurada — sem ela não é possível "
             "guardar chave de IA. Gere uma com: "
             "python -c \"from cryptography.fernet import Fernet; "
             "print(Fernet.generate_key().decode())\""
         )
+    brutas = [primaria] + [
+        k.strip() for k in os.environ.get("AI_CREDENTIALS_KEY_PREV", "").split(",") if k.strip()
+    ]
     try:
-        return Fernet(bruta.encode("utf-8"))
+        return MultiFernet([Fernet(k.encode("utf-8")) for k in brutas])
     except Exception as e:
         raise CredencialError(f"AI_CREDENTIALS_KEY inválida: {e}")
 

@@ -78,8 +78,13 @@ async def trocar_senha(body: SenhaIn, user=Depends(get_current_user)):
         )
     if body.nova_senha == body.senha_atual:
         raise HTTPException(status_code=400, detail="A nova senha é igual à atual")
+    # `$inc` em token_version invalida toda sessão emitida antes desta troca
+    # (ZZ-09): quem tinha o cookie antigo — inclusive numa máquina roubada — é
+    # derrubado na próxima requisição.
     await db.users.update_one(
-        {"id": user["id"]}, {"$set": {"password_hash": hash_password(body.nova_senha)}}
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_password(body.nova_senha)},
+         "$inc": {"token_version": 1}},
     )
     return {"ok": True}
 

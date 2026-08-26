@@ -282,30 +282,24 @@ export default function ListaAgentes({ plataformaDisponivel }) {
   };
 
   return (
-    <div className="mt-10" data-testid="lista-agentes">
-      {/* Cabeçalho */}
-      <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
-        <div>
-          <div className="flex items-baseline gap-2">
-            <h2 className="font-heading text-2xl font-bold tracking-tight">Agentes</h2>
-            {agentes.length > 0 && (
-              <span className="text-sm text-ink-3">
-                {agentes.length} {agentes.length === 1 ? "agente" : "agentes"}
-              </span>
-            )}
-          </div>
-          <p className="text-ink-2 text-sm mt-0.5">
-            Quem atende automaticamente, e com que comportamento.
-          </p>
-        </div>
-      </div>
-
-      {agentes.length > 2 && (
-        <div className="relative mb-4">
-          <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
-          <input className="zz-input pl-9" placeholder="Buscar agentes…"
-            value={busca} onChange={(e) => setBusca(e.target.value)}
-            data-testid="buscar-agente" />
+    <div className="mt-6" data-testid="lista-agentes">
+      {/* Sem título nem descrição próprios: o cabeçalho da página já diz que
+          isto é a lista de agentes de IA e para que eles servem, e um segundo
+          "Agentes / Quem atende automaticamente" logo abaixo era a mesma frase
+          duas vezes. Do cabeçalho sobrou o que informa: quantos são e a busca. */}
+      {agentes.length > 0 && (
+        <div className="flex items-center gap-3 mb-4">
+          <span className="text-sm text-ink-3 shrink-0" data-testid="agentes-total">
+            {agentes.length} {agentes.length === 1 ? "agente" : "agentes"}
+          </span>
+          {agentes.length > 2 && (
+            <div className="relative ml-auto w-full max-w-xs">
+              <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
+              <input className="zz-input pl-9" placeholder="Buscar agentes…"
+                value={busca} onChange={(e) => setBusca(e.target.value)}
+                data-testid="buscar-agente" />
+            </div>
+          )}
         </div>
       )}
 

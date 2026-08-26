@@ -257,8 +257,7 @@ export default function SettingsPage() {
   return (
     <div className="zz-page-form" data-testid="settings-page">
       <div className="mb-8">
-        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Conta</div>
-        <h1 className="font-heading text-4xl font-black tracking-tighter">Configurações</h1>
+        <h1 className="font-heading text-4xl font-black tracking-tighter">Ajustes</h1>
       </div>
       <MinhaConta />
       <Empresa />

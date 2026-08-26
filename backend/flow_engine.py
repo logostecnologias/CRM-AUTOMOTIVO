@@ -5,12 +5,15 @@ a node that must wait for user input (Menu) or the flow ends.
 Persists ephemeral test sessions in-memory (module-level dict) — this
 is fine because it's only for the test chat inside the editor.
 """
+import json
 import re
 import uuid
 import asyncio
 import httpx
 from datetime import datetime, timezone
 
+import agenda_flow
+import net_guard
 import wuzapi_client as wuzapi
 
 _test_sessions: dict[str, dict] = {}
@@ -206,6 +209,16 @@ async def _process_node(node, flow, session, outputs):
         }
         return None  # wait for user input
 
+    if ntype == "schedule":
+        # O nó de Agendamento conduz quatro perguntas sozinho (serviço,
+        # profissional, dia, hora) e guarda o andamento em `session["awaiting"]`,
+        # do mesmo jeito que o Menu: é o que faz a resposta do contato voltar
+        # para dentro dele. Devolve None enquanto está perguntando.
+        saida = await agenda_flow.avancar(node, session, outputs)
+        if saida is None:
+            return None
+        return _find_next(edges, node["id"], saida)
+
     if ntype == "save_variable":
         name = data.get("variable_name") or "var"
         source = data.get("source", "last_response")
@@ -257,18 +270,29 @@ async def _process_node(node, flow, session, outputs):
     if ntype == "webhook":
         url = _interp(data.get("url", ""), variables)
         method = (data.get("method") or "GET").upper()
+        # Passa por net_guard: a URL vem do cliente, e o servidor é quem faz a
+        # requisição. Sem isto, um destino como http://127.0.0.1:8090 ou o
+        # endpoint de metadados da nuvem seria lido e ecoado ao contato (ZZ-04).
+        # O corpo só é enviado quando não é GET, como antes.
+        corpo = None if method == "GET" else data.get("body", {})
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                if method == "GET":
-                    r = await client.get(url)
-                else:
-                    r = await client.request(method, url, json=data.get("body", {}))
+            status, ctype, texto = await net_guard.fetch_text(
+                url, method, json_body=corpo, max_bytes=256 * 1024, timeout=5.0
+            )
+            if "json" in ctype:
                 try:
-                    variables["webhook_response"] = r.json()
-                except Exception:
-                    variables["webhook_response"] = r.text
-                outputs.append({"type": "system", "content": f"Webhook {method} {r.status_code}"})
-                return _find_next(edges, node["id"], "success")
+                    variables["webhook_response"] = json.loads(texto)
+                except ValueError:
+                    variables["webhook_response"] = texto
+            else:
+                variables["webhook_response"] = texto
+            outputs.append({"type": "system", "content": f"Webhook {method} {status}"})
+            return _find_next(edges, node["id"], "success")
+        except net_guard.SSRFError as e:
+            # Destino recusado pela política de saída: mensagem clara, sem expor
+            # rede interna, e o fluxo segue pela saída de erro.
+            outputs.append({"type": "system", "content": f"Webhook recusado: {e}"})
+            return _find_next(edges, node["id"], "error")
         except Exception as e:
             outputs.append({"type": "system", "content": f"Erro no webhook: {e}"})
             return _find_next(edges, node["id"], "error")
@@ -331,6 +355,12 @@ async def run_test_message(flow, session_id, message, start, escolha_id=None):
             "status": "ativa",
             "awaiting": None,
             "last_user_message": "",
+            # O nó de Agendamento consulta a agenda **de verdade** desta empresa:
+            # é o que faz o teste provar que a grade e os serviços estão certos.
+            # `simulado` é o que impede a outra metade: gravar o agendamento, ,
+            # porque testar um fluxo não pode ocupar o horário de um cliente.
+            "tenant_id": flow.get("tenant_id"),
+            "simulado": True,
         }
         _test_sessions[session_id] = session
         await _run_from(start_node["id"], flow, session, outputs)
@@ -343,7 +373,16 @@ async def run_test_message(flow, session_id, message, start, escolha_id=None):
     if awaiting and awaiting.get("node_id"):
         # Determine chosen handle from Menu
         menu_node = _find_node(flow["nodes"], awaiting["node_id"])
-        if menu_node and menu_node["type"] == "menu":
+        if menu_node and menu_node["type"] == "schedule":
+            # O nó de Agendamento resolve a própria resposta: ele tem várias
+            # etapas e só devolve uma saída quando termina (ou desiste).
+            saida = await agenda_flow.avancar(menu_node, session, outputs,
+                                              resposta=message, escolha_id=escolha_id)
+            if saida is not None:
+                next_id = _find_next(flow["edges"], menu_node["id"], saida)
+                if next_id:
+                    await _run_from(next_id, flow, session, outputs)
+        elif menu_node and menu_node["type"] == "menu":
             options = menu_node.get("data", {}).get("options", [])
             # Mesmo resolvedor do caminho real (flow_runtime): o chat de teste
             # existe para provar o fluxo publicado, e duas regras de

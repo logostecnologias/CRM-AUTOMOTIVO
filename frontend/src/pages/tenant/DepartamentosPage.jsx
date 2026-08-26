@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -17,7 +18,7 @@ export default function DepartamentosPage() {
   const openNew = () => { setForm({ nome: "", cor: DEFAULT_COLORS[0] }); setEditing({}); };
   const openEdit = (d) => { setForm({ nome: d.nome, cor: d.cor }); setEditing(d); };
 
-  const save = async (e) => {
+  const [save, salvando] = useAcao(async (e) => {
     e.preventDefault();
     try {
       if (editing?.id) await api.patch(`/departments/${editing.id}`, form);
@@ -28,20 +29,19 @@ export default function DepartamentosPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao salvar");
     }
-  };
+  });
 
-  const remove = async (id) => {
+  const [remove, removendo] = useAcao(async (id) => {
     if (!(await confirmToast("Excluir departamento?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/departments/${id}`);
     toast.success("Departamento excluído");
     load();
-  };
+  });
 
   return (
     <div className="zz-page" data-testid="departments-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Organização</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Departamentos</h1>
           <p className="text-ink-2 mt-2 text-sm">Agrupe conexões e conversas por área (ex: Vendas, Suporte, Financeiro).</p>
         </div>
@@ -64,7 +64,8 @@ export default function DepartamentosPage() {
               ))}
             </div>
           </div>
-          <button type="submit" className="zz-btn" data-testid="dept-submit">Salvar</button>
+          <button type="submit" className="zz-btn" data-testid="dept-submit"
+            disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
           <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
         </form>
       )}
@@ -80,7 +81,8 @@ export default function DepartamentosPage() {
             </div>
             <div className="flex gap-1">
               <button onClick={() => openEdit(d)} className="p-1.5 hover:bg-surface-3"><PencilSimple size={14} weight="bold" /></button>
-              <button onClick={() => remove(d.id)} className="p-1.5 hover:bg-danger-soft text-danger"><Trash size={14} weight="bold" /></button>
+              <button onClick={() => remove(d.id)} disabled={removendo}
+                className="p-1.5 hover:bg-danger-soft text-danger"><Trash size={14} weight="bold" /></button>
             </div>
           </div>
         ))}

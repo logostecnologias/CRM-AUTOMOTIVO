@@ -83,6 +83,7 @@ const VAZIO = {
   nao_fazer: "",
   base_conhecimento: "",
   escalar_quando: "",
+  agenda_ativa: false,
   max_respostas: "",
   conexoes: [],
   departamento_id: "",
@@ -467,6 +468,27 @@ export default function AgenteWizard({
                   value={form.nao_fazer}
                   onChange={(e) => set({ nao_fazer: e.target.value })}
                 />
+              </div>
+
+              <div className="border-t border-line pt-5">
+                <label className="flex items-start gap-3 border rounded-xl p-4 cursor-pointer transition-colors border-line hover:border-line-strong hover:bg-surface-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    data-testid="agente-agenda-ativa"
+                    checked={!!form.agenda_ativa}
+                    onChange={(e) => set({ agenda_ativa: e.target.checked })}
+                  />
+                  <span>
+                    <span className="font-semibold block">Deixar o agente marcar horário na Agenda</span>
+                    <span className="text-[11px] text-ink-3 block mt-1">
+                      Ele passa a consultar os horários livres de verdade, marcar e cancelar
+                      pelo WhatsApp, em vez de anotar a preferência e transferir. Os serviços,
+                      profissionais e grade de horários vêm da tela <strong>Agenda</strong>;
+                      sem nenhum serviço cadastrado, esta opção não tem efeito.
+                    </span>
+                  </span>
+                </label>
               </div>
 
               <div>

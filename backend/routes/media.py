@@ -42,5 +42,14 @@ async def download(media_id: str, user: dict = Depends(get_current_user)):
         media_type=doc["mime"],
         filename=doc["filename"],
         content_disposition_type=disposition,
-        headers={"Cache-Control": "private, max-age=86400"},
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            # Defesa em profundidade do ZZ-07: `nosniff` impede o navegador de
+            # reinterpretar o tipo (um "documento" que ele adivinhe como HTML),
+            # e a CSP `sandbox` desliga script/plugins caso algo ainda renderize
+            # inline. Com o SVG já classificado como documento (anexo), estes
+            # cabeçalhos fecham o resto do caminho para qualquer tipo servido.
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox; default-src 'none'",
+        },
     )

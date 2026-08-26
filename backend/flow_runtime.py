@@ -6,6 +6,7 @@ import asyncio
 import base64
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from db import get_db
 from flow_engine import (
@@ -357,7 +358,70 @@ async def _agente_ia(db, tenant_id, conn, session, contact, text, media, outputs
     return False
 
 
-async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None, escolha: dict | None = None):
+# ---------------------------------------------------------------------------
+# Uma conversa de cada vez
+# ---------------------------------------------------------------------------
+#
+# Cada webhook chega numa task própria, e duas mensagens do mesmo contato podem
+# ser processadas ao mesmo tempo. As duas leem a sessão no mesmo estado, as duas
+# decidem a partir dele, e a última a gravar apaga o que a primeira tinha feito.
+#
+# Foi exatamente isso que quebrou um agendamento real: o nó mandou "Para qual
+# dia?" e gravou `awaiting` na etapa do dia; um segundo depois, uma mensagem que
+# tinha chegado ANTES terminou de ser processada, ainda enxergando o Menu
+# anterior, respondeu "Resposta inválida" e regravou o `awaiting` do Menu por
+# cima. Quando o contato escolheu o dia, a conversa já não esperava mais por ele.
+#
+# Com duas pessoas conversando isso é raro (as mensagens vêm com segundos de
+# distância), mas basta o contato tocar num botão e digitar em seguida. E é
+# certeiro quando do outro lado há outro robô respondendo em rajada.
+#
+# A trava é por conversa, não global: duas conversas diferentes continuam
+# andando em paralelo, que é o ponto de o webhook ser assíncrono.
+#
+# **Vale dentro de um processo.** Com mais de um worker de uvicorn, duas
+# mensagens podem cair em processos diferentes e a corrida volta. Fechar isso
+# exige trava no Mongo (findAndModify com TTL), e é o caminho no dia em que o
+# backend rodar replicado.
+
+_travas_por_conversa: dict[str, tuple] = {}
+
+
+@asynccontextmanager
+async def _uma_por_vez(chave: str):
+    trava, esperando = _travas_por_conversa.get(chave, (None, 0))
+    if trava is None:
+        trava = asyncio.Lock()
+    _travas_por_conversa[chave] = (trava, esperando + 1)
+    try:
+        async with trava:
+            yield
+    finally:
+        # O contador evita que o dicionário cresça sem fim, uma entrada por
+        # contato que já conversou. Só sai quando ninguém mais está na fila.
+        _trava, quantos = _travas_por_conversa[chave]
+        if quantos <= 1:
+            _travas_por_conversa.pop(chave, None)
+        else:
+            _travas_por_conversa[chave] = (_trava, quantos - 1)
+
+
+async def handle_incoming_message(tenant_id: str, from_number: str, text: str,
+                                  message_id: str, connection_id: str | None = None,
+                                  push_name: str | None = None, media: dict | None = None,
+                                  escolha: dict | None = None):
+    """Ponto de entrada do webhook, uma mensagem por vez em cada conversa.
+
+    A chave é (empresa, conexão, número), que é a mesma identidade que
+    `conversation_sessions` usa. Ela é montada antes de qualquer leitura do
+    banco, senão a corrida aconteceria justamente na busca da sessão.
+    """
+    async with _uma_por_vez(f"{tenant_id}:{connection_id or '-'}:{from_number}"):
+        return await _processar_mensagem(tenant_id, from_number, text, message_id,
+                                         connection_id, push_name, media, escolha)
+
+
+async def _processar_mensagem(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None, escolha: dict | None = None):
     """Called from webhook. Advances the conversation for this contact.
 
     `connection_id` identifies exactly which whatsapp_connection (and thus
@@ -487,6 +551,26 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
                        "Contato pediu para não receber mais campanhas — "
                        "removido dos próximos disparos", mtype="system")
 
+    # Resposta ao lembrete de agendamento ("CONFIRMAR"/"CANCELAR").
+    #
+    # Vem antes de qualquer roteamento, como o opt-out e pelo mesmo motivo: quem
+    # responde a uma pergunta **nossa** não pode depender de haver bot
+    # configurado naquela conexão. E vem antes até do desvio de atendimento
+    # humano, porque a confirmação de presença é dado de agenda: perdê-la porque
+    # um atendente assumiu a conversa no intervalo deixaria a cadeira marcada sem
+    # ninguém saber se o cliente vem.
+    #
+    # Só olha quando a conversa está com `agenda_aguardando` preenchido, isto é,
+    # logo depois de um lembrete. É esse contexto que permite aceitar respostas
+    # curtas ("sim", "ok", "1") que fora dele seriam ambíguas demais.
+    if session and session.get("agenda_aguardando") and text:
+        import agenda_worker
+        if await agenda_worker.responder_lembrete(db, tenant_id, session, text):
+            await db.conversation_sessions.update_one(
+                {"id": session_id}, {"$set": {"updated_at": _now()}},
+            )
+            return
+
     outputs: list[dict] = []
 
     if session and session.get("status") == "aguardando_humano":
@@ -534,11 +618,19 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
                           "updated_at": _now()},
                  "$inc": {"unread_count": 1}},
             )
-            await _log_msg(
-                db, session_id, tenant_id, "sistema",
-                "Resposta a uma campanha — encaminhada para atendimento humano"
-                if primeira_resposta_campanha else
-                "Bot da conversa indisponível — encaminhada para atendimento humano")
+            # A conversa aberta por um aviso de agendamento também nasce sem
+            # bot, e cai aqui quando o contato responde outra coisa que não
+            # CONFIRMAR/CANCELAR ("posso remarcar?"). Dizer "bot indisponível"
+            # descreveria um defeito onde não há nenhum: mesmo raciocínio da
+            # resposta de campanha, logo acima.
+            if primeira_resposta_campanha:
+                motivo = "Resposta a uma campanha: encaminhada para atendimento humano"
+            elif session.get("origem") == "agenda":
+                motivo = ("Resposta a um aviso de agendamento: encaminhada "
+                          "para atendimento humano")
+            else:
+                motivo = "Bot da conversa indisponível: encaminhada para atendimento humano"
+            await _log_msg(db, session_id, tenant_id, "sistema", motivo)
             return
         bot, flow, start_node = loaded
 
@@ -556,7 +648,19 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             await _run_from(start_node["id"], flow, session, outputs)
         elif awaiting and awaiting.get("node_id"):
             menu_node = _find_node(flow["nodes"], awaiting["node_id"])
-            if menu_node and menu_node["type"] == "menu":
+            if menu_node and menu_node["type"] == "schedule":
+                # O nó de Agendamento conduz várias perguntas dentro de si e
+                # resolve a própria resposta, pelo mesmo `resolver_escolha_menu`
+                # do Menu. Só devolve saída quando marcou (ou desistiu).
+                import agenda_flow
+                saida = await agenda_flow.avancar(
+                    menu_node, session, outputs,
+                    resposta=text, escolha_id=(escolha or {}).get("id"))
+                if saida is not None:
+                    next_id = _find_next(flow["edges"], menu_node["id"], saida)
+                    if next_id:
+                        await _run_from(next_id, flow, session, outputs)
+            elif menu_node and menu_node["type"] == "menu":
                 opts = menu_node.get("data", {}).get("options", [])
                 # Mesma função que o chat de teste do editor usa: o id do botão
                 # primeiro, depois o número e o rótulo digitados.

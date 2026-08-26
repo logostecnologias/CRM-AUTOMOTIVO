@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { Plus, PencilSimple, Copy, Trash, Pause, Play } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -20,7 +21,7 @@ export default function BotsPage() {
     api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
   }, []);
 
-  const create = async (e) => {
+  const [create, criando] = useAcao(async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     try {
@@ -31,9 +32,9 @@ export default function BotsPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao criar robô");
     }
-  };
+  });
 
-  const duplicate = async (id) => {
+  const [duplicate, duplicando] = useAcao(async (id) => {
     try {
       await api.post(`/bots/${id}/duplicate`);
       toast.success("Robô duplicado");
@@ -41,7 +42,7 @@ export default function BotsPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao duplicar robô");
     }
-  };
+  });
 
   const toggleStatus = async (bot) => {
     const next = bot.status === "ativo" ? "pausado" : "ativo";
@@ -49,18 +50,17 @@ export default function BotsPage() {
     load();
   };
 
-  const remove = async (id) => {
+  const [remove, removendo] = useAcao(async (id) => {
     if (!(await confirmToast("Excluir este robô?", { confirmLabel: "Excluir" }))) return;
     await api.delete(`/bots/${id}`);
     toast.success("Robô excluído");
     load();
-  };
+  });
 
   return (
     <div className="zz-page" data-testid="bots-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Automação</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Robôs</h1>
         </div>
         <button data-testid="new-bot-btn" onClick={() => setCreating(true)} className="zz-btn">
@@ -82,7 +82,8 @@ export default function BotsPage() {
               {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
             </select>
           </div>
-          <button type="submit" className="zz-btn" data-testid="new-bot-submit">Criar</button>
+          <button type="submit" className="zz-btn" data-testid="new-bot-submit"
+            disabled={criando}>{criando ? "Criando…" : "Criar"}</button>
           <button type="button" onClick={() => setCreating(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
         </form>
       )}
@@ -126,8 +127,10 @@ export default function BotsPage() {
                 <button onClick={() => toggleStatus(b)} className="p-1.5 hover:bg-surface-3" title={b.status === "ativo" ? "Pausar" : "Ativar"}>
                   {b.status === "ativo" ? <Pause size={14} weight="bold" /> : <Play size={14} weight="bold" />}
                 </button>
-                <button onClick={() => duplicate(b.id)} className="p-1.5 hover:bg-surface-3" title="Duplicar"><Copy size={14} weight="bold" /></button>
-                <button onClick={() => remove(b.id)} className="p-1.5 hover:bg-danger-soft text-danger" title="Excluir"><Trash size={14} weight="bold" /></button>
+                <button onClick={() => duplicate(b.id)} disabled={duplicando}
+                  className="p-1.5 hover:bg-surface-3" title="Duplicar"><Copy size={14} weight="bold" /></button>
+                <button onClick={() => remove(b.id)} disabled={removendo}
+                  className="p-1.5 hover:bg-danger-soft text-danger" title="Excluir"><Trash size={14} weight="bold" /></button>
               </div>
             </div>
           ))}

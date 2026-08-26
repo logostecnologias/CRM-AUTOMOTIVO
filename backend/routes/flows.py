@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Any
 
+import agenda_flow
 from db import get_db
 from auth import require_tenant_admin
 from flow_engine import run_test_message, validar_menu
@@ -87,11 +88,18 @@ async def publish_flow(flow_id: str, user=Depends(require_tenant_admin)):
     # antes desta checagem — ou editado por fora — não perder a pergunta.)
     problemas = []
     for n in flow.get("nodes", []):
-        if n.get("type") != "menu":
-            continue
         dados = n.get("data") or {}
-        nome = dados.get("label") or "Menu"
-        problemas += [f"{nome}: {p}" for p in validar_menu(dados)]
+        if n.get("type") == "menu":
+            nome = dados.get("label") or "Menu"
+            problemas += [f"{nome}: {p}" for p in validar_menu(dados)]
+        elif n.get("type") == "schedule":
+            # O nó de Agendamento monta as próprias mensagens interativas em
+            # tempo de envio, então o teto do WhatsApp já é respeitado na
+            # montagem. O que se confere aqui é a configuração do nó: um
+            # "profissional fixo" sem profissional escolhido, por exemplo,
+            # perguntaria a coisa errada a um contato real.
+            nome = dados.get("label") or "Agendamento"
+            problemas += [f"{nome}: {p}" for p in agenda_flow.validar(dados)]
     if problemas:
         raise HTTPException(status_code=400, detail=" · ".join(problemas))
 

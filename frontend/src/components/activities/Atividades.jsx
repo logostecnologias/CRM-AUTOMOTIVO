@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import {
@@ -44,9 +45,12 @@ export function emDias(dias, hora = 9) {
 
 function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar" }) {
   const [form, setForm] = useState(inicial);
+  // Enter apertado duas vezes envia o formulário duas vezes, do mesmo jeito que
+  // o duplo clique no botão. A trava fica aqui, no envio, e não no botão.
+  const [enviar, enviando] = useAcao(onSalvar);
   return (
     <form
-      onSubmit={(e) => { e.preventDefault(); onSalvar(form); }}
+      onSubmit={(e) => { e.preventDefault(); enviar(form); }}
       className="border border-line bg-surface-2 p-3 space-y-2 rounded-lg"
       data-testid="atividade-form"
     >
@@ -70,7 +74,8 @@ function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar" }) {
           </button>
         ))}
         <div className="flex-1" />
-        <button type="submit" className="zz-btn text-xs py-1" data-testid="atividade-submit">{rotulo}</button>
+        <button type="submit" className="zz-btn text-xs py-1" data-testid="atividade-submit"
+          disabled={enviando}>{enviando ? "Salvando…" : rotulo}</button>
         <button type="button" onClick={onCancelar} className="zz-btn zz-btn-secondary text-xs py-1">
           Cancelar
         </button>

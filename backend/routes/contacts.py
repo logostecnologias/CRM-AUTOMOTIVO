@@ -12,6 +12,7 @@ from pymongo import InsertOne, UpdateOne
 from db import get_db
 from auth import accessible_connection_ids, require_tenant_admin, require_tenant_member
 from flow_runtime import send_human_message as _send_human
+import audit
 import contatos
 import contatos_csv
 import outbound
@@ -233,6 +234,14 @@ async def update_field_def(field_id: str, body: FieldDefIn, user=Depends(require
 @router.delete("/contacts/fields/{field_id}")
 async def delete_field_def(field_id: str, user=Depends(require_tenant_admin)):
     db = get_db()
+    # `field_id` vira chave de documento no $unset abaixo (`campos.<id>`). Ele
+    # já é indiretamente contido — o delete_one só casa um id que geramos como
+    # uuid4 —, mas validar o formato aqui é a barreira explícita (ZZ-20): um
+    # `field_id` com ponto jamais alcança um subcaminho dentro de `campos`.
+    try:
+        uuid.UUID(field_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Campo não encontrado")
     res = await db.contact_field_defs.delete_one(
         {"id": field_id, "tenant_id": user["tenant_id"]}
     )
@@ -461,6 +470,23 @@ async def import_contacts(
     return resumo
 
 
+# Caracteres que, no início de uma célula, fazem o Excel/Sheets tratarem o texto
+# como fórmula (ZZ-13). O `nome` do contato vem do PushName do WhatsApp — ou
+# seja, do próprio contato, que escolhe o que quiser: um nome começando com "="
+# vira fórmula quando o admin abre a exportação. É a única falha do sistema que
+# um estranho dispara sem conta nenhuma.
+_CSV_GATILHOS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(valor) -> str:
+    """Prefixa com aspa simples toda célula que começaria com um gatilho de
+    fórmula. A aspa neutraliza a interpretação sem alterar o que se lê."""
+    texto = "" if valor is None else str(valor)
+    if texto and texto[0] in _CSV_GATILHOS:
+        return "'" + texto
+    return texto
+
+
 @router.get("/contacts/export")
 async def export_contacts(
     q: str | None = None,
@@ -528,7 +554,9 @@ async def export_contacts(
         cursor = db.contacts.find(filtro, {"_id": 0}).sort("created_at", -1)
         async for c in cursor:
             valores = c.get("campos") or {}
-            escritor.writerow([
+            # Toda célula passa por _csv_safe — inclusive os campos
+            # personalizados, que podem carregar valor vindo do próprio contato.
+            escritor.writerow([_csv_safe(v) for v in ([
                 c.get("nome") or "",
                 c.get("numero_whatsapp") or "",
                 c.get("email") or "",
@@ -539,9 +567,16 @@ async def export_contacts(
                 emails.get(c.get("responsavel_id")) or "",
                 "sim" if c.get("opt_out") else "nao",
                 (c.get("created_at") or "")[:10],
-            ] + [valores.get(d["id"], "") for d in defs])
+            ] + [valores.get(d["id"], "") for d in defs])])
             yield despeja()
 
+    # Exportar a base é o caminho mais curto para ela sair da empresa — vai para
+    # a auditoria com o filtro usado (ZZ-21). Registrado no início: se o cliente
+    # cancelar o download no meio, o pedido de exportação ainda aconteceu.
+    await audit.registrar(
+        db, ator=user, acao="contact.export", tenant_id=tenant_id,
+        meta={"filtro": {"q": q, "tag": tag, "responsavel_id": responsavel_id}},
+    )
     return StreamingResponse(
         linhas(),
         media_type="text/csv; charset=utf-8",
@@ -768,8 +803,14 @@ async def delete_contact(contact_id: str, modo: str = "anonimizar",
     if not contact:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
     if modo == "apagar":
-        return await contatos.apagar(db, tenant_id, contact)
-    return await contatos.anonimizar(db, tenant_id, contact)
+        resultado = await contatos.apagar(db, tenant_id, contact)
+    else:
+        resultado = await contatos.anonimizar(db, tenant_id, contact)
+    await audit.registrar(
+        db, ator=user, acao=f"contact.{modo}", tenant_id=tenant_id,
+        alvo=contact_id, meta={"nome": contact.get("nome")},
+    )
+    return resultado
 
 
 class MesclarIn(BaseModel):
@@ -794,9 +835,14 @@ async def merge_contacts(contact_id: str, body: MesclarIn, user=Depends(require_
     if not principal or not secundario:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
     try:
-        return await contatos.mesclar(db, tenant_id, principal, secundario)
+        resultado = await contatos.mesclar(db, tenant_id, principal, secundario)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await audit.registrar(
+        db, ator=user, acao="contact.merge", tenant_id=tenant_id, alvo=contact_id,
+        meta={"secundario_id": body.secundario_id},
+    )
+    return resultado
 
 
 # ---------- Notas ----------

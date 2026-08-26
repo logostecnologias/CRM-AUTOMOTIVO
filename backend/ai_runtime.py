@@ -206,15 +206,22 @@ async def consumo_do_mes(db, tenant_id: str, mes: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str,
-                               historico: list[dict]) -> ai_client.Resposta:
+                               historico: list[dict], ferramentas: list = None,
+                               executar=None) -> ai_client.Resposta:
     """Resolve a credencial do agente, chama o provedor e mede — nesta ordem.
 
     É por aqui que o atendimento, o chat de teste e (futuramente) o nó de fluxo
     devem passar. Chamar `ai_client.responder` direto pula a cota e a medição.
+
+    Com `ferramentas`, o consumo medido é o do **laço inteiro** (consultar a
+    agenda e marcar são duas chamadas ao provedor, não uma): `ai_client` soma as
+    voltas antes de devolver, senão a cota do plano contaria menos do que a
+    fatura cobra.
     """
     cred = await resolver_credencial(db, tenant_id, agente)
     resposta = await ai_client.responder(
-        cred["provedor"], cred["chave"], cred["modelo"], instrucoes, historico
+        cred["provedor"], cred["chave"], cred["modelo"], instrucoes, historico,
+        ferramentas=ferramentas, executar=executar,
     )
     await registrar_uso(db, tenant_id, cred["origem"], cred["provedor"],
                         cred["modelo"], resposta, agente.get("id"))

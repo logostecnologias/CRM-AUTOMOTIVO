@@ -2,7 +2,8 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
@@ -250,8 +251,205 @@ async def etapa_janela_e_teto():
         relatorios.MAX_SESSOES = original
 
 
+# ---------------------------------------------------------------------------
+# Agenda
+#
+# O que este bloco protege, e por que cada coisa esta aqui:
+#
+#   - **O corte de dia e no fuso da empresa.** Um horario das 21h em Brasilia
+#     esta gravado como 00:00Z do dia seguinte. Cortar o dia pelo prefixo do ISO
+#     (o que os outros relatorios fazem, e de proposito) jogaria esse
+#     atendimento para o dia seguinte, e "faltas de sexta" apareceriam no
+#     sabado. E o unico jeito de pegar isso e com um horario de noite.
+#   - **A taxa de falta e sobre horarios decididos.** Marcacao futura nao e
+#     acerto nem erro: contando-a no denominador, a taxa cairia so porque a
+#     agenda da semana que vem esta cheia.
+#   - **A ocupacao tem um denominador que nao existe gravado.** Ele sai de somar
+#     a grade dia a dia, e por isso o teste conta os dias uteis por conta
+#     propria, em vez de chamar a mesma funcao que o codigo usa.
+#   - **Cancelado e falta liberam o horario**, entao nao podem contar como
+#     ocupacao: uma agenda cheia de faltas mostraria 90% de ocupacao com a sala
+#     vazia.
+# ---------------------------------------------------------------------------
+
+TZ_EMPRESA = ZoneInfo("America/Sao_Paulo")
+ANA, BRUNO, SALA, CARLA = "r-ana", "r-bruno", "r-sala", "r-carla"
+FERIADO = "2026-08-07"          # uma sexta-feira
+AGO_DE = datetime(2026, 8, 1, 0, 0, tzinfo=TZ_EMPRESA).astimezone(timezone.utc).isoformat()
+AGO_ATE = datetime(2026, 8, 31, 23, 59, 59, tzinfo=TZ_EMPRESA).astimezone(timezone.utc).isoformat()
+
+
+def parede(dia, hh, mm=0):
+    """Hora de parede em Sao Paulo, gravada como o sistema grava: UTC."""
+    return datetime(2026, 8, dia, hh, mm, tzinfo=TZ_EMPRESA).astimezone(timezone.utc).isoformat()
+
+
+def uteis(primeiro, ultimo, tirando=()):
+    """Dias uteis do intervalo, contados aqui e nao pela funcao sob teste."""
+    return [d for d in range(primeiro, ultimo + 1)
+            if date(2026, 8, d).weekday() < 5 and f"2026-08-{d:02d}" not in tirando]
+
+
+def grade_semanal(inicio, fim):
+    """Grade de segunda a sexta, no formato de `resources.grade` (7 posicoes)."""
+    return [[{"inicio": inicio, "fim": fim}]] * 5 + [[], []]
+
+
+async def etapa_agenda():
+    print("\n[5] Relatorio de agenda")
+    await DB.scheduling_settings.insert_one({
+        "tenant_id": TENANT, "fuso": "America/Sao_Paulo",
+        "bloqueios": [{"data": FERIADO, "motivo": "Feriado"}],
+    })
+    for rid, nome, ini, fim, ativo, nasceu in (
+        (ANA, "Ana", "09:00", "18:00", True, "2026-07-01T12:00:00+00:00"),
+        (BRUNO, "Bruno", "09:00", "13:00", True, "2026-08-15T12:00:00+00:00"),
+        (SALA, "Sala 1", "08:00", "18:00", True, "2026-07-01T12:00:00+00:00"),
+        (CARLA, "Carla", "09:00", "18:00", False, "2026-07-01T12:00:00+00:00"),
+    ):
+        await DB.resources.insert_one({
+            "id": rid, "tenant_id": TENANT, "nome": nome, "ativo": ativo,
+            "grade": grade_semanal(ini, fim), "excecoes": [], "created_at": nasceu,
+        })
+
+    # (dia, hora, duracao, preco, status, origem, recurso, lembrete)
+    marcados = [
+        ("a1", 3, 9, 60, 100, "concluido", "manual", ANA, True),
+        ("a2", 4, 10, 60, 100, "concluido", "bot", ANA, True),
+        ("a3", 5, 9, 60, 100, "faltou", "bot", ANA, True),
+        ("a4", 6, 9, 60, 100, "faltou", "manual", ANA, False),
+        ("a5", 10, 9, 60, 100, "cancelado", "ia", ANA, False),
+        ("a6", 28, 9, 60, 200, "agendado", "bot", ANA, False),
+        ("a7", 27, 9, 30, None, "confirmado", "manual", BRUNO, False),
+        # 21h em Sao Paulo: gravado como 00:00Z do dia 11. E o caso que separa o
+        # corte de dia no fuso da empresa do corte pelo texto do ISO.
+        ("a8", 10, 21, 60, 50, "concluido", "ia", ANA, False),
+        # Sabado: fora da grade de todo mundo (encaixe da recepcao). Ocupa tempo
+        # sem que exista grade naquele dia.
+        ("a9", 15, 10, 60, 80, "concluido", "manual", BRUNO, True),
+    ]
+    for aid, dia, hora, dur, preco, status, origem, recurso, lembrete in marcados:
+        inicio = parede(dia, hora)
+        await DB.appointments.insert_one({
+            "id": aid, "tenant_id": TENANT, "inicio": inicio,
+            "fim": parede(dia, hora + dur // 60), "duracao_min": dur, "preco": preco,
+            "status": status, "origem": origem, "resource_id": recurso,
+            "resource_nome": {ANA: "Ana", BRUNO: "Bruno"}[recurso],
+            "service_id": "s-corte" if dur == 60 else "s-barba",
+            "service_nome": "Corte" if dur == 60 else "Barba",
+            "lembrete_enviado_em": "2026-08-01T12:00:00+00:00" if lembrete else None,
+        })
+
+    r = await rr.agenda(de=AGO_DE, ate=AGO_ATE, user=ADMIN)
+    resumo = r["resumo"]
+    check("todos os horarios da janela entram", resumo["marcados"] == 9, resumo)
+    check("atendidos, faltas e cancelados separados",
+          (resumo["realizados"], resumo["faltas"], resumo["cancelados"]) == (4, 2, 1), resumo)
+    check("e o que ainda vai acontecer fica fora dos dois",
+          resumo["por_acontecer"] == 2 and resumo["confirmados"] == 1, resumo)
+    # 2 faltas em 6 decididos. Com os 2 futuros no denominador daria 25%.
+    check("taxa de falta e sobre os decididos", resumo["taxa_falta"] == 33.3, resumo)
+    check("taxa de cancelamento e sobre o total", resumo["taxa_cancelamento"] == 11.1, resumo)
+    check("o fuso da empresa vem na resposta", r["fuso"] == "America/Sao_Paulo", r["fuso"])
+
+    check("receita realizada soma so os concluidos",
+          resumo["receita_realizada"] == 330, resumo)
+    check("prevista soma o que ainda vai acontecer",
+          resumo["receita_prevista"] == 200, resumo)
+    check("perdida soma falta e cancelamento",
+          resumo["receita_perdida"] == 300, resumo)
+    check("horario sem preco e contado a parte", resumo["sem_preco"] == 1, resumo)
+    check("horas realizadas somam a duracao dos concluidos",
+          resumo["horas_realizadas"] == 4.0, resumo)
+
+    check("origem separa equipe, bot e IA",
+          r["por_origem"] == {"manual": 4, "bot": 3, "ia": 2}, r["por_origem"])
+
+    dias = {d["dia"]: d for d in r["por_dia"]}
+    check("o horario das 21h fica no dia 10, o dia da empresa",
+          dias.get("2026-08-10", {}).get("marcados") == 2, dias.get("2026-08-10"))
+    check("e nao vaza para o dia 11 pelo fuso do UTC",
+          "2026-08-11" not in dias, sorted(dias))
+    check("no dia 10, um atendido e um cancelado",
+          (dias["2026-08-10"]["realizados"], dias["2026-08-10"]["cancelados"]) == (1, 1),
+          dias["2026-08-10"])
+    check("quem marcou fecha com o total do dia",
+          all(d["equipe"] + d["whatsapp"] == d["marcados"] for d in r["por_dia"]),
+          r["por_dia"])
+
+    lem = r["lembrete"]
+    check("lembrete: 1 falta em 4 decididos com aviso",
+          (lem["com"]["decididos"], lem["com"]["faltas"], lem["com"]["taxa_falta"])
+          == (4, 1, 25.0), lem["com"])
+    check("e 1 em 2 sem aviso",
+          (lem["sem"]["decididos"], lem["sem"]["taxa_falta"]) == (2, 50.0), lem["sem"])
+
+    profs = {p["id"]: p for p in r["por_profissional"]}
+    check("profissional inativo e sem horario nao aparece", CARLA not in profs, sorted(profs))
+    check("mas a sala sem nenhum horario aparece", SALA in profs, sorted(profs))
+    check("com ocupacao zero, nao nula",
+          profs[SALA]["marcados"] == 0 and profs[SALA]["ocupacao"] == 0.0, profs[SALA])
+
+    # Ocupacao: so o que tomou a agenda (agendado, confirmado, concluido).
+    # Ana tem a1, a2, a6 e a8 = 240 min; a3/a4 (faltou) e a5 (cancelado) sairam.
+    check("falta e cancelamento nao contam como ocupacao",
+          profs[ANA]["minutos_ocupados"] == 240, profs[ANA])
+    esperado_ana = len(uteis(1, 31, tirando=(FERIADO,))) * 9 * 60
+    check("a grade do mes desconta o feriado da empresa",
+          profs[ANA]["minutos_disponiveis"] == esperado_ana,
+          (profs[ANA]["minutos_disponiveis"], esperado_ana))
+    check("e a ocupacao e a divisao dos dois",
+          profs[ANA]["ocupacao"] == round(240 / esperado_ana * 100, 1), profs[ANA])
+    check("taxa de falta por profissional tambem e sobre decididos",
+          profs[ANA]["taxa_falta"] == 40.0, profs[ANA])
+
+    # Bruno nasceu no dia 15: os 14 primeiros dias do mes nao eram agenda dele.
+    esperado_bruno = len(uteis(15, 31)) * 4 * 60
+    check("profissional cadastrado no meio do mes nao ganha grade retroativa",
+          profs[BRUNO]["minutos_disponiveis"] == esperado_bruno,
+          (profs[BRUNO]["minutos_disponiveis"], esperado_bruno))
+    check("o encaixe de sabado conta como ocupacao mesmo sem grade no dia",
+          profs[BRUNO]["minutos_ocupados"] == 90, profs[BRUNO])
+
+    servicos = {s["id"]: s for s in r["por_servico"]}
+    check("por servico separa marcados e atendidos",
+          (servicos["s-corte"]["marcados"], servicos["s-corte"]["realizados"]) == (8, 4),
+          servicos["s-corte"])
+    check("e traz a duracao media", servicos["s-barba"]["duracao_media_min"] == 30,
+          servicos["s-barba"])
+
+    # Janela de um sabado: ninguem tem grade, e a divisao nao pode explodir.
+    so_sabado = await rr.agenda(de=parede(15, 0), ate=parede(15, 23), user=ADMIN)
+    sab = {p["id"]: p for p in so_sabado["por_profissional"]}
+    check("sem grade no dia, ocupacao e nula em vez de erro",
+          sab[BRUNO]["ocupacao"] is None and sab[BRUNO]["minutos_disponiveis"] == 0,
+          sab[BRUNO])
+    check("e o horario do sabado continua sendo contado",
+          so_sabado["resumo"]["marcados"] == 1, so_sabado["resumo"])
+
+    # Agenda inteira para a equipe inteira: e o oposto do relatorio de
+    # atendimento, e de proposito (ver o docstring da rota).
+    do_agente = await rr.agenda(de=AGO_DE, ate=AGO_ATE, user=AGENTE)
+    check("o atendente ve a agenda toda, sem recorte por conexao",
+          do_agente["resumo"]["marcados"] == 9, do_agente["resumo"])
+
+    original = relatorios.MAX_AGENDAMENTOS
+    relatorios.MAX_AGENDAMENTOS = 2
+    try:
+        st, det = await erro(rr.agenda(de=AGO_DE, ate=AGO_ATE, user=ADMIN))
+        check("acima do teto da 413 dizendo o numero",
+              st == 413 and "9 horários" in det, (st, det))
+    finally:
+        relatorios.MAX_AGENDAMENTOS = original
+
+    vazio = await rr.agenda(de=parede(1, 0), ate=parede(1, 23), user=ADMIN)
+    check("janela sem nada nao inventa taxa nenhuma",
+          vazio["resumo"]["marcados"] == 0 and vazio["resumo"]["taxa_falta"] is None,
+          vazio["resumo"])
+
+
 async def etapa_campanhas():
-    print("\n[5] Relatorio de campanhas")
+    print("\n[6] Relatorio de campanhas")
     await DB.campaigns.insert_one({"id": "camp-1", "tenant_id": TENANT, "nome": "Promo Agosto"})
     await DB.campaigns.insert_one({"id": "camp-2", "tenant_id": TENANT, "nome": "Reativação"})
     quando = iso(days=-5)
@@ -305,7 +503,7 @@ async def etapa_campanhas():
 
 
 async def etapa_permissoes_do_atendente():
-    print("\n[6] O que o atendente pode e o que nao pode")
+    print("\n[7] O que o atendente pode e o que nao pode")
     # base toda
     lista = await rc.list_contacts(user=AGENTE)
     check("atendente lista a base toda", lista["total"] == 1, lista)
@@ -419,7 +617,7 @@ async def etapa_barreira_de_permissao():
 
 
 async def etapa_envio_respeita_conexao():
-    print("\n[7] Atendente fala so pelas conexoes dele")
+    print("\n[8] Atendente fala so pelas conexoes dele")
     contato = await DB.contacts.find_one({"id": "c1"})
     conn = await rc._resolve_conexao(DB, TENANT, contato, None, AGENTE)
     check("sem escolha, cai na conexao permitida", conn["id"] == CONN_A, conn["id"])
@@ -462,6 +660,7 @@ def test_suite():
         await etapa_tempos_estranhos()
         await etapa_escopo_do_atendente()
         await etapa_janela_e_teto()
+        await etapa_agenda()
         await etapa_campanhas()
         await etapa_permissoes_do_atendente()
         await etapa_barreira_de_permissao()

@@ -71,7 +71,6 @@ export default function TenantDashboard() {
     return (
       <div className="zz-page" data-testid="tenant-dashboard">
         <div className="mb-8">
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Painel</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Olá, {user?.name}.</h1>
           <p className="text-ink-2 mt-2">Suas conversas estão na Central de Atendimento.</p>
         </div>
@@ -97,7 +96,6 @@ export default function TenantDashboard() {
   return (
     <div className="zz-page" data-testid="tenant-dashboard">
       <div className="mb-6">
-        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Painel</div>
         <h1 className="font-heading text-4xl font-black tracking-tighter">Olá, {user?.name}.</h1>
         <p className="text-ink-2 mt-2 text-sm">Como está a operação agora.</p>
       </div>

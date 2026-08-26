@@ -226,6 +226,20 @@ body, .zz-panel, .zz-panel-hard, .zz-input, .zz-btn, .zz-nav-item {
   transition: border-color .12s, box-shadow .12s, background-color .15s;
 }
 .zz-input::placeholder { color: var(--text-4); }
+
+/* As setinhas de `input[type=number]` são desenhadas pelo navegador, não por
+   nós: não seguem os tokens de cor, aparecem só no hover em alguns navegadores
+   e ficam por cima de qualquer coisa posicionada à direita do campo: foi assim
+   que elas cobriram o sufixo "min" na configuração da agenda. Ninguém acerta um
+   alvo de 8px para somar de 1 em 1; quem quer isso usa as setas do teclado, que
+   continuam funcionando. */
+.zz-input[type="number"]::-webkit-inner-spin-button,
+.zz-input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+.zz-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 /* O foco era borda preta + anel preto de 2px. Agora é o azul de informação com
    anel translúcido — mesma força de sinal, sem o peso do contorno cheio. */
 .zz-input:focus {
@@ -292,6 +306,23 @@ textarea.zz-input { line-height: 1.55; }
 .zz-nav-item:hover { background: var(--surface-3); color: var(--text); }
 .zz-nav-item.active { color: var(--brand-fg); background: var(--brand); font-weight: 600; }
 .zz-nav-item.active:hover { background: var(--brand); color: var(--brand-fg); }
+
+/* Subtitulo de grupo da barra lateral. Nao e item clicavel, entao nao pode
+   competir com eles: caixa alta pequena, sem fundo e sem icone. A cor e
+   `--text-3`, a mesma dos itens, e nao o `--text-4` que seria o natural para
+   texto secundario: a 10px isto e texto pequeno, e `--text-4` reprova nos dois
+   temas (3,46:1 no claro, 3,83:1 no escuro). O que separa o titulo do item e o
+   tamanho e a caixa alta, nao a cor. O recuo alinha com o rotulo do item
+   (0.6rem de margem do item mais 0.8rem de padding), nao com a borda da barra,
+   senao o titulo parece de outra coluna. */
+.zz-nav-grupo {
+  padding: 0.35rem 1.4rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-3);
+}
 
 /* Sinalização de fila — conversas aguardando atendimento precisam saltar aos
    olhos de qualquer canto do sistema, não só na tela da Central. */

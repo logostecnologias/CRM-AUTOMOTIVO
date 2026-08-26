@@ -31,9 +31,6 @@ export default function AIAgentsPage() {
     <div className="zz-page" data-testid="ai-agents-page">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">
-            Automação
-          </div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Agentes de IA</h1>
           <p className="text-ink-2 mt-1 text-sm">
             Atendimento automático por WhatsApp, com transferência para uma pessoa quando precisa.

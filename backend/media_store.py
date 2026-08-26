@@ -23,6 +23,8 @@ from pathlib import Path
 
 import httpx
 
+import net_guard
+
 DEFAULT_MIME = "application/octet-stream"
 
 # Blocos de leitura para codificar o arquivo aos poucos. Precisa ser múltiplo
@@ -82,6 +84,12 @@ def classify(mime: str | None, filename: str | None = None) -> str:
     mime = (mime or "").lower().split(";")[0].strip()
     if (not mime or mime == DEFAULT_MIME) and filename:
         mime = (mimetypes.guess_type(filename)[0] or "").lower()
+    # SVG é uma imagem que também é um documento executável (<script>, onload).
+    # Tratá-lo como documento faz `/api/media` servi-lo como anexo, nunca
+    # inline na origem da API — é a raiz do ZZ-07. Vale para upload, mídia
+    # recebida de um contato e envio pela WuzAPI.
+    if mime == "image/svg+xml":
+        return "document"
     if mime.startswith("image/"):
         return "image"
     if mime.startswith("video/"):
@@ -302,14 +310,15 @@ async def ensure_data_uri(source: str, mime: str | None = None) -> str:
         return source
     if not source.startswith(("http://", "https://")):
         raise MediaError(f"Origem de mídia não suportada: {source[:40]}")
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        r = await client.get(source)
-    if r.status_code >= 400:
-        raise MediaError(f"Falha ao baixar mídia ({r.status_code})")
-    content = r.content
-    if len(content) > HARD_MAX_BYTES:
-        raise MediaError("Mídia remota acima do limite de tamanho")
-    return to_data_uri(mime or r.headers.get("content-type"), content)
+    # net_guard: a URL vem do nó de Mídia (cliente) e é o servidor que a busca.
+    # Recusa destino interno/privado (ZZ-04/05) e aplica o teto de bytes
+    # **durante** o download, sem materializar a resposta inteira antes de
+    # checar o tamanho — a segunda metade do ZZ-05 e a regra do projeto.
+    try:
+        ctype, content = await net_guard.fetch_bytes(source, max_bytes=HARD_MAX_BYTES)
+    except net_guard.SSRFError as e:
+        raise MediaError(str(e)) from e
+    return to_data_uri(mime or ctype, content)
 
 
 def public_payload(doc: dict) -> dict:

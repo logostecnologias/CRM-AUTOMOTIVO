@@ -69,9 +69,15 @@ class _IAFalsa:
         self.proxima = "Claro, posso ajudar com isso."
         self.erro = None
 
-    async def __call__(self, db, tenant_id, agente, instrucoes, historico):
+    async def __call__(self, db, tenant_id, agente, instrucoes, historico,
+                       ferramentas=None, executar=None):
+        # `ferramentas`/`executar` sao aceitos e ignorados: o duble existe para
+        # provar o roteamento do agente, nao o laco de ferramentas do provedor
+        # (esse tem teste proprio em test_agenda.py). Sem os parametros, ligar a
+        # agenda num agente quebraria toda esta suite com TypeError.
         self.chamadas.append({"tenant_id": tenant_id, "agente": agente,
-                              "instrucoes": instrucoes, "historico": historico})
+                              "instrucoes": instrucoes, "historico": historico,
+                              "ferramentas": ferramentas})
         if self.erro:
             raise self.erro
         return ai_client.Resposta(texto=self.proxima, modelo="claude-haiku-4-5",

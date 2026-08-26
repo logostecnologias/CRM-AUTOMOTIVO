@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { Plus, Trash, X, ArrowUp, ArrowDown } from "@phosphor-icons/react";
 
@@ -35,7 +36,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
 
   const remover = (i) => setEtapas(etapas.filter((_, j) => j !== i));
 
-  const salvar = async (e) => {
+  const [salvar, salvando] = useAcao(async (e) => {
     e?.preventDefault();
     try {
       await api.patch(`/pipelines/${pipeline.id}`,
@@ -52,7 +53,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
       if (ex.response?.status === 409) setConflito(detalhe);
       else toast.error(detalhe);
     }
-  };
+  });
 
   const restantes = etapas.filter((e) => e.id);
 
@@ -135,7 +136,8 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
             <button type="button" onClick={onClose} className="zz-btn zz-btn-secondary text-xs py-1">
               Cancelar
             </button>
-            <button type="submit" className="zz-btn text-xs py-1" data-testid="funil-submit">Salvar</button>
+            <button type="submit" className="zz-btn text-xs py-1" data-testid="funil-submit"
+              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
           </div>
         </div>
       </form>

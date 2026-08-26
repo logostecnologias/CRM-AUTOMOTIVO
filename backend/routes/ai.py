@@ -100,6 +100,12 @@ class AgenteIn(BaseModel):
     escalar_quando: str | None = None
     max_respostas: int | None = None
 
+    # Deixa o agente consultar a agenda e marcar horário de verdade. Desligado
+    # por padrão: ligar dá ao modelo a capacidade de **escrever** no sistema, e
+    # isso é uma decisão do cliente, não um default. Sem serviços cadastrados, a
+    # opção não tem efeito nenhum (ver `ai_agents.preparar_agenda`).
+    agenda_ativa: bool = False
+
     # Onde atende. Vazio = todas as conexões da empresa.
     conexoes: list[str] = []
     # Para qual departamento a conversa vai quando o agente transfere.
@@ -333,9 +339,18 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
         return {"transferiu": True, "texto": None,
                 "motivo": "O contato pediu para falar com uma pessoa"}
 
+    # O contato do teste é fictício, e as ferramentas rodam em modo simulação:
+    # consultam a agenda de verdade (é o que prova que a grade está certa) e não
+    # gravam nada. Um teste que marcasse horário ocuparia a agenda do cliente.
+    contato_teste = {"id": "teste", "nome": "Contato de teste", "numero_whatsapp": ""}
+    bloco_agenda, ferramentas, executar = await ai_agents.preparar_agenda(
+        db, user["tenant_id"], agente, contato_teste, None, simulado=True)
+
     try:
         resposta = await ai_runtime.responder_por_agente(
-            db, user["tenant_id"], agente, ai_agents.montar_instrucoes(agente), historico)
+            db, user["tenant_id"], agente,
+            ai_agents.montar_instrucoes(agente, bloco_agenda), historico,
+            ferramentas=ferramentas, executar=executar)
     except ai_client.IAError as e:
         # A chave pode ter sido revogada no console depois de salva. Marcar aqui
         # é o que faz o cartão mostrar o problema em vez de o agente falhar em
@@ -360,6 +375,10 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
         "texto": texto,
         "tokens": (resposta.tokens_entrada + resposta.tokens_saida
                    + resposta.tokens_cache_leitura + resposta.tokens_cache_escrita),
+        # Quais ferramentas ele chegou a usar. É o que mostra, no teste, que o
+        # agente foi de fato à agenda em vez de inventar um horário plausível
+        # a diferença entre as duas coisas não aparece no texto da resposta.
+        "ferramentas": resposta.ferramentas_usadas,
     }
 
 
@@ -375,7 +394,8 @@ async def ver_prompt(agent_id: str, user=Depends(require_tenant_admin)):
     agente = await db.ai_agents.find_one({"id": agent_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
     if not agente:
         raise HTTPException(status_code=404, detail="Agente não encontrado")
-    return {"instrucoes": ai_agents.montar_instrucoes(agente)}
+    bloco_agenda, _, _ = await ai_agents.preparar_agenda(db, user["tenant_id"], agente)
+    return {"instrucoes": ai_agents.montar_instrucoes(agente, bloco_agenda)}
 
 
 # ---------------------------------------------------------------------------

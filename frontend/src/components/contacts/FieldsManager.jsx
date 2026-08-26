@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { Plus, Trash, PencilSimple, X } from "@phosphor-icons/react";
@@ -31,7 +32,7 @@ export default function FieldsManager({ onClose, onChanged }) {
     setOpcoesTexto((c.opcoes || []).join(", "));
   };
 
-  const salvar = async (e) => {
+  const [salvar, salvando] = useAcao(async (e) => {
     e.preventDefault();
     const payload = {
       nome: form.nome,
@@ -51,9 +52,9 @@ export default function FieldsManager({ onClose, onChanged }) {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
-  const remover = async (c) => {
+  const [remover, removendo] = useAcao(async (c) => {
     if (!(await confirmToast(
       `Excluir o campo "${c.nome}"? O valor dele sai de todas as fichas.`,
       { confirmLabel: "Excluir" }))) return;
@@ -65,7 +66,7 @@ export default function FieldsManager({ onClose, onChanged }) {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
   return (
     <div className="border border-line-strong bg-surface p-6 mb-6 zz-panel-hard rounded-lg" data-testid="fields-manager">
@@ -114,7 +115,8 @@ export default function FieldsManager({ onClose, onChanged }) {
             <input type="number" className="zz-input h-8 py-1 text-sm" value={form.ordem}
               onChange={(e) => setForm({ ...form, ordem: e.target.value })} />
           </div>
-          <button type="submit" className="zz-btn text-xs py-1" data-testid="field-submit">Salvar</button>
+          <button type="submit" className="zz-btn text-xs py-1" data-testid="field-submit"
+            disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
           <button type="button" onClick={() => setForm(null)} className="zz-btn zz-btn-secondary text-xs py-1">
             Cancelar
           </button>
@@ -142,7 +144,8 @@ export default function FieldsManager({ onClose, onChanged }) {
             <button onClick={() => abrirEdicao(c)} className="p-1 hover:bg-surface-3">
               <PencilSimple size={13} weight="bold" />
             </button>
-            <button onClick={() => remover(c)} className="p-1 hover:bg-danger-soft text-danger">
+            <button onClick={() => remover(c)} disabled={removendo}
+              className="p-1 hover:bg-danger-soft text-danger">
               <Trash size={13} weight="bold" />
             </button>
           </div>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import {
@@ -160,7 +161,7 @@ export default function FunilPage() {
     else mover(dealId, etapa.id);
   };
 
-  const criar = async (e) => {
+  const [criar, criando] = useAcao(async (e) => {
     e.preventDefault();
     if (!novo.contato) return toast.error("Escolha o contato do negócio");
     try {
@@ -179,7 +180,7 @@ export default function FunilPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
   const funil = quadro?.pipeline;
   const totalAberto = (quadro?.colunas || [])
@@ -190,7 +191,6 @@ export default function FunilPage() {
     <div className={`p-8 ${abertoId ? "pr-[500px]" : ""}`} data-testid="funil-page">
       <div className="flex items-end justify-between mb-6 gap-4">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Comercial</div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Funil de negócios</h1>
           <p className="text-ink-2 mt-2 text-sm">
             Arraste o cartão entre as etapas. {formatBRL(totalAberto)} em aberto no funil.
@@ -247,7 +247,8 @@ export default function FunilPage() {
               onChange={(e) => setNovo({ ...novo, valor: parseBRLInput(e.target.value) })} />
           </div>
           <div className="flex gap-2">
-            <button type="submit" className="zz-btn" data-testid="new-deal-submit">Criar</button>
+            <button type="submit" className="zz-btn" data-testid="new-deal-submit"
+              disabled={criando}>{criando ? "Criando…" : "Criar"}</button>
             <button type="button" onClick={() => setNovo(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
           </div>
         </form>

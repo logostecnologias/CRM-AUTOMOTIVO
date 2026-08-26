@@ -18,7 +18,6 @@ export default function SuperAdminDashboard() {
   return (
     <div className="zz-page" data-testid="admin-dashboard">
       <div className="mb-8">
-        <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Painel Super Admin</div>
         <h1 className="font-heading text-4xl font-black tracking-tighter">Métricas Globais</h1>
       </div>
 

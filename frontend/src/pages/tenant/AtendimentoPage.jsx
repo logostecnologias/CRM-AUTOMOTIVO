@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import api from "@/lib/api";
+import { useAcao } from "@/hooks/useAcao";
 import { useAuth } from "@/context/AuthContext";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { Hand, CheckCircle, X } from "@phosphor-icons/react";
@@ -46,16 +47,16 @@ export default function AtendimentoPage() {
     return acc;
   }, {});
 
-  const assume = async () => {
+  const [assume, assumindo] = useAcao(async () => {
     await api.post(`/atendimento/sessions/${activeId}/assume`);
     toast.success("Conversa assumida");
     await refreshActive(); loadSessions();
-  };
-  const finalize = async () => {
+  });
+  const [finalize, finalizando] = useAcao(async () => {
     await api.post(`/atendimento/sessions/${activeId}/finalize`);
     toast.success("Atendimento finalizado");
     await refreshActive(); loadSessions();
-  };
+  });
   const reassign = async (deptId) => {
     await api.patch(`/atendimento/sessions/${activeId}/department`, { department_id: deptId || null });
     toast.success("Departamento reatribuído");
@@ -68,8 +69,7 @@ export default function AtendimentoPage() {
     <div className="h-full flex flex-col" data-testid="atendimento-page">
       <div className="border-b border-line-strong bg-surface px-6 py-4 flex items-center justify-between">
         <div>
-          <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3">Central</div>
-          <h1 className="font-heading text-2xl font-black tracking-tighter">CRM</h1>
+          <h1 className="font-heading text-2xl font-black tracking-tighter">Conversas</h1>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -167,12 +167,14 @@ export default function AtendimentoPage() {
               </select>
               <div className="flex-1" />
               {["aguardando"].includes(active.status_atendimento) && (
-                <button onClick={assume} className="zz-btn text-xs" data-testid="assume-btn">
+                <button onClick={assume} disabled={assumindo}
+                  className="zz-btn text-xs" data-testid="assume-btn">
                   <Hand size={12} weight="bold" /> Assumir
                 </button>
               )}
               {active.status_atendimento === "em_atendimento" && (
-                <button onClick={finalize} className="zz-btn zz-btn-secondary text-xs" data-testid="finalize-btn">
+                <button onClick={finalize} disabled={finalizando}
+                  className="zz-btn zz-btn-secondary text-xs" data-testid="finalize-btn">
                   <CheckCircle size={12} weight="bold" /> Finalizar
                 </button>
               )}

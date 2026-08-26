@@ -2,14 +2,17 @@ import { useState, useEffect } from "react";
 import { X, Trash, Plus } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import {
-  NODE_TYPES, MENU_FORMATOS, LIMITES_MENU, validarMenu,
-  FORMATO_TEXTO, FORMATO_LISTA, GATILHOS,
+  NODE_TYPES, MENU_FORMATOS, LIMITES_MENU, validarMenu, validarAgendamento,
+  FORMATO_TEXTO, FORMATO_LISTA, GATILHOS, MODOS_PROFISSIONAL, FORMATOS_AGENDA,
+  MAX_DIAS_AGENDA,
 } from "./nodeTypes";
 
 export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   const [data, setData] = useState(node?.data || {});
   const [bots, setBots] = useState([]);
   const [depts, setDepts] = useState([]);
+  const [servicos, setServicos] = useState([]);
+  const [recursos, setRecursos] = useState([]);
   useEffect(() => setData(node?.data || {}), [node?.id]);
   useEffect(() => {
     if (node?.type === "transfer_bot") {
@@ -17,6 +20,14 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
     }
     if (node?.type === "human_handoff") {
       api.get("/departments").then((r) => setDepts(r.data)).catch(() => {});
+    }
+    if (node?.type === "schedule") {
+      // Só os ativos: oferecer no editor um serviço desativado deixaria o nó
+      // configurado para perguntar algo que a execução nunca ofereceria.
+      api.get("/agenda/services", { params: { todos: false } })
+        .then((r) => setServicos(r.data)).catch(() => {});
+      api.get("/agenda/resources", { params: { todos: false } })
+        .then((r) => setRecursos(r.data)).catch(() => {});
     }
   }, [node?.type]);
 
@@ -315,6 +326,134 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
             </Field>
           </>
         )}
+
+        {node.type === "schedule" && (() => {
+          const modo = data.modo_profissional || "qualquer";
+          const problemas = validarAgendamento(data);
+          const metaModo = MODOS_PROFISSIONAL.find((m) => m.valor === modo);
+          const metaFormato = FORMATOS_AGENDA.find(
+            (f) => f.valor === (data.formato || "lista"));
+          return (
+            <>
+              {!servicos.length && (
+                <div className="text-xs text-warning bg-warning-soft border border-warning rounded-lg p-3">
+                  Nenhum serviço cadastrado na Agenda. O nó publica, mas em toda conversa
+                  ele vai sair direto pela saída <strong>Não agendou</strong>: cadastre os
+                  serviços em Agenda › Configuração.
+                </div>
+              )}
+              {problemas.length > 0 && (
+                <div className="text-xs text-danger bg-danger-soft border border-danger rounded-lg p-3"
+                  data-testid="config-agenda-avisos">
+                  <div className="font-bold mb-1">Impede a publicação:</div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {problemas.map((p) => <li key={p}>{p}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              <Field label="Serviço"
+                hint="Em branco, o nó pergunta ao contato qual é. Com um serviço só cadastrado, a pergunta é pulada.">
+                <select className="zz-input" value={data.service_id || ""}
+                  data-testid="config-agenda-servico"
+                  onChange={(e) => {
+                    const sv = servicos.find((x) => x.id === e.target.value);
+                    update({ service_id: e.target.value, service_nome: sv?.nome || "" });
+                  }}>
+                  <option value="">: perguntar ao contato, </option>
+                  {servicos.map((sv) => (
+                    <option key={sv.id} value={sv.id}>{sv.nome} ({sv.duracao_min} min)</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="Quem atende" hint={metaModo?.ajuda}>
+                <select className="zz-input" value={modo} data-testid="config-agenda-modo"
+                  onChange={(e) => update({ modo_profissional: e.target.value })}>
+                  {MODOS_PROFISSIONAL.map((m) => (
+                    <option key={m.valor} value={m.valor}>{m.label}</option>
+                  ))}
+                </select>
+              </Field>
+
+              {modo === "fixo" && (
+                <Field label="Profissional">
+                  <select className="zz-input" value={data.resource_id || ""}
+                    data-testid="config-agenda-recurso"
+                    onChange={(e) => update({ resource_id: e.target.value })}>
+                    <option value="">: selecione, </option>
+                    {recursos.map((r) => (
+                      <option key={r.id} value={r.id}>{r.nome}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+
+              <Field label="Quantos dias oferecer"
+                hint={"De 1 a " + MAX_DIAS_AGENDA + ". Só entram dias que têm horário livre."}>
+                <input type="number" min="1" max={MAX_DIAS_AGENDA} className="zz-input font-mono"
+                  value={data.dias_oferecidos ?? 5}
+                  data-testid="config-agenda-dias"
+                  onChange={(e) => update({ dias_oferecidos: parseInt(e.target.value) || 1 })} />
+              </Field>
+
+              <Field label="Como as opções aparecem" hint={metaFormato?.ajuda}>
+                <select className="zz-input" value={data.formato || "lista"}
+                  data-testid="config-agenda-formato"
+                  onChange={(e) => update({ formato: e.target.value })}>
+                  {FORMATOS_AGENDA.map((f) => (
+                    <option key={f.valor} value={f.valor}>{f.label}</option>
+                  ))}
+                </select>
+              </Field>
+
+              {(data.formato || "lista") === "lista" && (
+                <Field label="Texto do botão que abre a lista">
+                  <input className="zz-input" value={data.botao_texto || ""}
+                    placeholder="Ver opções"
+                    onChange={(e) => update({ botao_texto: e.target.value })} />
+                </Field>
+              )}
+
+              <div className="border-t border-line pt-4 space-y-4">
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3">
+                  Textos das perguntas
+                </div>
+                <p className="text-[11px] text-ink-3 -mt-2">
+                  Cada campo em branco usa o texto padrão, que aparece como sugestão.
+                </p>
+                {[
+                  ["texto_servico", "Pergunta do serviço", "O que você gostaria de agendar?"],
+                  ["texto_profissional", "Pergunta do profissional", "Com quem você prefere ser atendido?"],
+                  ["texto_dia", "Pergunta do dia", "Para qual dia?"],
+                  ["texto_hora", "Pergunta do horário", "E qual horário fica melhor?"],
+                ].map(([campo, rotulo, exemplo]) => (
+                  <Field key={campo} label={rotulo}>
+                    <input className="zz-input" value={data[campo] || ""} placeholder={exemplo}
+                      data-testid={"config-agenda-" + campo}
+                      onChange={(e) => update({ [campo]: e.target.value })} />
+                  </Field>
+                ))}
+                <Field label="Confirmação depois de marcar"
+                  hint="Use {servico}, {profissional}, {data_completa}, {data} e {hora}.">
+                  <textarea rows={4} className="zz-input"
+                    value={data.texto_confirmado || ""}
+                    placeholder={"Prontinho!\n\n*{servico}*\n{data_completa}\n{profissional}"}
+                    data-testid="config-agenda-confirmado"
+                    onChange={(e) => update({ texto_confirmado: e.target.value })} />
+                </Field>
+                <Field label="Quando não dá para agendar"
+                  hint="Sai por esta mensagem e pela saída “Não agendou”: sem horário livre, ou o contato não escolheu nenhuma opção.">
+                  <textarea rows={3} className="zz-input"
+                    value={data.texto_sem_horario || ""}
+                    placeholder="No momento não encontrei horários disponíveis. Vou passar você para um atendente."
+                    data-testid="config-agenda-sem-horario"
+                    onChange={(e) => update({ texto_sem_horario: e.target.value })} />
+                </Field>
+              </div>
+            </>
+          );
+        })()}
 
         {node.type === "human_handoff" && (
           <Field label="Departamento" hint="Deixe em branco para usar o departamento padrão da conexão de WhatsApp.">

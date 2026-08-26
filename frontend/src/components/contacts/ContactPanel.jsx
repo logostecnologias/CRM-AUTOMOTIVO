@@ -3,6 +3,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
+import { useAcao } from "@/hooks/useAcao";
 import Atividades from "@/components/activities/Atividades";
 import {
   X, PaperPlaneRight, Trash, Prohibit, Check, ChatCircleDots, Megaphone,
@@ -132,7 +133,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     }
   };
 
-  const adicionarNota = async (e) => {
+  const [adicionarNota, anotando] = useAcao(async (e) => {
     e.preventDefault();
     if (!nota.trim()) return;
     try {
@@ -142,7 +143,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
   const removerNota = async (id) => {
     if (!(await confirmToast("Excluir esta anotação?", { confirmLabel: "Excluir" }))) return;
@@ -150,7 +151,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     carregar();
   };
 
-  const criarNegocio = async (e) => {
+  const [criarNegocio, criandoNoFunil] = useAcao(async (e) => {
     e.preventDefault();
     try {
       await api.post("/deals", {
@@ -165,7 +166,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  };
+  });
 
   const excluir = async (modo) => {
     try {
@@ -312,7 +313,9 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
             <input className="zz-input h-8 py-1 text-sm flex-1" data-testid="contact-note-input"
               placeholder="Ligou dia 12, quer proposta até sexta…"
               value={nota} onChange={(e) => setNota(e.target.value)} />
-            <button type="submit" className="zz-btn text-xs py-1"><NotePencil size={13} weight="bold" /></button>
+            <button type="submit" className="zz-btn text-xs py-1" disabled={anotando}>
+              <NotePencil size={13} weight="bold" />
+            </button>
           </form>
           {ficha.notas.length === 0 && <div className="text-xs text-ink-4">Nenhuma anotação.</div>}
           <div className="space-y-2">
@@ -362,7 +365,9 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                     {funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
                 )}
-                <button type="submit" className="zz-btn text-xs py-1">Criar</button>
+                <button type="submit" className="zz-btn text-xs py-1" disabled={criandoNoFunil}>
+                  {criandoNoFunil ? "Criando…" : "Criar"}
+                </button>
                 <button type="button" onClick={() => setCriandoNegocio(null)}
                   className="zz-btn zz-btn-secondary text-xs py-1">Cancelar</button>
               </div>
