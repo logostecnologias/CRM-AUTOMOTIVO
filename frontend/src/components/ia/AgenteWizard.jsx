@@ -6,6 +6,7 @@ import {
   Lightning, TextAlignLeft, Article, Lifebuoy, Flag, Prohibit,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
+import FotosAgente from "./FotosAgente";
 
 // Custo mensal estimado por modelo, para a empresa escolher com numero na
 // frente em vez de pelo nome. A carga de referencia e a de um cliente medio:
@@ -328,6 +329,15 @@ export default function AgenteWizard({
                   Esta é a única fonte de fatos do agente — ele é instruído a não inventar nada que
                   não esteja aqui. Quanto mais completo, menos transferências.
                 </p>
+              </div>
+
+              <div>
+                <Rotulo>Fotos que o agente pode enviar</Rotulo>
+                <p className="text-xs text-ink-2 mb-3 -mt-1">
+                  O agente manda a foto sozinho quando a conversa pedir — o cliente diz que gostou
+                  do carro, ele mostra. Quem escolhe é ele, pela descrição de cada uma.
+                </p>
+                <FotosAgente agente={agente} />
               </div>
             </>
           )}

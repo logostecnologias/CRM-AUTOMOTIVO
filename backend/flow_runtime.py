@@ -220,6 +220,18 @@ async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
                 await _log_msg(db, session_id, tenant_id, "enviada", o["content"])
             elif o["type"] == "menu":
                 await _enviar_menu(db, tenant_id, token, number, session_id, o)
+            elif o["type"] == "media" and o.get("doc"):
+                # Arquivo nosso, já em disco — é o caso das fotos do catálogo do
+                # agente de IA. Lido aos pedaços durante o envio, nunca inteiro
+                # na memória, e o `public_payload` no meta é o que faz a bolha
+                # renderizar a imagem pelo /api/media em vez de um link cru.
+                doc = o["doc"]
+                await wuzapi.send_media(token, number, doc.get("kind", "image"),
+                                        media_store.DataUriStream(doc),
+                                        o.get("caption", ""), filename=doc.get("filename"))
+                await _log_msg(db, session_id, tenant_id, "enviada", o.get("caption", ""),
+                               mtype=doc.get("kind", "image"),
+                               meta={"media": media_store.public_payload(doc)})
             elif o["type"] == "media":
                 # O nó de Mídia guarda uma URL pública; a WuzAPI só aceita o
                 # arquivo embutido, então ele é baixado e convertido aqui.

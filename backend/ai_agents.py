@@ -65,6 +65,22 @@ JANELA_HISTORICO = 20
 # sobrevive a 10 respostas precisa de gente.
 MAX_RESPOSTAS_PADRAO = 10
 
+# Fotos que o agente pode mandar. O teto existe porque a descrição de CADA foto
+# entra no prompt de TODA chamada — é o catálogo que o modelo consulta para
+# decidir o que mostrar. 30 fotos custam ~450 tokens de prefixo, que o cache
+# absorve; 300 encareceriam todas as respostas do mês para atender um caso raro.
+MAX_FOTOS = 30
+
+# Quantas fotos podem sair numa resposta só. Sem teto, um modelo prestativo
+# manda o álbum inteiro e o contato recebe vinte imagens de uma vez — que no
+# WhatsApp é a diferença entre um vendedor e um spammer.
+MAX_FOTOS_POR_RESPOSTA = 5
+
+# `[FOTO:3]`, pelo índice mostrado no prompt e não pelo uuid do arquivo: um uuid
+# gasta ~20 tokens por linha do catálogo e o modelo erra dígito no meio dele. O
+# índice é curto, e o mapeamento de volta acontece aqui.
+RE_FOTO = re.compile(r"\[\s*FOTO\s*:\s*(\d{1,3})\s*\]", re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # Catálogo de escolhas — é o que a tela oferece e o que o prompt consome
@@ -263,6 +279,26 @@ def montar_instrucoes(agente: dict) -> str:
             "transfira sempre que perguntarem qualquer um desses."
         )
 
+    # O catálogo de fotos. A descrição escrita pela empresa é a **única** coisa
+    # que o modelo sabe sobre cada imagem: ele é de texto e não enxerga o
+    # arquivo. Descrição ruim produz foto enviada na hora errada.
+    fotos = agente.get("midias") or []
+    if fotos:
+        linhas = "\n".join(
+            f"[FOTO:{i + 1}] {(f.get('descricao') or 'sem descrição').strip()}"
+            for i, f in enumerate(fotos)
+        )
+        partes.append(
+            "Fotos que você pode enviar:\n" + linhas + "\n\n"
+            "Para enviar, escreva a etiqueta exata (por exemplo [FOTO:1]) dentro da "
+            "sua resposta — o sistema troca a etiqueta pela imagem. Mande foto "
+            "quando a pessoa pedir para ver, ou quando mostrar for o passo natural "
+            f"da conversa; não a cada mensagem. No máximo {MAX_FOTOS_POR_RESPOSTA} "
+            "por resposta.\n"
+            "Só existem as fotos desta lista. Nunca invente um número de etiqueta e "
+            "nunca descreva uma foto que não esteja aqui."
+        )
+
     escalar = [
         "o contato pedir para falar com uma pessoa",
         "o assunto envolver reclamação, cancelamento ou cobrança",
@@ -351,6 +387,35 @@ async def montar_historico(db, session_id: str, tenant_id: str,
     while historico and historico[0]["role"] != "user":
         historico.pop(0)
     return historico
+
+
+def extrair_fotos(texto: str, fotos: list[dict]) -> tuple[str, list[dict]]:
+    """Separa as etiquetas `[FOTO:n]` do texto e devolve as fotos escolhidas.
+
+    Etiqueta fora da faixa é descartada em silêncio junto com o resto da
+    limpeza: é melhor o contato receber a frase sem a imagem do que receber
+    `[FOTO:9]` escrito na bolha — mesmo raciocínio que impede o id de um botão
+    de menu de chegar como texto no histórico.
+
+    A ordem é a que o modelo escreveu; etiqueta repetida vale uma vez só.
+    """
+    if not texto:
+        return texto, []
+    escolhidas: list[dict] = []
+    vistos: set[int] = set()
+    for achado in RE_FOTO.finditer(texto):
+        i = int(achado.group(1)) - 1
+        if 0 <= i < len(fotos) and i not in vistos:
+            vistos.add(i)
+            escolhidas.append(fotos[i])
+            if len(escolhidas) >= MAX_FOTOS_POR_RESPOSTA:
+                break
+    # A limpeza acontece sobre TODAS as etiquetas, inclusive as descartadas
+    # acima por repetição, por estarem fora da faixa ou por passarem do teto.
+    limpo = RE_FOTO.sub("", texto)
+    limpo = re.sub(r"[ \t]{2,}", " ", limpo)
+    limpo = re.sub(r"\n{3,}", "\n\n", limpo).strip()
+    return limpo, escolhidas
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +512,29 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
     if not texto_resposta:
         return await escalar("Agente de IA respondeu vazio — encaminhado para atendimento humano")
 
-    outputs.append({"type": "text", "content": texto_resposta})
+    # As etiquetas saem do texto antes de qualquer coisa: se sobrarem, o contato
+    # lê "[FOTO:1]" na bolha.
+    texto_resposta, fotos = extrair_fotos(texto_resposta, agente.get("midias") or [])
+
+    if not texto_resposta and not fotos:
+        return await escalar("Agente de IA respondeu só com etiquetas inválidas — "
+                             "encaminhado para atendimento humano")
+
+    # O texto vai primeiro e as fotos depois, que é a ordem de uma pessoa
+    # vendendo: "tenho esse Onix 2019, olha só" e então as imagens. A legenda
+    # fica na mensagem de texto, não repetida em cada foto.
+    if texto_resposta:
+        outputs.append({"type": "text", "content": texto_resposta})
+    for foto in fotos:
+        doc = await db.media_files.find_one(
+            {"id": foto.get("media_id"), "tenant_id": tenant_id}, {"_id": 0})
+        if not doc or doc.get("purged_at"):
+            # Arquivo apagado pela retenção ou removido por fora. Perder a foto
+            # não pode derrubar a resposta que já foi montada.
+            logger.warning("Foto %s do agente %s indisponível", foto.get("media_id"), agente.get("id"))
+            continue
+        outputs.append({"type": "media", "doc": doc,
+                        "media_type": doc.get("kind", "image"), "caption": ""})
+
     session["ia_respostas"] = session.get("ia_respostas", 0) + 1
     return RESPONDEU

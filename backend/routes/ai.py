@@ -18,7 +18,7 @@ para contatos, funil e agenda — não para o segredo que paga a conta.
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from db import get_db
@@ -27,6 +27,7 @@ import ai_agents
 import ai_client
 import ai_credentials
 import ai_runtime
+import media_store
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -375,3 +376,121 @@ async def ver_prompt(agent_id: str, user=Depends(require_tenant_admin)):
     if not agente:
         raise HTTPException(status_code=404, detail="Agente não encontrado")
     return {"instrucoes": ai_agents.montar_instrucoes(agente)}
+
+
+# ---------------------------------------------------------------------------
+# Fotos que o agente pode enviar
+# ---------------------------------------------------------------------------
+#
+# Vivem embutidas no documento do agente (`midias`), e não numa coleção própria
+# — o oposto da decisão tomada em `contact_notes`. O motivo é o inverso do de
+# lá: aquela lista cresce sem teto e não é necessária na leitura quente, esta é
+# limitada a MAX_FOTOS e é lida em TODA mensagem, porque é dela que sai o
+# catálogo no prompt. Uma coleção separada custaria uma consulta extra por
+# mensagem recebida para buscar o que sempre é preciso.
+#
+# O binário vai para o `media_store` como qualquer outro arquivo do sistema, e
+# é o mesmo `/api/media/{id}` que serve a prévia na tela de configuração.
+
+
+class MidiaPatch(BaseModel):
+    descricao: str
+
+
+async def _agente_do_tenant(db, agent_id: str, tenant_id: str) -> dict:
+    agente = await db.ai_agents.find_one({"id": agent_id, "tenant_id": tenant_id}, {"_id": 0})
+    if not agente:
+        raise HTTPException(status_code=404, detail="Agente não encontrado")
+    return agente
+
+
+@router.post("/agents/{agent_id}/midias")
+async def subir_foto(agent_id: str, file: UploadFile = File(...),
+                     descricao: str = Form(""), user=Depends(require_tenant_admin)):
+    """Sobe uma foto para o catálogo do agente.
+
+    A descrição é obrigatória de propósito: ela é a **única** coisa que o
+    modelo sabe sobre a imagem — ele é de texto e não enxerga o arquivo. Uma
+    foto sem descrição é uma foto que o agente nunca vai saber quando mandar,
+    e aceitar o upload assim só produziria a frustração mais tarde.
+    """
+    if not descricao.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Descreva a foto — é por essa descrição que o agente decide quando enviá-la.")
+
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    midias = agente.get("midias") or []
+    if len(midias) >= ai_agents.MAX_FOTOS:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Máximo de {ai_agents.MAX_FOTOS} fotos por agente. A descrição de cada "
+                    "uma vai no prompt de toda mensagem, então a lista precisa ser curta."))
+
+    kind = media_store.classify(file.content_type, file.filename)
+    if kind != "image":
+        raise HTTPException(status_code=400, detail="Envie uma imagem (JPG, PNG ou WebP).")
+
+    try:
+        doc = await media_store.store_stream(
+            db, user["tenant_id"], None, user["id"],
+            file.filename, file.content_type, file.read, kind="image")
+    except media_store.MediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    foto = {
+        "id": str(uuid.uuid4()),
+        "media_id": doc["id"],
+        "descricao": descricao.strip(),
+        "filename": doc.get("filename"),
+        "created_at": _now(),
+    }
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$push": {"midias": foto}, "$set": {"updated_at": _now()}})
+    return foto
+
+
+@router.patch("/agents/{agent_id}/midias/{midia_id}")
+async def editar_foto(agent_id: str, midia_id: str, body: MidiaPatch,
+                      user=Depends(require_tenant_admin)):
+    """Corrige a descrição. É a operação mais provável depois de ver o agente
+    mandar a foto na hora errada — e a correção vale já na próxima mensagem."""
+    if not body.descricao.strip():
+        raise HTTPException(status_code=400, detail="A descrição não pode ficar vazia")
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+
+    # Reescreve a lista inteira em vez de usar o operador posicional
+    # (`midias.$.descricao`). A lista tem no máximo MAX_FOTOS itens, então
+    # regravá-la é barato — e o posicional casa pelo filtro, o que torna o
+    # comportamento dependente de um detalhe do Mongo difícil de enxergar aqui.
+    midias = agente.get("midias") or []
+    achou = False
+    for m in midias:
+        if m.get("id") == midia_id:
+            m["descricao"] = body.descricao.strip()
+            achou = True
+    if not achou:
+        raise HTTPException(status_code=404, detail="Foto não encontrada")
+
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$set": {"midias": midias, "updated_at": _now()}})
+    return {"ok": True}
+
+
+@router.delete("/agents/{agent_id}/midias/{midia_id}")
+async def remover_foto(agent_id: str, midia_id: str, user=Depends(require_tenant_admin)):
+    """Tira a foto do catálogo. O arquivo em si fica para a rotina de retenção:
+    ele pode estar referenciado por mensagens já enviadas, e apagá-lo agora
+    deixaria bolhas quebradas no histórico de quem já recebeu."""
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    res = await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$pull": {"midias": {"id": midia_id}}, "$set": {"updated_at": _now()}})
+    if res.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Foto não encontrada")
+    return {"ok": True}

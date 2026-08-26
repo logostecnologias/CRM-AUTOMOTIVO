@@ -15,8 +15,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
+import tempfile
+# As fotos do agente sao arquivos de verdade em disco: `DataUriStream` abre o
+# arquivo e levanta se ele nao existir, entao o teste precisa de um MEDIA_DIR.
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x"}.items():
+             "WUZAPI_GATEWAY_URL": "http://x",
+             "MEDIA_DIR": tempfile.mkdtemp(prefix="zz-teste-midia-")}.items():
     os.environ.setdefault(k, v)
 
 from cryptography.fernet import Fernet
@@ -31,6 +35,7 @@ db_mod.get_db = lambda: DB
 
 import ai_agents
 import ai_client
+import media_store
 import ai_runtime
 import flow_runtime
 import routes.ai as rai
@@ -43,7 +48,11 @@ async def fake_send_text(token, numero, texto):
     return {"ok": True}
 
 
-async def fake_send_media(*a, **kw):
+MIDIAS_ENVIADAS: list[tuple] = []
+
+
+async def fake_send_media(token, numero, tipo, media, caption="", filename=None):
+    MIDIAS_ENVIADAS.append((numero, tipo, filename, caption))
     return {"ok": True}
 
 
@@ -114,6 +123,30 @@ async def erro(coro):
     return None, None
 
 
+def _um_pedaco(dados: bytes):
+    """`read_chunk` no formato que `store_stream` espera: devolve tudo de uma
+    vez e depois vazio."""
+    restante = {"b": dados}
+
+    async def ler(_n=None):
+        b, restante["b"] = restante["b"], b""
+        return b
+
+    return ler
+
+
+class _upload:
+    """UploadFile o bastante para `store_stream` e para a checagem de tipo."""
+
+    def __init__(self, filename, content_type, dados=b"conteudo"):
+        self.filename = filename
+        self.content_type = content_type
+        self._ler = _um_pedaco(dados)
+
+    async def read(self, n=None):
+        return await self._ler(n)
+
+
 async def receber(texto, numero=NUM, conn=CONN_A, media=None):
     """Uma mensagem chegando do WhatsApp."""
     global _msg_seq
@@ -141,6 +174,7 @@ async def semear(*, agente=None, com_bot=False, bot_trigger="first_message",
                  keyword=None):
     DB._cols.clear()
     ENVIADOS.clear()
+    MIDIAS_ENVIADAS.clear()
     IA.chamadas.clear()
     IA.erro = None
     IA.proxima = "Claro, posso ajudar com isso."
@@ -648,6 +682,145 @@ async def etapa_credencial_por_agente():
         os.environ.pop("AI_PLATFORM_PROVIDER", None)
 
 
+async def etapa_fotos():
+    print()
+    print("[o agente manda foto na hora certa]")
+
+    # --- o extrator, sem rede e sem banco ---
+    fotos = [{"id": f"f{i}", "media_id": f"m{i}", "descricao": f"foto {i}"} for i in range(1, 4)]
+
+    limpo, escolhidas = ai_agents.extrair_fotos("Olha esse Onix [FOTO:2] que beleza", fotos)
+    check("a etiqueta sai do texto", "[FOTO:2]" not in limpo and "FOTO" not in limpo, limpo)
+    check("sobra a frase limpa, sem espaco duplo", limpo == "Olha esse Onix que beleza", repr(limpo))
+    check("e a foto certa foi escolhida", [f["id"] for f in escolhidas] == ["f2"], escolhidas)
+
+    _, varias = ai_agents.extrair_fotos("[FOTO:1][FOTO:3]", fotos)
+    check("varias etiquetas viram varias fotos",
+          [f["id"] for f in varias] == ["f1", "f3"], varias)
+
+    _, repetida = ai_agents.extrair_fotos("[FOTO:1] e de novo [FOTO:1]", fotos)
+    check("etiqueta repetida vale uma vez", len(repetida) == 1, repetida)
+
+    limpo, fora = ai_agents.extrair_fotos("Veja [FOTO:9] e [FOTO:0]", fotos)
+    check("etiqueta fora da faixa nao vira foto", fora == [], fora)
+    check("e some do texto em vez de chegar ao contato",
+          "FOTO" not in limpo and limpo == "Veja e", repr(limpo))
+
+    muitas = [{"id": f"f{i}", "media_id": f"m{i}", "descricao": "x"} for i in range(1, 11)]
+    _, cortadas = ai_agents.extrair_fotos(" ".join(f"[FOTO:{i}]" for i in range(1, 11)), muitas)
+    check("o teto por resposta e respeitado",
+          len(cortadas) == ai_agents.MAX_FOTOS_POR_RESPOSTA, len(cortadas))
+
+    _, minusculo = ai_agents.extrair_fotos("[foto: 2 ]", fotos)
+    check("a etiqueta e reconhecida com espaco e minuscula",
+          [f["id"] for f in minusculo] == ["f2"], minusculo)
+
+    # --- o catalogo no prompt ---
+    agente = {"nome": "Bia", "tipo": "vendas", "midias": [
+        {"id": "f1", "media_id": "m1", "descricao": "Onix 2019 prata, frente"},
+        {"id": "f2", "media_id": "m2", "descricao": "Onix 2019 prata, interior"},
+    ]}
+    prompt = ai_agents.montar_instrucoes(agente)
+    check("as fotos aparecem numeradas no prompt",
+          "[FOTO:1] Onix 2019 prata, frente" in prompt
+          and "[FOTO:2] Onix 2019 prata, interior" in prompt, prompt)
+    check("com a regra de nao inventar etiqueta", "Nunca invente um número" in prompt)
+    check("e o teto por resposta dito ao modelo",
+          str(ai_agents.MAX_FOTOS_POR_RESPOSTA) in prompt)
+    check("agente sem foto nao ganha bloco de fotos alguma",
+          "Fotos que você pode enviar" not in ai_agents.montar_instrucoes(
+              {"nome": "X", "tipo": "geral"}))
+
+    # --- ponta a ponta: a foto sai de verdade pelo WhatsApp ---
+    await semear(agente={})
+    doc = await media_store.store_stream(
+        DB, TENANT, None, "u-1", "onix.jpg", "image/jpeg",
+        _um_pedaco(b"conteudo-da-foto"), kind="image")
+    await DB.ai_agents.update_one({"id": "ag-1"}, {"$set": {"midias": [
+        {"id": "f1", "media_id": doc["id"], "descricao": "Onix 2019 prata, frente"}]}})
+
+    IA.proxima = "Tenho esse Onix 2019 com 45 mil km. [FOTO:1]"
+    await receber("tem onix?")
+
+    check("o texto saiu sem a etiqueta",
+          ENVIADOS and ENVIADOS[-1][1] == "Tenho esse Onix 2019 com 45 mil km.", ENVIADOS)
+    check("e a foto saiu junto", len(MIDIAS_ENVIADAS) == 1, MIDIAS_ENVIADAS)
+    check("como imagem, com o arquivo certo",
+          MIDIAS_ENVIADAS[0][1] == "image" and MIDIAS_ENVIADAS[0][2] == "onix.jpg",
+          MIDIAS_ENVIADAS[0])
+
+    s_ = await sessao()
+    msgs = await DB.messages_log.find(
+        {"session_id": s_["id"], "direction": "enviada"}).to_list(10)
+    check("o historico guarda a imagem como imagem",
+          any(m["type"] == "image" and m.get("meta", {}).get("media", {}).get("id") == doc["id"]
+              for m in msgs), msgs)
+    check("a conversa continua com o agente, nao foi para a fila",
+          s_["status_atendimento"] == "bot", s_["status_atendimento"])
+
+    # --- foto apagada nao derruba a resposta ---
+    await semear(agente={})
+    await DB.ai_agents.update_one({"id": "ag-1"}, {"$set": {"midias": [
+        {"id": "f1", "media_id": "nao-existe", "descricao": "sumida"}]}})
+    IA.proxima = "Segue a foto [FOTO:1]"
+    await receber("manda a foto")
+    check("texto entregue mesmo com a foto indisponivel",
+          ENVIADOS and ENVIADOS[-1][1] == "Segue a foto", ENVIADOS)
+    check("e nada de imagem foi enviado", MIDIAS_ENVIADAS == [], MIDIAS_ENVIADAS)
+
+    # --- resposta so com etiqueta invalida vai para a fila, nao vazia ---
+    await semear(agente={})
+    IA.proxima = "[FOTO:7]"
+    await receber("manda foto")
+    s_ = await sessao()
+    check("resposta so com etiqueta invalida escala",
+          s_["status_atendimento"] == "aguardando", s_["status_atendimento"])
+    check("sem mandar bolha vazia", ENVIADOS == [], ENVIADOS)
+
+    IA.proxima = "Claro, posso ajudar com isso."
+
+
+async def etapa_upload_de_fotos():
+    print()
+    print("[subir foto pelo painel]")
+    await semear(agente={})
+
+    st, det = await erro(rai.subir_foto(
+        "ag-1", _upload("a.jpg", "image/jpeg"), "", ADMIN))
+    check("foto sem descricao e recusada", st == 400 and "Descreva" in det, (st, det))
+
+    st, det = await erro(rai.subir_foto(
+        "ag-1", _upload("contrato.pdf", "application/pdf"), "um pdf", ADMIN))
+    check("arquivo que nao e imagem e recusado", st == 400, (st, det))
+
+    foto = await rai.subir_foto("ag-1", _upload("onix.jpg", "image/jpeg"),
+                                "Onix 2019 prata", ADMIN)
+    check("a foto entra no agente", foto["descricao"] == "Onix 2019 prata", foto)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("guardada dentro do documento do agente", len(doc["midias"]) == 1, doc.get("midias"))
+    check("e ja aparece no prompt",
+          "Onix 2019 prata" in ai_agents.montar_instrucoes(doc))
+
+    await rai.editar_foto("ag-1", foto["id"], rai.MidiaPatch(descricao="Onix 2019 preto"), ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("a descricao pode ser corrigida",
+          doc["midias"][0]["descricao"] == "Onix 2019 preto", doc["midias"])
+
+    # Empresa B nao alcanca o agente de A.
+    outro = {"id": "u-b", "tenant_id": "t-outro", "role": "tenant_admin",
+             "name": "B", "email": "b@x.com"}
+    st, _ = await erro(rai.subir_foto("ag-1", _upload("x.jpg", "image/jpeg"), "x", outro))
+    check("outra empresa nao sobe foto no agente alheio", st == 404, st)
+    st, _ = await erro(rai.remover_foto("ag-1", foto["id"], outro))
+    check("nem remove", st == 404, st)
+
+    await rai.remover_foto("ag-1", foto["id"], ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("removida do catalogo", doc["midias"] == [], doc["midias"])
+    check("mas o arquivo fica para a retencao (historico de quem ja recebeu)",
+          await DB.media_files.count_documents({"tenant_id": TENANT}) >= 1)
+
+
 # ---------------------------------------------------------------------------
 
 def test_suite():
@@ -671,5 +844,7 @@ def test_suite():
         await etapa_historico()
         await etapa_contadores_do_cartao()
         await etapa_credencial_por_agente()
+        await etapa_fotos()
+        await etapa_upload_de_fotos()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

@@ -213,6 +213,21 @@ class Colecao:
                             break
                     if isinstance(cur, dict):
                         cur.pop(partes[-1], None)
+            elif op == "$push":
+                # Campo ausente vira lista com um item, igual ao Mongo.
+                for k, v in campos.items():
+                    _set(doc, k, list(_get(doc, k) or []) + [v])
+            elif op == "$pull":
+                # So a forma usada no projeto: `{"campo": {"chave": valor}}`,
+                # que remove os itens do array cujos campos casam todos.
+                for k, cond in campos.items():
+                    atual = _get(doc, k) or []
+                    if isinstance(cond, dict):
+                        _set(doc, k, [item for item in atual
+                                      if not (isinstance(item, dict)
+                                              and all(item.get(ck) == cv for ck, cv in cond.items()))])
+                    else:
+                        _set(doc, k, [item for item in atual if item != cond])
             else:
                 raise NotImplementedError(op)
 
