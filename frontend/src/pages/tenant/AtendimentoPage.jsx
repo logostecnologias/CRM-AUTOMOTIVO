@@ -65,7 +65,7 @@ export default function AtendimentoPage() {
     (user?.role !== "agent" || active?.atendente_id === user?.id);
 
   return (
-    <div className="h-screen flex flex-col" data-testid="atendimento-page">
+    <div className="h-full flex flex-col" data-testid="atendimento-page">
       <div className="border-b border-line-strong bg-surface px-6 py-4 flex items-center justify-between">
         <div>
           <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3">Central</div>

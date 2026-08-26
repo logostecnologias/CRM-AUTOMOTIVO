@@ -104,7 +104,7 @@ function EditorInner({ flow, bot, connections, onBotChange }) {
   const selectedNode = nodes.find((n) => n.id === selectedId);
 
   return (
-    <div className="h-screen flex flex-col" data-testid="flow-editor">
+    <div className="h-full flex flex-col" data-testid="flow-editor">
       <div className="h-14 border-b border-line-strong bg-surface flex items-center justify-between px-4">
         <div className="flex items-center gap-4">
           <button data-testid="back-btn" onClick={() => nav("/app/bots")} className="p-1.5 hover:bg-surface-2">

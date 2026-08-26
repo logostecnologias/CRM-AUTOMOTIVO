@@ -108,6 +108,27 @@ async def audience_count(db, tenant_id: str, publico: dict) -> int:
     return await db.contacts.count_documents(audience_query(tenant_id, publico))
 
 
+# ---------- Consumo do mês ----------
+
+async def disparos_no_mes(db, tenant_id: str) -> int:
+    """Mensagens de campanha entregues no mês corrente.
+
+    Mora aqui, e não na rota, porque tem dois leitores: o teto do plano, que
+    recusa a campanha que estouraria (`routes/campaigns._enforce_cota_mensal`),
+    e a tela de Configurações, que mostra o quanto já foi usado. Se cada um
+    contasse do seu jeito, o painel diria "1.240 de 5.000" enquanto o disparo
+    era recusado — e não haveria como saber qual dos dois está certo.
+
+    Conta `enviado`, não campanha criada: o que custa é mensagem entregue.
+    """
+    inicio = datetime.now(timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    ).isoformat()
+    return await db.campaign_recipients.count_documents(
+        {"tenant_id": tenant_id, "status": "enviado", "sent_at": {"$gte": inicio}}
+    )
+
+
 class CampaignError(Exception):
     pass
 

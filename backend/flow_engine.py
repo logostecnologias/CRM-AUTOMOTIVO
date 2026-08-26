@@ -11,7 +11,108 @@ import asyncio
 import httpx
 from datetime import datetime, timezone
 
+import wuzapi_client as wuzapi
+
 _test_sessions: dict[str, dict] = {}
+
+
+# Como o nó de Menu se apresenta no WhatsApp. `texto` é o formato original
+# (lista numerada, o contato digita o número) e continua sendo o padrão: nó de
+# Menu sem `formato` gravado é o de um fluxo publicado antes desta versão, e ele
+# tem que continuar se comportando igual.
+FORMATO_TEXTO = "texto"
+FORMATO_BOTOES = "botoes"
+FORMATO_LISTA = "lista"
+FORMATOS = (FORMATO_TEXTO, FORMATO_BOTOES, FORMATO_LISTA)
+
+
+def validar_menu(data: dict) -> list[str]:
+    """Problemas que impediriam a mensagem interativa de chegar ao contato.
+
+    O WhatsApp não recusa com erro: ele descarta a mensagem em silêncio. E um
+    Menu descartado é pior que um menu feio, porque o fluxo fica esperando uma
+    resposta que o contato nunca foi convidado a dar. Por isso a lista é
+    checada em dois lugares — na publicação do fluxo (routes/flows.py, que
+    recusa) e no envio (flow_runtime, que degrada para texto numerado em vez de
+    perder a pergunta).
+
+    Formato `texto` nunca tem problema: é só uma mensagem de texto.
+    """
+    formato = data.get("formato") or FORMATO_TEXTO
+    if formato == FORMATO_TEXTO:
+        return []
+
+    opcoes = data.get("options") or []
+    problemas: list[str] = []
+    if not opcoes:
+        problemas.append("menu interativo sem nenhuma opção")
+
+    def longos(limite, campo):
+        return [(o.get(campo) or "") for o in opcoes if len(o.get(campo) or "") > limite]
+
+    if formato == FORMATO_BOTOES:
+        if len(opcoes) > wuzapi.MAX_BOTOES:
+            problemas.append(
+                f"botões aceitam no máximo {wuzapi.MAX_BOTOES} opções "
+                f"(este menu tem {len(opcoes)}) — use o formato Lista")
+        passou = longos(wuzapi.LIMITE_ROTULO_BOTAO, "label")
+        if passou:
+            problemas.append(
+                f"rótulo de botão passa de {wuzapi.LIMITE_ROTULO_BOTAO} "
+                f"caracteres: {', '.join(passou)}")
+    elif formato == FORMATO_LISTA:
+        if len(opcoes) > wuzapi.MAX_ITENS_LISTA:
+            problemas.append(
+                f"uma lista aceita no máximo {wuzapi.MAX_ITENS_LISTA} opções "
+                f"(este menu tem {len(opcoes)})")
+        if not (data.get("botao_texto") or "").strip():
+            problemas.append("a lista precisa do texto do botão que abre as opções")
+        passou = longos(wuzapi.LIMITE_ROTULO_ITEM, "label")
+        if passou:
+            problemas.append(
+                f"opção de lista passa de {wuzapi.LIMITE_ROTULO_ITEM} "
+                f"caracteres: {', '.join(passou)}")
+    else:
+        problemas.append(f"formato de menu desconhecido: {formato}")
+    return problemas
+
+
+def ids_das_opcoes(opcoes: list[dict]) -> list[str]:
+    """O id de cada opção — que é também o `sourceHandle` da saída dela no
+    editor, e por isso é o que vai como id do botão/linha no WhatsApp."""
+    return [o.get("id") or f"opt_{i}" for i, o in enumerate(opcoes)]
+
+
+def resolver_escolha_menu(opcoes: list[dict], texto: str,
+                          escolha_id: str | None = None) -> str | None:
+    """Qual saída do Menu a resposta do contato escolheu, ou None se nenhuma.
+
+    Ordem: o id que veio do botão/lista, o número digitado, o rótulo digitado.
+
+    O id vem primeiro porque é o único confiável. A WuzAPI corta o rótulo do
+    botão em 20 caracteres, então o texto que volta de um botão longo nunca é
+    igual ao rótulo configurado — casar por rótulo falharia justamente nos
+    menus mais descritivos. O número e o rótulo continuam valendo: o contato
+    pode digitar em vez de tocar, e é assim que o formato `texto` funciona.
+
+    Um id que não está mais entre as opções (botão de um menu anterior da
+    conversa, ou opção apagada depois do envio) conta como resposta inválida,
+    não como acerto — é o caminho "invalid" do nó que trata isso.
+    """
+    ids = ids_das_opcoes(opcoes)
+    if escolha_id and escolha_id in ids:
+        return escolha_id
+
+    m = (texto or "").strip()
+    if m.isdigit():
+        i = int(m) - 1
+        if 0 <= i < len(ids):
+            return ids[i]
+    if m:
+        for i, o in enumerate(opcoes):
+            if (o.get("label") or "").strip().lower() == m.lower():
+                return ids[i]
+    return None
 
 
 def _now():
@@ -67,12 +168,42 @@ async def _process_node(node, flow, session, outputs):
     if ntype == "menu":
         question = _interp(data.get("text", ""), variables)
         options = data.get("options", [])
+        # Rótulo de opção não passa por _interp de propósito: é ele que o
+        # resolvedor coteja quando o contato digita em vez de tocar, e
+        # interpolar aqui faria o texto exibido divergir do texto casado.
         outputs.append({
             "type": "menu",
             "content": question,
+            "formato": data.get("formato") or FORMATO_TEXTO,
+            "titulo": _interp(data.get("titulo", ""), variables),
+            "rodape": _interp(data.get("rodape", ""), variables),
+            "botao_texto": _interp(data.get("botao_texto", ""), variables),
+            "titulo_secao": _interp(data.get("titulo_secao", ""), variables),
+            # `options` (só rótulos) continua no output porque é o que o
+            # formato texto usa e o que já era consumido; `itens` carrega o id,
+            # que é o que a mensagem interativa precisa.
             "options": [o.get("label", "") for o in options],
+            "itens": [{"id": oid, "label": o.get("label", ""),
+                       "descricao": o.get("descricao", "")}
+                      for oid, o in zip(ids_das_opcoes(options), options)],
+            # O formato pedido vai junto com o que impede de usá-lo: é quem
+            # envia (e o chat de teste) que decide degradar, para o problema
+            # aparecer onde dá para consertar em vez de virar mensagem perdida.
+            "problemas": validar_menu(data),
         })
-        session["awaiting"] = {"node_id": node["id"]}
+        # Os rótulos vão guardados junto do `awaiting`, indexados pelo id.
+        #
+        # Não é cache: é a única fonte confiável do que o contato tocou. A
+        # resposta de um botão chega do WhatsApp com o id e, na prática, **sem
+        # rótulo nenhum** — e o que sobrava para gravar no histórico era o id
+        # ("t2_dur"), um identificador interno no lugar da frase que o contato
+        # leu na tela. Aqui o rótulo é o do próprio menu que fez a pergunta —
+        # a única fonte que existe, já que o payload não traz nenhuma.
+        session["awaiting"] = {
+            "node_id": node["id"],
+            "rotulos": {oid: o.get("label", "")
+                        for oid, o in zip(ids_das_opcoes(options), options)},
+        }
         return None  # wait for user input
 
     if ntype == "save_variable":
@@ -185,7 +316,7 @@ async def _run_from(node_id, flow, session, outputs, guard=0):
         guard += 1
 
 
-async def run_test_message(flow, session_id, message, start):
+async def run_test_message(flow, session_id, message, start, escolha_id=None):
     outputs: list[dict] = []
     if start or not session_id or session_id not in _test_sessions:
         session_id = str(uuid.uuid4())
@@ -214,19 +345,10 @@ async def run_test_message(flow, session_id, message, start):
         menu_node = _find_node(flow["nodes"], awaiting["node_id"])
         if menu_node and menu_node["type"] == "menu":
             options = menu_node.get("data", {}).get("options", [])
-            handle = None
-            msg = (message or "").strip()
-            # try number
-            if msg.isdigit():
-                idx = int(msg) - 1
-                if 0 <= idx < len(options):
-                    handle = options[idx].get("id") or f"opt_{idx}"
-            # try label match
-            if handle is None:
-                for i, o in enumerate(options):
-                    if o.get("label", "").strip().lower() == msg.lower():
-                        handle = o.get("id") or f"opt_{i}"
-                        break
+            # Mesmo resolvedor do caminho real (flow_runtime): o chat de teste
+            # existe para provar o fluxo publicado, e duas regras de
+            # correspondência diferentes fariam ele provar outra coisa.
+            handle = resolver_escolha_menu(options, message, escolha_id)
             if handle is None:
                 # invalid response -> fallback handle
                 next_id = _find_next(flow["edges"], menu_node["id"], "invalid")

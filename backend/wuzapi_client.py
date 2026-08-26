@@ -27,11 +27,19 @@ Endpoint shape (WuzAPI, via gateway):
   POST   /chat/send/document        — {Phone, Document, FileName, Caption}
   POST   /chat/send/video           — {Phone, Video, Caption}
   POST   /chat/send/sticker         — {Phone, Sticker}
+  POST   /chat/send/buttons         — {Phone, Body, Title, Footer, Buttons:[{type,id,title}]}
+  POST   /chat/send/list            — {Phone, Desc, ButtonText, TopText, FooterText,
+                                       Sections:[{title, rows:[{title, desc, RowId}]}]}
   POST   /chat/downloadimage        — mídia recebida: {Url, DirectPath, MediaKey,
                                        Mimetype, FileSHA256, FileEncSHA256, FileLength}
   POST   /chat/downloadvideo        — idem
   POST   /chat/downloadaudio        — idem
   POST   /chat/downloaddocument     — idem
+
+As duas últimas são as mensagens interativas: botão de resposta rápida e
+lista de opções. Nenhuma das duas está documentada no API.md da WuzAPI — a
+forma dos campos vem do handler dela, e as chaves de id/rótulo mudam de grafia
+entre versões e forks, daí a redundância deliberada em send_buttons/send_list.
 
 Media fields (Image/Audio/Document/Video/Sticker) carry the file itself as a
 base64 data URI ("data:image/png;base64,..."), not a URL — WuzAPI does not
@@ -301,3 +309,101 @@ async def send_media(token: str, number: str, mediatype: str, media,
         return await _request("POST", endpoint, _token_headers(token), {**body, field: media})
     return await _request("POST", endpoint, _token_headers(token),
                           body=_CorpoStream(body, field, media))
+
+
+# ---------------------------------------------------------------------------
+# Mensagens interativas: botão de resposta rápida e lista de opções.
+#
+# Os tetos abaixo são do WhatsApp, não da WuzAPI: o handler dela não conta
+# botão nem linha, e o WhatsApp não devolve erro quando o teto é ultrapassado —
+# a mensagem simplesmente não chega ao contato. Como um Menu deixa a conversa
+# esperando resposta, uma mensagem que não chega trava a conversa sem ninguém
+# perceber. Por isso quem valida é o nosso lado (flow_engine.validar_menu, na
+# publicação do fluxo) e quem envia degrada para texto numerado.
+MAX_BOTOES = 3
+MAX_ITENS_LISTA = 10
+LIMITE_ROTULO_BOTAO = 20
+LIMITE_ROTULO_ITEM = 24
+LIMITE_DESC_ITEM = 72
+LIMITE_BOTAO_LISTA = 20
+
+
+def _ids_do_item(item_id: str) -> dict:
+    """O id da opção nas duas grafias que o handler da WuzAPI aceita.
+
+    Ele resolve o campo por cadeia de fallback (`id` → `buttonId`,
+    `RowId` → `rowId` → ...), e qual delas é a canônica muda entre versões.
+    Mandar as duas é o mesmo raciocínio do `_pick` no webhook: errar a chave
+    aqui não dá erro nenhum, só faz o id voltar vazio na resposta do contato —
+    e aí a escolha dele não casa com nenhuma saída do nó.
+
+    O rótulo, ao contrário, vai numa chave só (`title`): é a que o handler
+    demonstravelmente usa, e duplicar rótulo tem consequência visível (um
+    fork que concatenasse mostraria o texto repetido no botão), enquanto
+    duplicar id não tem nenhuma.
+    """
+    return {"id": item_id, "buttonId": item_id}
+
+
+async def send_buttons(token: str, number: str, body: str, itens: list[dict],
+                       titulo: str = "", rodape: str = "") -> dict:
+    """Botões de resposta rápida (até MAX_BOTOES).
+
+    `itens` é uma lista de {"id": ..., "label": ...}. O id é o que volta no
+    webhook quando o contato toca no botão, e no ZappZen ele é o próprio
+    `sourceHandle` da saída do nó de Menu — então a resposta já aponta para a
+    aresta certa, sem depender de casar texto.
+
+    O rótulo é cortado em LIMITE_ROTULO_BOTAO pela própria WuzAPI. O corte é
+    feito aqui também, de propósito: assim o que fica no histórico é o que o
+    contato viu, e não um rótulo mais longo que nunca chegou à tela dele. O
+    `rstrip` é porque o corte cai no meio de uma palavra na maioria das vezes,
+    e sobra um espaço no fim do botão.
+    """
+    payload = {
+        "Phone": number,
+        "Body": body,
+        "Buttons": [
+            {"type": "reply",
+             "title": (it.get("label") or "")[:LIMITE_ROTULO_BOTAO].rstrip(),
+             **_ids_do_item(it["id"])}
+            for it in itens[:MAX_BOTOES]
+        ],
+    }
+    if titulo:
+        payload["Title"] = titulo
+    if rodape:
+        payload["Footer"] = rodape
+    return await _request("POST", "/chat/send/buttons", _token_headers(token), payload)
+
+
+async def send_list(token: str, number: str, body: str, texto_botao: str,
+                    itens: list[dict], titulo: str = "", rodape: str = "",
+                    titulo_secao: str = "") -> dict:
+    """Lista de opções (até MAX_ITENS_LISTA), aberta por um botão.
+
+    `texto_botao` é o rótulo do botão que abre a lista ("Ver opções",
+    "Agendamentos"...). Cada item de `itens` aceita `descricao`, que aparece
+    como segunda linha da opção.
+
+    Uma seção só: o WhatsApp permite agrupar as opções em várias seções com
+    título, mas o editor não expõe isso ainda — `titulo_secao` é o título
+    dessa seção única, e fica vazio quando não há um.
+    """
+    linhas = [
+        {"title": (it.get("label") or "")[:LIMITE_ROTULO_ITEM].rstrip(),
+         "desc": (it.get("descricao") or "")[:LIMITE_DESC_ITEM].rstrip(),
+         "RowId": it["id"], "rowId": it["id"]}
+        for it in itens[:MAX_ITENS_LISTA]
+    ]
+    payload = {
+        "Phone": number,
+        "Desc": body,
+        "ButtonText": (texto_botao or "")[:LIMITE_BOTAO_LISTA],
+        "Sections": [{"title": titulo_secao, "rows": linhas}],
+    }
+    if titulo:
+        payload["TopText"] = titulo
+    if rodape:
+        payload["FooterText"] = rodape
+    return await _request("POST", "/chat/send/list", _token_headers(token), payload)

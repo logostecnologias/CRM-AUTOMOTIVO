@@ -43,7 +43,7 @@ export default function LoginPage() {
             Construa bots de WhatsApp<br/>com um <span className="text-info">canvas visual.</span>
           </h1>
           <p className="text-ink-2 text-base leading-relaxed max-w-md">
-            Multi-tenant, blocos arrastáveis, integrações via webhook e atendimento humano quando o robô não conseguir resolver.
+            Várias empresas num só painel, blocos arrastáveis, integrações via webhook e atendimento humano quando o robô não conseguir resolver.
           </p>
         </div>
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from db import get_db
 from auth import require_tenant_admin
-from flow_engine import run_test_message
+from flow_engine import run_test_message, validar_menu
 from bot_binding import sync_bot_trigger
 
 router = APIRouter(prefix="/api/flows", tags=["flows"])
@@ -78,6 +78,23 @@ async def publish_flow(flow_id: str, user=Depends(require_tenant_admin)):
     if dangling:
         raise HTTPException(status_code=400, detail=f"Existem {len(dangling)} nó(s) sem conexão de saída")
 
+    # Menu em formato interativo (botões/lista) fora dos tetos do WhatsApp: a
+    # publicação é recusada aqui porque o WhatsApp **não** devolve erro nesse
+    # caso — ele descarta a mensagem, e o fluxo fica esperando uma resposta que
+    # o contato nunca foi convidado a dar. Recusar na publicação é o último
+    # ponto em que isso ainda não chegou a um contato real. (No envio existe a
+    # rede de segurança de cair para texto numerado, para o fluxo publicado
+    # antes desta checagem — ou editado por fora — não perder a pergunta.)
+    problemas = []
+    for n in flow.get("nodes", []):
+        if n.get("type") != "menu":
+            continue
+        dados = n.get("data") or {}
+        nome = dados.get("label") or "Menu"
+        problemas += [f"{nome}: {p}" for p in validar_menu(dados)]
+    if problemas:
+        raise HTTPException(status_code=400, detail=" · ".join(problemas))
+
     await db.flows.update_one(
         {"id": flow_id},
         {"$set": {"published_at": _now(), "version": flow.get("version", 1) + 1}},
@@ -100,6 +117,10 @@ class TestIn(BaseModel):
     session_id: str | None = None
     message: str | None = None
     start: bool = False
+    # Id da opção quando o teste "toca" num botão em vez de digitar — é o que
+    # faz o chat do editor exercitar o mesmo caminho de uma resposta real de
+    # botão, em vez de só o de quem digita o número.
+    escolha_id: str | None = None
 
 
 @router.post("/{flow_id}/test")
@@ -109,4 +130,5 @@ async def test_flow(flow_id: str, body: TestIn, user=Depends(require_tenant_admi
     flow = await db.flows.find_one({"id": flow_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
     if not flow:
         raise HTTPException(status_code=404, detail="Fluxo não encontrado")
-    return await run_test_message(flow, body.session_id, body.message, body.start)
+    return await run_test_message(flow, body.session_id, body.message, body.start,
+                                  body.escolha_id)

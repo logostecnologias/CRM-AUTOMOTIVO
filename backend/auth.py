@@ -103,7 +103,7 @@ async def require_tenant_member(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") not in ("tenant_admin", "agent"):
         raise HTTPException(status_code=403, detail="Acesso restrito à equipe da empresa")
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Tenant não vinculado")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     return user
 
 
@@ -124,9 +124,9 @@ async def accessible_connection_ids(db, user: dict) -> list[str] | None:
 
 async def require_tenant_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "tenant_admin":
-        raise HTTPException(status_code=403, detail="Acesso restrito ao Tenant Admin")
+        raise HTTPException(status_code=403, detail="Acesso restrito ao administrador da empresa")
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Tenant não vinculado")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     return user
 
 

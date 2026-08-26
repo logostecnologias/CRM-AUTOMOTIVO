@@ -4,6 +4,7 @@ import api from "@/lib/api";
 import { Plus, PencilSimple, Copy, Trash, Pause, Play } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
+import { rotuloGatilho } from "@/components/flow/nodeTypes";
 
 export default function BotsPage() {
   const [bots, setBots] = useState([]);
@@ -106,13 +107,9 @@ export default function BotsPage() {
                 {b.name}
               </div>
               <div className="col-span-2 text-xs" data-testid={`bot-trigger-${b.id}`}>
-                {b.trigger === "keyword" ? (
-                  "Palavra-chave"
-                ) : b.trigger === "no_response" ? (
-                  <span className="text-ink-3">Sem resposta</span>
-                ) : (
-                  "Primeira mensagem"
-                )}
+                {b.trigger === "no_response"
+                  ? <span className="text-ink-3">{rotuloGatilho(b.trigger)}</span>
+                  : rotuloGatilho(b.trigger)}
               </div>
               <div className="col-span-2 text-xs" data-testid={`bot-connection-${b.id}`}>
                 {b.connection?.nome || <span className="italic text-warning">sem conexão</span>}

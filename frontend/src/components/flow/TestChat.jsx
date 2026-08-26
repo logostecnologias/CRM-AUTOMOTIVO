@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import api from "@/lib/api";
-import { X, PaperPlaneRight, ArrowClockwise } from "@phosphor-icons/react";
+import { X, PaperPlaneRight, ArrowClockwise, List, Warning } from "@phosphor-icons/react";
+import { FORMATO_BOTOES, FORMATO_LISTA, FORMATO_TEXTO } from "./nodeTypes";
 
 export default function TestChat({ flowId, onClose }) {
   const [sessionId, setSessionId] = useState(null);
@@ -30,7 +31,11 @@ export default function TestChat({ flowId, onClose }) {
   const applyOutputs = (outputs) => {
     const items = outputs.map((o, i) => {
       if (o.type === "text") return { role: "bot", text: o.content };
-      if (o.type === "menu") return { role: "bot", text: o.content, options: o.options };
+      // O menu vem inteiro no output: formato, título, rodapé e as opções com
+      // id. O simulador desenha o formato configurado porque é ele que a pessoa
+      // precisa conferir antes de publicar — ver a lista numerada não prova que
+      // os botões vão sair certos.
+      if (o.type === "menu") return { role: "bot", text: o.content, menu: o };
       if (o.type === "media") return { role: "bot", text: `[${o.media_type}] ${o.url}${o.caption ? " — " + o.caption : ""}` };
       if (o.type === "system") return { role: "system", text: o.content };
       if (o.type === "delay") return { role: "system", text: `⏱ Aguardando ${o.seconds}s...` };
@@ -39,14 +44,18 @@ export default function TestChat({ flowId, onClose }) {
     setMessages((m) => [...m, ...items]);
   };
 
-  const send = async (text) => {
+  // `escolhaId` é o id da opção quando o teste toca num botão em vez de digitar.
+  // Vai separado do texto porque é assim que a resposta real chega do WhatsApp:
+  // o rótulo pode vir cortado, o id nunca.
+  const send = async (text, escolhaId = null) => {
     const msg = (text ?? input).trim();
-    if (!msg) return;
+    if (!msg && !escolhaId) return;
     setMessages((m) => [...m, { role: "user", text: msg }]);
     setInput("");
     setLoading(true);
     try {
-      const { data } = await api.post(`/flows/${flowId}/test`, { session_id: sessionId, message: msg });
+      const { data } = await api.post(`/flows/${flowId}/test`,
+        { session_id: sessionId, message: msg, escolha_id: escolhaId });
       applyOutputs(data.outputs);
       if (data.status === "finalizada") {
         setMessages((m) => [...m, { role: "system", text: "— Conversa encerrada —" }]);
@@ -85,21 +94,10 @@ export default function TestChat({ flowId, onClose }) {
                   : "bg-surface border-line text-ink"
               }`}
             >
+              {m.menu?.titulo && <div className="font-bold whitespace-pre-wrap">{m.menu.titulo}</div>}
               <div className="whitespace-pre-wrap">{m.text}</div>
-              {m.options && (
-                <div className="mt-2 space-y-1">
-                  {m.options.map((o, j) => (
-                    <button
-                      key={j}
-                      onClick={() => send(String(j + 1))}
-                      className="block w-full text-left text-xs px-2 py-1 bg-surface-2 border border-line-strong hover:bg-surface-2 rounded-lg"
-                      data-testid={`menu-option-${j}`}
-                    >
-                      {j + 1}. {o}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {m.menu?.rodape && <div className="text-[11px] text-ink-3 mt-1">{m.menu.rodape}</div>}
+              {m.menu && <MenuSimulado menu={m.menu} onEscolher={send} />}
             </div>
           </div>
         ))}
@@ -118,6 +116,80 @@ export default function TestChat({ flowId, onClose }) {
           <PaperPlaneRight size={14} weight="bold" />
         </button>
       </div>
+    </div>
+  );
+}
+
+// Desenha o menu no formato que o contato vai receber. Tocar numa opção manda o
+// id dela, não o número: é o caminho que um botão real exercita, e é o único
+// que prova que a saída do nó está ligada na opção certa.
+function MenuSimulado({ menu, onEscolher }) {
+  const [aberta, setAberta] = useState(false);
+  const formato = menu.formato || FORMATO_TEXTO;
+  const itens = menu.itens || [];
+  const problemas = menu.problemas || [];
+
+  // Configuração fora dos tetos do WhatsApp: quem envia degrada para texto
+  // numerado, e o simulador mostra o mesmo — junto com o motivo, que é a
+  // informação que falta para consertar.
+  const degradado = problemas.length > 0;
+  const efetivo = degradado ? FORMATO_TEXTO : formato;
+
+  const opcao = (item, i) => (
+    <button
+      key={item.id || i}
+      onClick={() => onEscolher(item.label, item.id)}
+      className="block w-full text-left text-xs px-2 py-1.5 bg-surface-2 border border-line-strong hover:border-info rounded-lg"
+      data-testid={`menu-option-${i}`}
+    >
+      {efetivo === FORMATO_TEXTO ? `${i + 1}. ` : ""}{item.label}
+      {item.descricao && <div className="text-[10px] text-ink-3">{item.descricao}</div>}
+    </button>
+  );
+
+  return (
+    <div className="mt-2 space-y-1">
+      {degradado && (
+        <div className="text-[10px] text-danger flex gap-1 items-start" data-testid="menu-degradado">
+          <Warning size={12} weight="bold" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>Sai como texto numerado: {problemas.join(" · ")}</span>
+        </div>
+      )}
+
+      {efetivo === FORMATO_LISTA ? (
+        <>
+          <button
+            onClick={() => setAberta((v) => !v)}
+            className="flex items-center justify-center gap-1.5 w-full text-xs px-2 py-1.5 border border-line-strong text-info font-medium rounded-lg hover:border-info"
+            data-testid="menu-abrir-lista"
+          >
+            <List size={13} weight="bold" /> {menu.botao_texto || "Ver opções"}
+          </button>
+          {aberta && (
+            <div className="space-y-1 pt-1">
+              {menu.titulo_secao && (
+                <div className="text-[10px] font-bold uppercase tracking-wider text-ink-3">{menu.titulo_secao}</div>
+              )}
+              {itens.map(opcao)}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className={efetivo === FORMATO_BOTOES ? "flex flex-wrap gap-1" : "space-y-1"}>
+          {efetivo === FORMATO_BOTOES
+            ? itens.map((item, i) => (
+                <button
+                  key={item.id || i}
+                  onClick={() => onEscolher(item.label, item.id)}
+                  className="flex-1 min-w-[30%] text-xs px-2 py-1.5 border border-line-strong text-info font-medium rounded-lg hover:border-info"
+                  data-testid={`menu-option-${i}`}
+                >
+                  {item.label}
+                </button>
+              ))
+            : itens.map(opcao)}
+        </div>
+      )}
     </div>
   );
 }

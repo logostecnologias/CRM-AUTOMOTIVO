@@ -1,15 +1,19 @@
-"""Conexão da conta de IA da empresa e os agentes que atendem por ela.
+"""Agentes de IA da empresa: comportamento e credencial.
 
-Uma conexão por empresa (`ai_connections`, chaveada por `tenant_id`). O
-provedor não permite que um SaaS de terceiro use a assinatura do cliente por
-OAuth — Anthropic, OpenAI e Google fecharam esse caminho no primeiro trimestre
-de 2026 — então a credencial é uma chave de API que o cliente gera no console
-do provedor e cola aqui. A tela leva ele direto à página certa (`console_url`
+**A chave de API mora no agente, não na empresa.** Um cliente pode ter uma
+chave da Anthropic no agente de suporte e uma da OpenAI no de vendas —
+contas, times e orçamentos diferentes. Uma credencial única por empresa
+obrigaria os dois a dividirem a mesma conta e o mesmo modelo.
+
+O provedor não permite que um SaaS de terceiro use a assinatura do cliente
+por OAuth — Anthropic, OpenAI e Google fecharam esse caminho no primeiro
+trimestre de 2026 — então a credencial é uma chave de API que o cliente gera
+no console e cola aqui. A tela leva ele direto à página certa (`console_url`
 do catálogo) para que isso leve segundos, não uma busca na documentação.
 
-Tudo aqui é `require_tenant_admin`: é configuração e é credencial. A regra do
-projeto de abrir a base para o atendente (`require_tenant_member`) vale para
-contatos, funil e agenda — não para o segredo que paga a conta da empresa.
+Tudo aqui é `require_tenant_admin`: é configuração e é credencial. A regra
+do projeto de abrir a base para o atendente (`require_tenant_member`) vale
+para contatos, funil e agenda — não para o segredo que paga a conta.
 """
 import uuid
 from datetime import datetime, timezone
@@ -31,158 +35,19 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-class ConexaoIn(BaseModel):
-    provedor: str
-    modelo: str | None = None
-    # Ausente = manter a chave já guardada. É o que permite trocar só o modelo
-    # sem obrigar o cliente a gerar uma chave nova (ele não tem a antiga: nós
-    # nunca a devolvemos).
-    chave_api: str | None = None
-
-
-def _publica(conexao: dict | None) -> dict | None:
-    """O documento como a tela pode vê-lo. A chave cifrada e o texto cifrado
-    nunca saem daqui — só a máscara."""
-    if not conexao:
-        return None
-    credencial = conexao.get("credencial") or {}
-    return {
-        "id": conexao["id"],
-        "provedor": conexao["provedor"],
-        "provedor_rotulo": ai_client.PROVEDORES.get(conexao["provedor"], {}).get("rotulo", conexao["provedor"]),
-        "modelo": conexao["modelo"],
-        "mascara": credencial.get("mascara", ""),
-        "status": conexao.get("status", "erro"),
-        "ultimo_erro": conexao.get("ultimo_erro"),
-        "verificada_em": conexao.get("verificada_em"),
-        "created_at": conexao.get("created_at"),
-    }
-
-
 @router.get("/providers")
 async def listar_provedores(_=Depends(require_tenant_admin)):
-    """Catálogo para a tela: provedores, modelos, preço e o link do console."""
-    return ai_client.catalogo_publico()
+    """Catálogo do passo de credencial: provedores, modelos, preço e o link do
+    console de cada um. Sem segredo nenhum.
 
-
-@router.get("/connection")
-async def obter_conexao(user=Depends(require_tenant_admin)):
-    db = get_db()
-    conexao = await db.ai_connections.find_one({"tenant_id": user["tenant_id"]}, {"_id": 0})
+    `plataforma_disponivel` acompanha porque decide o texto da tela: sem chave
+    no agente e sem chave nossa, ele não responde nada — e isso precisa ser dito
+    antes de o cliente ligar o agente, não depois da primeira mensagem perdida.
+    """
     return {
-        "conexao": _publica(conexao),
-        "consumo": await ai_runtime.consumo_do_mes(db, user["tenant_id"]),
-        # A tela precisa saber se existe rede de segurança: sem conexão própria
-        # e sem chave da plataforma, o agente simplesmente não responde, e o
-        # cliente tem que saber disso antes de ligar o agente.
+        "provedores": ai_client.catalogo_publico(),
         "plataforma_disponivel": ai_runtime._credencial_plataforma() is not None,
     }
-
-
-@router.put("/connection")
-async def salvar_conexao(body: ConexaoIn, user=Depends(require_tenant_admin)):
-    """Valida contra o provedor **antes** de gravar.
-
-    Guardar primeiro e testar depois deixaria a tela dizendo "conectada" com
-    uma chave que não funciona, e o cliente só descobriria na primeira mensagem
-    de um contato real — quando já é tarde. O teste custa fração de centavo.
-    """
-    if body.provedor not in ai_client.PROVEDORES:
-        raise HTTPException(status_code=400, detail="Provedor desconhecido")
-
-    db = get_db()
-    atual = await db.ai_connections.find_one({"tenant_id": user["tenant_id"]}, {"_id": 0})
-
-    if body.chave_api:
-        chave = body.chave_api.strip()
-        prefixo = ai_client.PROVEDORES[body.provedor]["prefixo_chave"]
-        if not chave.startswith(prefixo):
-            # Checagem de formato antes de gastar uma chamada: o engano comum é
-            # colar a chave de um provedor no campo do outro.
-            raise HTTPException(
-                status_code=400,
-                detail=f"Esta não parece uma chave de {ai_client.PROVEDORES[body.provedor]['rotulo']} (deveria começar com \"{prefixo}\").",
-            )
-    elif atual and atual.get("provedor") == body.provedor:
-        try:
-            chave = ai_credentials.decifrar(atual.get("credencial") or {})
-        except ai_credentials.CredencialError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    else:
-        # Trocar de provedor sem informar a chave nova não tem como funcionar:
-        # a guardada é do provedor antigo.
-        raise HTTPException(status_code=400, detail="Informe a chave de API do provedor escolhido")
-
-    modelo = body.modelo or ai_client.modelo_padrao(body.provedor)
-    try:
-        ai_client.modelo_de(body.provedor, modelo)
-    except ai_client.IAError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    try:
-        await ai_client.validar(body.provedor, chave, modelo)
-    except ai_client.IAError as e:
-        # 400, não 502: quem precisa agir é o cliente (chave, saldo, acesso ao
-        # modelo), e a mensagem de `_traduz_erro` já diz o quê.
-        raise HTTPException(status_code=400, detail=str(e))
-
-    try:
-        credencial = ai_credentials.cifrar(chave)
-    except ai_credentials.CredencialError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    doc = {
-        "id": (atual or {}).get("id") or str(uuid.uuid4()),
-        "tenant_id": user["tenant_id"],
-        "provedor": body.provedor,
-        "modelo": modelo,
-        "credencial": credencial,
-        "status": "conectada",
-        "ultimo_erro": None,
-        "verificada_em": _now(),
-        "created_at": (atual or {}).get("created_at") or _now(),
-        "updated_at": _now(),
-    }
-    await db.ai_connections.update_one(
-        {"tenant_id": user["tenant_id"]}, {"$set": doc}, upsert=True
-    )
-    return _publica(doc)
-
-
-@router.post("/connection/test")
-async def testar_conexao(user=Depends(require_tenant_admin)):
-    """Reteste da conexão já salva — a chave pode ter sido revogada no console
-    do provedor, ou a conta pode ter ficado sem saldo, sem nada mudar aqui.
-
-    O resultado é gravado: é o `status` que a tela mostra e, mais importante, é
-    o que explica por que o agente parou de responder.
-    """
-    db = get_db()
-    conexao = await db.ai_connections.find_one({"tenant_id": user["tenant_id"]}, {"_id": 0})
-    if not conexao:
-        raise HTTPException(status_code=404, detail="Nenhuma conta de IA conectada")
-
-    try:
-        await ai_client.validar_conexao(conexao)
-    except (ai_client.IAError, ai_credentials.CredencialError) as e:
-        await db.ai_connections.update_one(
-            {"tenant_id": user["tenant_id"]},
-            {"$set": {"status": "erro", "ultimo_erro": str(e), "verificada_em": _now()}},
-        )
-        return {"ok": False, "erro": str(e)}
-
-    await db.ai_connections.update_one(
-        {"tenant_id": user["tenant_id"]},
-        {"$set": {"status": "conectada", "ultimo_erro": None, "verificada_em": _now()}},
-    )
-    return {"ok": True}
-
-
-@router.delete("/connection")
-async def remover_conexao(user=Depends(require_tenant_admin)):
-    db = get_db()
-    await db.ai_connections.delete_one({"tenant_id": user["tenant_id"]})
-    return {"ok": True}
 
 
 @router.get("/usage")
@@ -207,6 +72,11 @@ async def consumo(mes: str | None = None, user=Depends(require_tenant_admin)):
 
 class AgenteIn(BaseModel):
     nome: str
+    # Credencial deste agente. `chave_api` ausente = manter a que já está
+    # guardada (o cliente não tem como reenviá-la: nunca a devolvemos).
+    provedor: str | None = None
+    modelo: str | None = None
+    chave_api: str | None = None
     tipo: str = "geral"
     objetivo: str | None = None          # obrigatório quando tipo = personalizado
     modo: str = ai_agents.MODO_FALLBACK
@@ -221,6 +91,9 @@ class AgenteIn(BaseModel):
     # Comportamento
     tom: list[str] = []
     tamanho: str = "normais"
+    # Texto livre, sempre enviado ao modelo. E o campo para o que as
+    # escolhas prontas nao cobrem.
+    instrucoes: str | None = None
     nao_fazer: str | None = None
     base_conhecimento: str | None = None
     escalar_quando: str | None = None
@@ -254,6 +127,84 @@ def _valida_agente(body: AgenteIn):
                             detail="O limite de respostas deve ficar entre 1 e 50")
 
 
+async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
+    """O bloco de credencial que vai para o documento do agente.
+
+    Valida contra o provedor **antes** de gravar. Guardar primeiro e testar
+    depois deixaria o agente marcado como pronto com uma chave morta, e o
+    cliente só descobriria na primeira mensagem de um contato real — quando já
+    é tarde. O teste custa fração de centavo.
+
+    Sem provedor escolhido, o agente fica sem chave própria e cai na chave da
+    plataforma (com o teto do plano). É um estado válido, não um erro.
+    """
+    if not body.provedor:
+        return {"provedor": None, "modelo": None, "credencial": None,
+                "credencial_status": None, "credencial_erro": None,
+                "credencial_em": None}
+
+    if body.provedor not in ai_client.PROVEDORES:
+        raise HTTPException(status_code=400, detail="Provedor desconhecido")
+    modelo = body.modelo or ai_client.modelo_padrao(body.provedor)
+    try:
+        ai_client.modelo_de(body.provedor, modelo)
+    except ai_client.IAError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if body.chave_api:
+        chave = body.chave_api.strip()
+        prefixo = ai_client.PROVEDORES[body.provedor]["prefixo_chave"]
+        if not chave.startswith(prefixo):
+            # Conferido antes de gastar uma chamada: o engano comum é colar a
+            # chave de um provedor no campo do outro.
+            raise HTTPException(
+                status_code=400,
+                detail=(f"Esta não parece uma chave de "
+                        f"{ai_client.PROVEDORES[body.provedor]['rotulo']} "
+                        f"(deveria começar com \"{prefixo}\")."),
+            )
+    elif atual and atual.get("credencial") and atual.get("provedor") == body.provedor:
+        try:
+            chave = ai_credentials.decifrar(atual["credencial"])
+        except ai_credentials.CredencialError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    else:
+        # Trocar de provedor sem informar a chave nova não tem como funcionar:
+        # a guardada é do provedor antigo.
+        raise HTTPException(status_code=400,
+                            detail="Informe a chave de API do provedor escolhido")
+
+    try:
+        await ai_client.validar(body.provedor, chave, modelo)
+    except ai_client.IAError as e:
+        # 400, não 502: quem precisa agir é o cliente (chave, saldo, acesso ao
+        # modelo), e a mensagem de `_traduz_erro` já diz o quê.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        credencial = ai_credentials.cifrar(chave)
+    except ai_credentials.CredencialError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"provedor": body.provedor, "modelo": modelo, "credencial": credencial,
+            "credencial_status": "ok", "credencial_erro": None,
+            "credencial_em": _now()}
+
+
+def _publico(agente: dict) -> dict:
+    """O agente como a tela pode vê-lo: o bloco cifrado sai, a máscara fica.
+
+    Devolver a chave "para preencher o campo de edição" a faria trafegar a cada
+    abertura de tela — por isso o formulário reaproveita a guardada quando o
+    provedor não muda.
+    """
+    a = {k: v for k, v in agente.items() if k not in ("_id", "credencial")}
+    credencial = agente.get("credencial") or {}
+    a["mascara"] = credencial.get("mascara")
+    a["tem_chave"] = bool(credencial)
+    return a
+
+
 @router.get("/agents/catalog")
 async def catalogo_de_agentes(_=Depends(require_tenant_admin)):
     """Tipos, tons, tamanhos, segmentos e modos — o que a tela oferece."""
@@ -262,39 +213,77 @@ async def catalogo_de_agentes(_=Depends(require_tenant_admin)):
 
 @router.get("/agents")
 async def listar_agentes(user=Depends(require_tenant_admin)):
+    """Os agentes com o que cada um está atendendo agora.
+
+    Os contadores saem de **uma** agregação sobre os ids em tela, não de uma
+    consulta por cartão — mesmo motivo de `atividades.negocios_sem_proximo_passo`:
+    uma ida ao banco por cartão custa caro num túnel SSH, e a tela é uma grade.
+    """
     db = get_db()
-    return await db.ai_agents.find(
+    agentes = await db.ai_agents.find(
         {"tenant_id": user["tenant_id"]}, {"_id": 0}
     ).sort("created_at", 1).to_list(50)
+    if not agentes:
+        return []
+
+    cursor = db.conversation_sessions.aggregate([
+        {"$match": {"tenant_id": user["tenant_id"],
+                    "ia_agente_id": {"$in": [a["id"] for a in agentes]}}},
+        {"$group": {"_id": {"agente": "$ia_agente_id", "situacao": "$status_atendimento"},
+                    "n": {"$sum": 1}}},
+    ])
+    por_agente: dict[str, dict] = {}
+    for linha in await cursor.to_list(500):
+        chave = linha["_id"]
+        alvo = por_agente.setdefault(chave["agente"], {"atendendo": 0, "transferidas": 0, "total": 0})
+        alvo["total"] += linha["n"]
+        if chave["situacao"] == "bot":
+            # Ainda com o agente: ele respondeu e a conversa não saiu para gente.
+            alvo["atendendo"] += linha["n"]
+        elif chave["situacao"] in ("aguardando", "em_atendimento"):
+            alvo["transferidas"] += linha["n"]
+
+    vazio = {"atendendo": 0, "transferidas": 0, "total": 0}
+    saida = []
+    for a in agentes:
+        pub = _publico(a)
+        pub["conversas"] = por_agente.get(a["id"], dict(vazio))
+        saida.append(pub)
+    return saida
 
 
 @router.post("/agents")
 async def criar_agente(body: AgenteIn, user=Depends(require_tenant_admin)):
     _valida_agente(body)
     db = get_db()
+    campos = body.model_dump()
+    campos.pop("chave_api", None)  # nunca em claro no documento
     agente = {
         "id": str(uuid.uuid4()),
         "tenant_id": user["tenant_id"],
-        **body.model_dump(),
+        **campos,
+        **await _resolver_credencial(body, None),
         "created_at": _now(),
         "updated_at": _now(),
     }
     await db.ai_agents.insert_one(agente)
-    agente.pop("_id", None)
-    return agente
+    return _publico(agente)
 
 
 @router.patch("/agents/{agent_id}")
 async def atualizar_agente(agent_id: str, body: AgenteIn, user=Depends(require_tenant_admin)):
     _valida_agente(body)
     db = get_db()
-    res = await db.ai_agents.update_one(
-        {"id": agent_id, "tenant_id": user["tenant_id"]},
-        {"$set": {**body.model_dump(), "updated_at": _now()}},
-    )
-    if res.matched_count == 0:
+    atual = await db.ai_agents.find_one({"id": agent_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
+    if not atual:
         raise HTTPException(status_code=404, detail="Agente não encontrado")
-    return await db.ai_agents.find_one({"id": agent_id}, {"_id": 0})
+    campos = body.model_dump()
+    campos.pop("chave_api", None)
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$set": {**campos, **await _resolver_credencial(body, atual), "updated_at": _now()}},
+    )
+    return _publico(await db.ai_agents.find_one({"id": agent_id}, {"_id": 0}))
 
 
 @router.delete("/agents/{agent_id}")
@@ -344,10 +333,22 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
                 "motivo": "O contato pediu para falar com uma pessoa"}
 
     try:
-        resposta = await ai_runtime.responder_por_tenant(
-            db, user["tenant_id"], ai_agents.montar_instrucoes(agente), historico)
+        resposta = await ai_runtime.responder_por_agente(
+            db, user["tenant_id"], agente, ai_agents.montar_instrucoes(agente), historico)
     except ai_client.IAError as e:
+        # A chave pode ter sido revogada no console depois de salva. Marcar aqui
+        # é o que faz o cartão mostrar o problema em vez de o agente falhar em
+        # silêncio na próxima mensagem de um contato real.
+        if agente.get("credencial"):
+            await db.ai_agents.update_one(
+                {"id": agent_id, "tenant_id": user["tenant_id"]},
+                {"$set": {"credencial_status": "erro", "credencial_erro": str(e)}})
         raise HTTPException(status_code=400, detail=str(e))
+    if agente.get("credencial_status") == "erro":
+        # Voltou a funcionar (saldo recarregado, chave reativada).
+        await db.ai_agents.update_one(
+            {"id": agent_id, "tenant_id": user["tenant_id"]},
+            {"$set": {"credencial_status": "ok", "credencial_erro": None}})
 
     texto = (resposta.texto or "").strip()
     if ai_agents.SENTINELA.lower() in texto.lower():

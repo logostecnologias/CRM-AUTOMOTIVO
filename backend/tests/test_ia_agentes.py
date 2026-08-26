@@ -7,7 +7,7 @@ risco do modulo nao esta em montar prompt, esta em ter mexido no roteamento de
 mensagem. O que precisa ficar provado e que ligar um agente nao rouba conversa
 de fluxo que ja existe, e que nenhum caminho de falha engole a mensagem.
 
-O provedor nunca e chamado: `ai_runtime.responder_por_tenant` e substituido.
+O provedor nunca e chamado: `ai_runtime.responder_por_agente` e substituido.
 """
 import asyncio
 import os
@@ -52,7 +52,7 @@ async def _sem_avatar(*a, **kw):
 
 
 class _IAFalsa:
-    """Substitui `ai_runtime.responder_por_tenant`. `proxima` define o que o
+    """Substitui `ai_runtime.responder_por_agente`. `proxima` define o que o
     modelo devolve; `erro` faz a chamada falhar."""
 
     def __init__(self):
@@ -60,9 +60,9 @@ class _IAFalsa:
         self.proxima = "Claro, posso ajudar com isso."
         self.erro = None
 
-    async def __call__(self, db, tenant_id, instrucoes, historico):
-        self.chamadas.append({"tenant_id": tenant_id, "instrucoes": instrucoes,
-                              "historico": historico})
+    async def __call__(self, db, tenant_id, agente, instrucoes, historico):
+        self.chamadas.append({"tenant_id": tenant_id, "agente": agente,
+                              "instrucoes": instrucoes, "historico": historico})
         if self.erro:
             raise self.erro
         return ai_client.Resposta(texto=self.proxima, modelo="claude-haiku-4-5",
@@ -81,8 +81,8 @@ def _conectar_fake():
     flow_runtime.wuzapi.send_text = fake_send_text
     flow_runtime.wuzapi.send_media = fake_send_media
     flow_runtime._fetch_avatar_bg = _sem_avatar
-    ai_runtime.responder_por_tenant = IA
-    ai_agents.ai_runtime.responder_por_tenant = IA
+    ai_runtime.responder_por_agente = IA
+    ai_agents.ai_runtime.responder_por_agente = IA
 
 
 TENANT = "t-1"
@@ -414,8 +414,20 @@ async def etapa_prompt():
         "base_conhecimento": "Horário: 9h às 18h.",
         "escalar_quando": "Pedirem nota fiscal",
     }
+    agente["instrucoes"] = ("Sempre pergunte a cidade antes de falar de frete.\n"
+                            "Trate quem ja e cliente pelo primeiro nome.")
     p = ai_agents.montar_instrucoes(agente)
     check("identifica agente e empresa", "Bia" in p and "Vubis" in p)
+    check("o texto livre entra inteiro, sem reformatacao",
+          "Sempre pergunte a cidade antes de falar de frete." in p
+          and "Trate quem ja e cliente pelo primeiro nome." in p, p)
+    # A ordem e o que garante que o cliente ajusta o comportamento sem afrouxar
+    # o que nao pode ser afrouxado.
+    check("as instrucoes livres vem depois do objetivo",
+          p.index("Instruções específicas") > p.index("Seu objetivo:"))
+    check("mas antes das regras fixas e da sentinela",
+          p.index("Instruções específicas") < p.index("Nunca peça senha")
+          and p.index("Instruções específicas") < p.index(ai_agents.SENTINELA))
     check("traz a estrategia do tipo escolhido", "vender" in p.lower(), p[:200])
     check("combina os dois tons", "profissional" in p and "empático" in p.lower())
     check("pede o tamanho escolhido", "15 palavras" in p, p)
@@ -432,6 +444,21 @@ async def etapa_prompt():
           "não recebeu base de conhecimento" in sem_base, sem_base[-400:])
 
     # Personalizado sem objetivo e recusado na rota.
+    # Guardado no agente e relido em toda chamada: salva, recarrega do banco e
+    # o prompt montado a partir do documento tem que conter o texto.
+    salvo = await rai.criar_agente(rai.AgenteIn(
+        nome="Com instrucoes", tipo="suporte",
+        instrucoes="Nunca abrevie o nome do produto."), ADMIN)
+    doc = await DB.ai_agents.find_one({"id": salvo["id"]}, {"_id": 0})
+    check("o texto livre e persistido no agente",
+          doc["instrucoes"] == "Nunca abrevie o nome do produto.", doc.get("instrucoes"))
+    check("e reaparece no prompt montado a partir do banco",
+          "Nunca abrevie o nome do produto." in ai_agents.montar_instrucoes(doc))
+    r = await rai.ver_prompt(salvo["id"], ADMIN)
+    check("e no prompt que a tela mostra",
+          "Nunca abrevie o nome do produto." in r["instrucoes"])
+    await rai.remover_agente(salvo["id"], ADMIN)
+
     st, det = await erro(rai.criar_agente(
         rai.AgenteIn(nome="X", tipo="personalizado"), ADMIN))
     check("personalizado exige objetivo", st == 400, (st, det))
@@ -470,6 +497,157 @@ async def etapa_historico():
           all(f"pergunta {i}" in h[0]["content"] for i in range(3)), h[0])
 
 
+async def etapa_contadores_do_cartao():
+    print("\n[contadores do cartao]")
+    # Tres conversas do mesmo agente em situacoes diferentes, mais uma de
+    # outro agente — o cartao de cada um so pode contar as suas.
+    await semear(agente={})
+    await DB.ai_agents.insert_one({
+        "id": "ag-2", "tenant_id": TENANT, "nome": "Outro", "tipo": "vendas",
+        "modo": ai_agents.MODO_FALLBACK, "ativo": True, "tom": [],
+        "tamanho": "normais", "conexoes": [], "created_at": "2026-08-02T00:00:00+00:00"})
+    for i, (agente_id, situacao) in enumerate([
+        ("ag-1", "bot"), ("ag-1", "bot"), ("ag-1", "aguardando"),
+        ("ag-1", "finalizado"), ("ag-2", "em_atendimento"),
+    ]):
+        await DB.conversation_sessions.insert_one({
+            "id": f"s{i}", "tenant_id": TENANT, "ia_agente_id": agente_id,
+            "status_atendimento": situacao})
+
+    linhas = await rai.listar_agentes(ADMIN)
+    por_id = {a["id"]: a["conversas"] for a in linhas}
+    check("atendendo conta so as que seguem com o agente",
+          por_id["ag-1"]["atendendo"] == 2, por_id["ag-1"])
+    check("transferidas junta fila e em atendimento",
+          por_id["ag-1"]["transferidas"] == 1, por_id["ag-1"])
+    check("total inclui as finalizadas", por_id["ag-1"]["total"] == 4, por_id["ag-1"])
+    check("um agente nao conta a conversa do outro",
+          por_id["ag-2"] == {"atendendo": 0, "transferidas": 1, "total": 1}, por_id["ag-2"])
+
+    # Agente sem conversa nenhuma tem que vir com os tres zeros, e nao sem a
+    # chave — a tela le `a.conversas` direto.
+    await semear(agente={})
+    linhas = await rai.listar_agentes(ADMIN)
+    check("agente novo vem zerado, nao sem a chave",
+          linhas[0]["conversas"] == {"atendendo": 0, "transferidas": 0, "total": 0},
+          linhas[0].get("conversas"))
+
+    # Uma conversa que nenhum agente atendeu nao pode aparecer em cartao algum.
+    await DB.conversation_sessions.insert_one({
+        "id": "s-humana", "tenant_id": TENANT, "ia_agente_id": None,
+        "status_atendimento": "aguardando"})
+    linhas = await rai.listar_agentes(ADMIN)
+    check("conversa sem agente fica de fora",
+          linhas[0]["conversas"]["total"] == 0, linhas[0]["conversas"])
+
+
+async def etapa_credencial_por_agente():
+    print("\n[credencial e do agente, nao da empresa]")
+    await semear(agente=None)
+
+    # O `validar` de verdade sairia para a rede. O dubla registra o que seria
+    # conferido, que e justamente o que precisa ficar provado: cada agente e
+    # validado com a SUA chave e o SEU modelo.
+    validados = []
+
+    async def fake_validar(provedor, chave, modelo):
+        validados.append((provedor, chave, modelo))
+        return ai_client.Resposta(texto="ok", modelo=modelo)
+
+    original = ai_client.validar
+    rai.ai_client.validar = fake_validar
+    try:
+        suporte = await rai.criar_agente(rai.AgenteIn(
+            nome="Suporte", tipo="suporte", provedor="anthropic",
+            modelo="claude-haiku-4-5", chave_api="sk-ant-CHAVE-DO-SUPORTE"), ADMIN)
+        vendas = await rai.criar_agente(rai.AgenteIn(
+            nome="Vendas", tipo="vendas", provedor="openai",
+            modelo="gpt-5-mini", chave_api="sk-CHAVE-DE-VENDAS"), ADMIN)
+
+        check("cada agente foi validado com a propria chave e modelo",
+              validados == [("anthropic", "sk-ant-CHAVE-DO-SUPORTE", "claude-haiku-4-5"),
+                            ("openai", "sk-CHAVE-DE-VENDAS", "gpt-5-mini")], validados)
+        check("dois provedores diferentes convivem na mesma empresa",
+              (suporte["provedor"], vendas["provedor"]) == ("anthropic", "openai"))
+
+        # A chave nunca volta em claro, nem na criacao nem na listagem.
+        check("a resposta nao traz o bloco cifrado", "credencial" not in suporte, suporte.keys())
+        check("so a mascara volta", suporte["mascara"].endswith("ORTE")
+              and "CHAVE-DO-SUPORTE" not in suporte["mascara"], suporte["mascara"])
+        listados = await rai.listar_agentes(ADMIN)
+        check("a listagem tambem nao vaza a chave",
+              all("credencial" not in a for a in listados), [a.keys() for a in listados])
+        check("mas diz quem tem chave", all(a["tem_chave"] for a in listados))
+
+        # No banco, cifrada — e decifravel de volta.
+        doc = await DB.ai_agents.find_one({"id": suporte["id"]})
+        check("no banco fica cifrada",
+              "sk-ant-CHAVE-DO-SUPORTE" not in str(doc["credencial"]), doc["credencial"])
+        import ai_credentials
+        check("e volta identica ao decifrar",
+              ai_credentials.decifrar(doc["credencial"]) == "sk-ant-CHAVE-DO-SUPORTE")
+
+        # Editar sem reenviar a chave reaproveita a guardada (o cliente nao a tem).
+        validados.clear()
+        await rai.atualizar_agente(suporte["id"], rai.AgenteIn(
+            nome="Suporte", tipo="suporte", provedor="anthropic",
+            modelo="claude-sonnet-5"), ADMIN)
+        check("trocar so o modelo reusa a chave guardada",
+              validados == [("anthropic", "sk-ant-CHAVE-DO-SUPORTE", "claude-sonnet-5")], validados)
+
+        # Trocar de provedor sem chave nova nao tem como funcionar.
+        st, det = await erro(rai.atualizar_agente(suporte["id"], rai.AgenteIn(
+            nome="Suporte", tipo="suporte", provedor="openai", modelo="gpt-5-mini"), ADMIN))
+        check("trocar de provedor exige chave nova", st == 400, (st, det))
+
+        # Chave do provedor errado e barrada antes de ir para a rede.
+        validados.clear()
+        st, det = await erro(rai.criar_agente(rai.AgenteIn(
+            nome="X", provedor="anthropic", chave_api="sk-proj-DA-OPENAI"), ADMIN))
+        check("chave do provedor errado e recusada", st == 400, (st, det))
+        check("sem gastar chamada no provedor", validados == [], validados)
+
+        # Agente sem provedor e valido: cai na chave da plataforma.
+        sem_chave = await rai.criar_agente(rai.AgenteIn(nome="Simples"), ADMIN)
+        check("agente sem provedor pode existir", sem_chave["tem_chave"] is False, sem_chave)
+    finally:
+        rai.ai_client.validar = original
+
+    # --- resolucao em tempo de atendimento ---
+    doc_suporte = await DB.ai_agents.find_one({"id": suporte["id"]}, {"_id": 0})
+    cred = await ai_runtime.resolver_credencial(DB, TENANT, doc_suporte)
+    check("o atendimento usa a chave do proprio agente",
+          cred["chave"] == "sk-ant-CHAVE-DO-SUPORTE" and cred["origem"] == "cliente", cred["origem"])
+
+    doc_vendas = await DB.ai_agents.find_one({"id": vendas["id"]}, {"_id": 0})
+    cred = await ai_runtime.resolver_credencial(DB, TENANT, doc_vendas)
+    check("e o outro agente usa a dele", cred["chave"] == "sk-CHAVE-DE-VENDAS", cred["chave"])
+
+    # Sem chave e sem plataforma: erro que diz o que fazer, nao 500.
+    doc_simples = await DB.ai_agents.find_one({"id": sem_chave["id"]}, {"_id": 0})
+    st, det = await erro(ai_runtime.resolver_credencial(DB, TENANT, doc_simples))
+    check("sem chave e sem plataforma, erro explicando", st == 400 and "Simples" in det, (st, det))
+
+    # Com a chave da plataforma configurada, o mesmo agente passa a funcionar.
+    os.environ["AI_PLATFORM_KEY"] = "sk-DA-PLATAFORMA"
+    os.environ["AI_PLATFORM_PROVIDER"] = "openai"
+    try:
+        cred = await ai_runtime.resolver_credencial(DB, TENANT, doc_simples)
+        check("sem chave propria, cai na plataforma",
+              cred["origem"] == "plataforma" and cred["chave"] == "sk-DA-PLATAFORMA", cred)
+
+        # Credencial marcada como quebrada nao e usada — cai na plataforma.
+        await DB.ai_agents.update_one({"id": suporte["id"]},
+                                      {"$set": {"credencial_status": "erro"}})
+        quebrado = await DB.ai_agents.find_one({"id": suporte["id"]}, {"_id": 0})
+        cred = await ai_runtime.resolver_credencial(DB, TENANT, quebrado)
+        check("chave sabidamente quebrada nao e reusada",
+              cred["origem"] == "plataforma", cred["origem"])
+    finally:
+        os.environ.pop("AI_PLATFORM_KEY", None)
+        os.environ.pop("AI_PLATFORM_PROVIDER", None)
+
+
 # ---------------------------------------------------------------------------
 
 def test_suite():
@@ -491,5 +669,7 @@ def test_suite():
         await etapa_falhas_nao_engolem_mensagem()
         await etapa_prompt()
         await etapa_historico()
+        await etapa_contadores_do_cartao()
+        await etapa_credencial_por_agente()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

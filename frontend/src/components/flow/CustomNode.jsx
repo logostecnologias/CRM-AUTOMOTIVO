@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { NODE_TYPES } from "./nodeTypes";
+import { NODE_TYPES, MENU_FORMATOS, validarMenu, FORMATO_TEXTO, rotuloGatilho } from "./nodeTypes";
 import { Warning } from "@phosphor-icons/react";
 
 function CustomNode({ id, data, selected, type }) {
@@ -20,10 +20,17 @@ function CustomNode({ id, data, selected, type }) {
     ];
   }
 
+  // O selo de aviso já existia no cartão mas nada o alimentava. Menu interativo
+  // fora dos tetos do WhatsApp é exatamente o caso que precisa aparecer no
+  // canvas: o problema não dá erro em lugar nenhum, a mensagem só não chega.
+  const aviso = data._warning
+    || (type === "menu" ? validarMenu(data).join(" · ") : "")
+    || null;
+
   return (
     <div className={`zz-node relative ${selected ? "selected" : ""}`} data-testid={`node-${type}`}>
-      {data._warning && (
-        <div className="zz-node-warning" title={data._warning}>
+      {aviso && (
+        <div className="zz-node-warning" title={aviso}>
           <Warning size={12} weight="bold" style={{ display: "inline" }} />
         </div>
       )}
@@ -40,7 +47,7 @@ function CustomNode({ id, data, selected, type }) {
       <div className="zz-node-body">
         {type === "start" && (
           <div className="text-xs text-ink-3">
-            Gatilho: <span className="font-mono text-ink">{data.trigger || "first_message"}</span>
+            Gatilho: <span className="font-semibold text-ink">{rotuloGatilho(data.trigger)}</span>
           </div>
         )}
         {type === "text" && (
@@ -51,7 +58,11 @@ function CustomNode({ id, data, selected, type }) {
         {type === "menu" && (
           <div className="space-y-1">
             <div className="text-xs text-ink line-clamp-2">{data.text || "Pergunta do menu"}</div>
-            <div className="text-[10px] font-mono text-ink-3">{(data.options || []).length} opções</div>
+            <div className="text-[10px] font-mono text-ink-3">
+              {(data.options || []).length} opções ·{" "}
+              {MENU_FORMATOS.find((f) => f.valor === (data.formato || FORMATO_TEXTO))?.label
+                || (data.formato || FORMATO_TEXTO)}
+            </div>
           </div>
         )}
         {type === "save_variable" && (

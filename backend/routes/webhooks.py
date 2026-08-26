@@ -16,6 +16,8 @@ resolves tenant/connection from the payload's `userID` field instead.
 """
 import hmac
 import hashlib
+import json
+import logging
 import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
@@ -24,6 +26,8 @@ from db import get_db
 from flow_runtime import handle_incoming_message
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+
+logger = logging.getLogger("zappzen.webhooks")
 
 
 def _now():
@@ -95,6 +99,74 @@ def _extract_media(payload: dict, msg: dict) -> dict | None:
             },
         }
     return None
+
+
+# A resposta a botão ou lista não vem como texto: cada tipo de mensagem
+# interativa devolve a escolha num nó próprio do payload. São quatro porque o
+# whatsmeow monta o menu de formas diferentes conforme a versão (botão clássico,
+# template, native flow), e o cliente do contato responde no formato que
+# recebeu — cobrir só um faria a resposta cair como mensagem sem texto e ser
+# descartada logo abaixo, deixando a conversa parada.
+_NOS_DE_ESCOLHA = (
+    # (nó, chaves do id, chaves do rótulo, caminho do id aninhado)
+    ("buttonsResponseMessage", ("selectedButtonId", "selectedButtonID"),
+     ("selectedDisplayText",), None),
+    ("listResponseMessage", ("selectedRowId", "selectedRowID"),
+     ("title", "description"), "singleSelectReply"),
+    ("templateButtonReplyMessage", ("selectedId", "selectedID"),
+     ("selectedDisplayText",), None),
+)
+
+
+def _escolha_native_flow(no: dict) -> dict | None:
+    """O botão de resposta rápida que a WuzAPI monta é um NativeFlowButton, e a
+    resposta dele chega com o id dentro de um JSON **em string** —
+    `paramsJson: '{"id": "opt_3"}'`. Sem desempacotar isso, a escolha não tem
+    id e o contato que tocou no botão cai no caminho de resposta inválida."""
+    fluxo = no.get("nativeFlowResponseMessage") or {}
+    bruto = _pick(fluxo, "paramsJson", "paramsJSON", "params_json") or ""
+    escolhido, rotulo = None, ""
+    try:
+        params = json.loads(bruto)
+        if isinstance(params, dict):
+            escolhido = _pick(params, "id", "ID")
+            rotulo = _pick(params, "display_text", "displayText", "title") or ""
+    except (ValueError, TypeError):
+        pass
+    rotulo = rotulo or ((no.get("body") or {}).get("text") or "")
+    if not escolhido and not rotulo:
+        return None
+    return {"id": escolhido, "titulo": rotulo}
+
+
+def _extract_escolha(msg: dict) -> dict | None:
+    escolha, origem = None, None
+    for chave, ids, rotulos, aninhado in _NOS_DE_ESCOLHA:
+        no = msg.get(chave)
+        if not isinstance(no, dict) or not no:
+            continue
+        fonte = (no.get(aninhado) or {}) if aninhado else no
+        escolha = {"id": _pick(fonte, *ids), "titulo": _pick(no, *rotulos) or ""}
+        origem = chave
+        break
+    if escolha is None:
+        interativo = msg.get("interactiveResponseMessage")
+        if isinstance(interativo, dict) and interativo:
+            escolha = _escolha_native_flow(interativo)
+            origem = "interactiveResponseMessage"
+    if escolha is None:
+        return None
+
+    if escolha.get("id") and not escolha.get("titulo"):
+        # Observado em toque real: a resposta traz o id e nenhum rótulo. O
+        # histórico é salvo por `awaiting.rotulos` (ver flow_runtime), mas o
+        # payload fica registrado aqui porque a forma exata dele é a única
+        # coisa deste módulo que veio de leitura do handler da WuzAPI e não de
+        # observação — e é o que diz se falta procurar o rótulo em outro campo.
+        logger.info("Escolha interativa sem rótulo (%s) id=%s payload=%s",
+                    origem, escolha["id"],
+                    json.dumps(msg.get(origem), ensure_ascii=False)[:1000])
+    return escolha
 
 
 @router.post("/wuzapi")
@@ -204,17 +276,23 @@ async def _process_webhook_event(tenant_id: str, connection_id: str, payload: di
         message_id = info.get("ID") or f"noid_{_now()}"
         msg = event.get("Message", {})
         media = _extract_media(payload, msg)
+        escolha = _extract_escolha(msg)
         text = (
             msg.get("conversation")
             or (msg.get("extendedTextMessage") or {}).get("text")
             or (media or {}).get("caption")
+            # O rótulo do botão/item é o que o contato viu na tela dele, então é
+            # o que faz sentido no histórico. Sem rótulo, o id — feio, mas uma
+            # bolha vazia esconderia que o contato respondeu.
+            or (escolha or {}).get("titulo")
+            or (escolha or {}).get("id")
             or ""
         )
-        if not text and not media:
+        if not text and not media and not escolha:
             return {"ok": True}
         push_name = info.get("PushName") or None
         bg.add_task(handle_incoming_message, tenant_id, number, text, message_id,
-                    connection_id, push_name, media)
+                    connection_id, push_name, media, escolha)
         return {"ok": True, "queued": True}
 
     return {"ok": True, "ignored": etype}

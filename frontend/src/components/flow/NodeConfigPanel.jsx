@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import { X, Trash, Plus } from "@phosphor-icons/react";
 import api from "@/lib/api";
-import { NODE_TYPES } from "./nodeTypes";
+import {
+  NODE_TYPES, MENU_FORMATOS, LIMITES_MENU, validarMenu,
+  FORMATO_TEXTO, FORMATO_LISTA, GATILHOS,
+} from "./nodeTypes";
 
 export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   const [data, setData] = useState(node?.data || {});
@@ -35,7 +38,11 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   const addOption = () => {
     const opts = [...(data.options || [])];
     const i = opts.length;
-    opts.push({ id: `opt_${Date.now()}_${i}`, label: `Opção ${i + 1}` });
+    // O id nasce aqui e nunca muda: ele é o `sourceHandle` da aresta que sai
+    // desta opção e, nos formatos interativos, é também o id do botão/linha
+    // que volta no webhook quando o contato toca. Regerá-lo ao editar o
+    // rótulo cortaria a ligação com a saída do nó.
+    opts.push({ id: `opt_${Date.now()}_${i}`, label: `Opção ${i + 1}`, descricao: "" });
     update({ options: opts });
   };
 
@@ -68,9 +75,9 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
             <Field label="Gatilho de Disparo">
               <select className="zz-input" value={data.trigger || "first_message"}
                 onChange={(e) => update({ trigger: e.target.value })}>
-                <option value="first_message">Primeira mensagem do contato</option>
-                <option value="keyword">Palavra-chave específica</option>
-                <option value="no_response">Sem resposta há X tempo</option>
+                {GATILHOS.map((g) => (
+                  <option key={g.valor} value={g.valor}>{g.opcao}</option>
+                ))}
               </select>
             </Field>
             {data.trigger === "keyword" && (
@@ -98,37 +105,123 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
           </Field>
         )}
 
-        {node.type === "menu" && (
-          <>
-            <Field label="Pergunta">
-              <textarea rows={3} className="zz-input" value={data.text || ""}
-                onChange={(e) => update({ text: e.target.value })} />
-            </Field>
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wider text-ink-2 mb-2">Opções</div>
-              <div className="space-y-2">
-                {(data.options || []).map((o, i) => (
-                  <div key={o.id || i} className="flex gap-2 items-center">
-                    <span className="text-xs font-mono text-ink-3 w-6">{i + 1}.</span>
-                    <input className="zz-input" value={o.label}
-                      onChange={(e) => updateOption(i, { label: e.target.value })}
-                      data-testid={`config-option-${i}`} />
-                    <button onClick={() => removeOption(i)} className="p-3 border border-line hover:border-danger hover:text-danger rounded-lg">
-                      <Trash size={14} />
-                    </button>
+        {node.type === "menu" && (() => {
+          const formato = data.formato || FORMATO_TEXTO;
+          const interativo = formato !== FORMATO_TEXTO;
+          const lista = formato === FORMATO_LISTA;
+          const problemas = validarMenu(data);
+          const tetoOpcoes = lista ? LIMITES_MENU.itensLista : LIMITES_MENU.botoes;
+          const tetoRotulo = lista ? LIMITES_MENU.rotuloItem : LIMITES_MENU.rotuloBotao;
+          const opcoes = data.options || [];
+          const meta = MENU_FORMATOS.find((f) => f.valor === formato);
+          return (
+            <>
+              <Field label="Como o menu aparece no WhatsApp" hint={meta?.ajuda}>
+                <select className="zz-input" value={formato} data-testid="config-menu-formato"
+                  onChange={(e) => update({ formato: e.target.value })}>
+                  {MENU_FORMATOS.map((f) => (
+                    <option key={f.valor} value={f.valor}>{f.label}</option>
+                  ))}
+                </select>
+              </Field>
+
+              {problemas.length > 0 && (
+                <div className="text-xs bg-danger border border-danger text-ink p-3 rounded-lg space-y-1"
+                  data-testid="config-menu-problemas">
+                  <div className="font-bold">Assim a mensagem não chega ao contato:</div>
+                  {problemas.map((prob, i) => <div key={i}>· {prob}</div>)}
+                  <div className="text-ink-2">
+                    O WhatsApp descarta a mensagem sem avisar. Enquanto não for corrigido,
+                    o fluxo não publica e o menu sai como texto numerado.
                   </div>
-                ))}
+                </div>
+              )}
+
+              {interativo && (
+                <Field label="Título (opcional)" hint="Linha em destaque acima da pergunta.">
+                  <input className="zz-input" value={data.titulo || ""}
+                    onChange={(e) => update({ titulo: e.target.value })}
+                    data-testid="config-menu-titulo" />
+                </Field>
+              )}
+
+              <Field label="Pergunta">
+                <textarea rows={3} className="zz-input" value={data.text || ""}
+                  onChange={(e) => update({ text: e.target.value })} />
+              </Field>
+
+              {lista && (
+                <Field label="Texto do botão que abre a lista"
+                  hint={`Aparece no lugar de "Ver opções". Até ${LIMITES_MENU.botaoLista} caracteres.`}>
+                  <input className="zz-input" value={data.botao_texto || ""}
+                    maxLength={LIMITES_MENU.botaoLista}
+                    onChange={(e) => update({ botao_texto: e.target.value })}
+                    placeholder="Ver opções" data-testid="config-menu-botao-texto" />
+                </Field>
+              )}
+
+              {interativo && (
+                <Field label="Rodapé (opcional)" hint="Linha pequena no pé da mensagem.">
+                  <input className="zz-input" value={data.rodape || ""}
+                    onChange={(e) => update({ rodape: e.target.value })}
+                    data-testid="config-menu-rodape" />
+                </Field>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-bold uppercase tracking-wider text-ink-2">Opções</div>
+                  {interativo && (
+                    <div className={`text-[11px] font-mono ${opcoes.length > tetoOpcoes ? "text-danger font-bold" : "text-ink-3"}`}>
+                      {opcoes.length}/{tetoOpcoes}
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {opcoes.map((o, i) => {
+                    const rotulo = o.label || "";
+                    const longo = interativo && rotulo.length > tetoRotulo;
+                    return (
+                      <div key={o.id || i} className="flex gap-2 items-start">
+                        <span className="text-xs font-mono text-ink-3 w-6 pt-3">{i + 1}.</span>
+                        <div className="flex-1 space-y-1">
+                          <input className={`zz-input ${longo ? "border-danger" : ""}`} value={rotulo}
+                            onChange={(e) => updateOption(i, { label: e.target.value })}
+                            data-testid={`config-option-${i}`} />
+                          {interativo && (
+                            <div className={`text-[10px] font-mono text-right ${longo ? "text-danger font-bold" : "text-ink-4"}`}>
+                              {rotulo.length}/{tetoRotulo}
+                            </div>
+                          )}
+                          {lista && (
+                            <input className="zz-input text-xs" value={o.descricao || ""}
+                              maxLength={LIMITES_MENU.descItem}
+                              onChange={(e) => updateOption(i, { descricao: e.target.value })}
+                              placeholder="Descrição (opcional)"
+                              data-testid={`config-option-desc-${i}`} />
+                          )}
+                        </div>
+                        <button onClick={() => removeOption(i)}
+                          className="p-3 border border-line hover:border-danger hover:text-danger rounded-lg">
+                          <Trash size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button onClick={addOption} className="zz-btn zz-btn-secondary mt-3" data-testid="add-option">
+                  <Plus size={14} weight="bold" /> Adicionar opção
+                </button>
               </div>
-              <button onClick={addOption} className="zz-btn zz-btn-secondary mt-3" data-testid="add-option">
-                <Plus size={14} weight="bold" /> Adicionar opção
-              </button>
-            </div>
-            <Field label="Mensagem de Resposta Inválida">
-              <input className="zz-input" value={data.invalid_message || ""}
-                onChange={(e) => update({ invalid_message: e.target.value })} />
-            </Field>
-          </>
-        )}
+
+              <Field label="Mensagem de Resposta Inválida"
+                hint="Vale também nos formatos com botão: o contato pode digitar em vez de tocar.">
+                <input className="zz-input" value={data.invalid_message || ""}
+                  onChange={(e) => update({ invalid_message: e.target.value })} />
+              </Field>
+            </>
+          );
+        })()}
 
         {node.type === "save_variable" && (
           <>

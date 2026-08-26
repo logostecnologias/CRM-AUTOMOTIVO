@@ -21,7 +21,7 @@ INLINE_KINDS = {"image", "video", "audio"}
 @router.get("/{media_id}")
 async def download(media_id: str, user: dict = Depends(get_current_user)):
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Sem tenant")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     db = get_db()
     doc = await db.media_files.find_one(
         {"id": media_id, "tenant_id": user["tenant_id"]}, {"_id": 0}

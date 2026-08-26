@@ -56,7 +56,7 @@ class ConnectionPatch(BaseModel):
 @router.get("/connections")
 async def list_connections(user: dict = Depends(get_current_user)):
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Sem tenant")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     db = get_db()
     q: dict = {"tenant_id": user["tenant_id"]}
     if user["role"] not in ("tenant_admin", "super_admin"):

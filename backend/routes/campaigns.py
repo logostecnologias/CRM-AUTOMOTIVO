@@ -116,11 +116,7 @@ async def _enforce_cota_mensal(db, tenant_id: str, a_enviar: int):
     teto = int(plan["max_disparos_mes"])
     if teto <= 0:
         return
-    inicio = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0,
-                                                microsecond=0).isoformat()
-    usado = await db.campaign_recipients.count_documents(
-        {"tenant_id": tenant_id, "status": "enviado", "sent_at": {"$gte": inicio}}
-    )
+    usado = await campanhas.disparos_no_mes(db, tenant_id)
     if usado + a_enviar > teto:
         raise HTTPException(
             status_code=403,

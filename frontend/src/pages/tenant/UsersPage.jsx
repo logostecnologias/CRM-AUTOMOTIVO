@@ -3,6 +3,7 @@ import api from "@/lib/api";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
+import { rotuloPapel } from "@/lib/papeis";
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -119,7 +120,7 @@ export default function UsersPage() {
           <div key={u.id} className="grid grid-cols-12 px-4 py-3 border-b border-line items-center hover:bg-surface-2" data-testid={`user-row-${u.id}`}>
             <div className="col-span-4 font-semibold">{u.name}</div>
             <div className="col-span-3 font-mono text-xs text-ink">{u.email}</div>
-            <div className="col-span-2"><span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full bg-surface-2 border-line text-ink">{u.role}</span></div>
+            <div className="col-span-2"><span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full bg-surface-2 border-line text-ink">{rotuloPapel(u.role)}</span></div>
             <div className="col-span-2 font-mono text-xs">{u.role === "tenant_admin" ? "todas" : (u.connection_ids?.length || 0)}</div>
             <div className="col-span-1 flex gap-1 justify-end">
               <button onClick={() => openEdit(u)} className="p-1.5 hover:bg-surface-3"><PencilSimple size={14} weight="bold" /></button>

@@ -22,7 +22,7 @@ def _now():
 async def list_departments(user: dict = Depends(get_current_user)):
     # Any authenticated user in the tenant can list (needed for filters).
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Usuário sem tenant")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     db = get_db()
     depts = await db.departments.find({"tenant_id": user["tenant_id"]}, {"_id": 0}).sort("nome", 1).to_list(200)
     return depts

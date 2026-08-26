@@ -140,7 +140,7 @@ export default function TenantsPage() {
               )}
             </div>
             <div className="col-span-2">
-              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full ${t.status === "active" ? "bg-success-soft border-success text-success" : "bg-danger-soft border-danger text-danger"}`}>{t.status}</span>
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full ${t.status === "active" ? "bg-success-soft border-success text-success" : "bg-danger-soft border-danger text-danger"}`}>{t.status === "active" ? "ativa" : "suspensa"}</span>
             </div>
             <div className="col-span-1 font-mono text-sm">{t.bots_count}</div>
             <div className="col-span-2 text-xs text-ink-3 font-mono">{new Date(t.created_at).toLocaleDateString("pt-BR")}</div>

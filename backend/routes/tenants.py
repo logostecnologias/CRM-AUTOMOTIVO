@@ -114,7 +114,7 @@ async def update_tenant(tenant_id: str, body: TenantUpdate, _=Depends(require_su
             raise HTTPException(status_code=400, detail="Plano inválido")
     res = await db.tenants.update_one({"id": tenant_id}, {"$set": update})
     if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
     tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
     (await _enrich_plan(db, [tenant]))
     if novo_plano:
@@ -155,7 +155,7 @@ async def impersonate(tenant_id: str, response: Response, super_admin=Depends(re
     db = get_db()
     tenant = await db.tenants.find_one({"id": tenant_id})
     if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
     log_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     await db.impersonation_log.insert_one({

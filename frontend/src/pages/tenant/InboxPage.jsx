@@ -50,7 +50,7 @@ export default function InboxPage() {
     (user?.role !== "agent" || active?.atendente_id === user?.id);
 
   return (
-    <div className="h-screen flex flex-col" data-testid="inbox-page">
+    <div className="h-full flex flex-col" data-testid="inbox-page">
       <div className="border-b border-line-strong bg-surface px-6 py-4">
         <div className="text-[10px] font-bold tracking-[0.25em] uppercase text-ink-3 mb-2">Central</div>
         <h1 className="font-heading text-2xl font-black tracking-tighter mb-4">Atendimento</h1>

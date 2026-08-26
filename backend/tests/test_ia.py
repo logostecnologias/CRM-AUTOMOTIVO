@@ -1,10 +1,13 @@
-"""Teste da conexao de IA: cifra da credencial, validacao antes de gravar,
-resolucao de credencial (empresa x plataforma), cota do plano e permissoes.
+"""Teste da credencial de IA: cifra, validacao antes de gravar, resolucao
+(chave do agente x chave da plataforma), cota do plano e permissoes.
+
+A credencial e do AGENTE, nao da empresa — um cliente pode ter uma chave da
+Anthropic no agente de suporte e uma da OpenAI no de vendas.
 
 O provedor nunca e chamado de verdade aqui — `ai_client.validar` e substituido.
 O que se testa e a regra em volta dele, que e onde moram os erros: gravar uma
-chave que nao funciona, vazar o segredo para a tela, deixar a empresa B ver a
-conexao da empresa A, ou contar consumo errado.
+chave que nao funciona, vazar o segredo para a tela, deixar a empresa B
+alcancar o agente da empresa A, ou contar consumo errado.
 """
 import asyncio
 import inspect
@@ -136,134 +139,144 @@ async def etapa_cifra():
 
 
 async def etapa_salvar():
-    print("\n[salvar conexao]")
+    print()
+    print("[gravar credencial do agente]")
     await semear()
+    # Provedor desconhecido nem chega perto da rede.
+    st, det = await erro(rai.criar_agente(
+        rai.AgenteIn(nome="X", provedor="deepseek", chave_api="sk-x"), ADMIN_A))
+    check("provedor desconhecido e recusado", st == 400, (st, det))
 
-    # Prefixo errado nao chega a gastar uma chamada no provedor.
-    st, det = await erro(rai.salvar_conexao(
-        rai.ConexaoIn(provedor="anthropic", chave_api=CHAVE_OPENAI), ADMIN_A))
-    check("chave do provedor errado e recusada", st == 400, (st, det))
-    check("e nem chamou o provedor", len(VALIDAR.chamadas) == 0, VALIDAR.chamadas)
+    # Chave com o prefixo do outro provedor e barrada ANTES da chamada.
+    VALIDAR.chamadas.clear()
+    st, det = await erro(rai.criar_agente(
+        rai.AgenteIn(nome="X", provedor="anthropic", chave_api=CHAVE_OPENAI), ADMIN_A))
+    check("chave da openai no campo da anthropic e recusada", st == 400, (st, det))
+    check("sem gastar chamada no provedor", VALIDAR.chamadas == [], VALIDAR.chamadas)
 
-    # Provedor recusa a chave: nada pode ser gravado.
-    VALIDAR.erro = "Chave de API recusada pelo provedor."
-    st, det = await erro(rai.salvar_conexao(
-        rai.ConexaoIn(provedor="anthropic", chave_api=CHAVE_ANTHROPIC), ADMIN_A))
-    check("chave recusada devolve 400 com o motivo", st == 400 and "recusada" in det, (st, det))
-    check("nada foi gravado quando a validacao falhou",
-          await DB.ai_connections.find_one({"tenant_id": TENANT_A}) is None)
+    # Caminho feliz: valida antes de gravar.
+    VALIDAR.chamadas.clear()
+    agente = await rai.criar_agente(rai.AgenteIn(
+        nome="Bia", tipo="suporte", provedor="anthropic",
+        modelo="claude-haiku-4-5", chave_api=CHAVE_ANTHROPIC), ADMIN_A)
+    check("validou antes de gravar", len(VALIDAR.chamadas) == 1, VALIDAR.chamadas)
+    check("gravou como ok", agente["credencial_status"] == "ok", agente)
+    check("a chave em claro nao volta para a tela",
+          CHAVE_ANTHROPIC not in str(agente), agente)
+    check("so a mascara volta", agente["mascara"].startswith("sk-ant-")
+          and agente["mascara"].endswith("KKKK"), agente["mascara"])
 
-    # Caminho feliz.
+    # Chave recusada pelo provedor nao pode ser gravada.
+    VALIDAR.erro = ai_client.IAError("Chave de API recusada pelo provedor.")
+    st, det = await erro(rai.criar_agente(rai.AgenteIn(
+        nome="Ruim", provedor="openai", chave_api=CHAVE_OPENAI), ADMIN_A))
+    check("chave recusada nao e gravada", st == 400, (st, det))
+    check("com o motivo do provedor", "recusada" in det, det)
     VALIDAR.erro = None
-    antes = len(VALIDAR.chamadas)
-    dados = await rai.salvar_conexao(
-        rai.ConexaoIn(provedor="anthropic", chave_api=CHAVE_ANTHROPIC), ADMIN_A)
-    check("conexao gravada como conectada", dados["status"] == "conectada", dados)
-    check("modelo cai no padrao do provedor",
-          dados["modelo"] == ai_client.modelo_padrao("anthropic"), dados["modelo"])
-    check("a validacao rodou antes de gravar",
-          len(VALIDAR.chamadas) == antes + 1, VALIDAR.chamadas)
+    restantes = await DB.ai_agents.find({"tenant_id": TENANT_A}).to_list(10)
+    check("e o agente ruim nao ficou no banco", len(restantes) == 1, len(restantes))
 
-    # O que a tela recebe nao pode conter o segredo.
-    serializado = str(dados)
-    check("a resposta da rota nao traz a chave", CHAVE_ANTHROPIC not in serializado)
-    check("nem o texto cifrado", "cifrada" not in serializado, serializado)
-    check("mas traz a mascara", dados["mascara"] == "sk-ant-…KKKK", dados["mascara"])
-
-    # No banco a chave esta cifrada, nao em texto puro.
-    guardado = await DB.ai_connections.find_one({"tenant_id": TENANT_A})
-    check("no banco a chave esta cifrada",
-          CHAVE_ANTHROPIC not in str(guardado), "chave em texto puro no banco!")
-
-    # Trocar so o modelo, sem reenviar a chave (a tela nunca a devolveu).
-    dados = await rai.salvar_conexao(
-        rai.ConexaoIn(provedor="anthropic", modelo="claude-sonnet-5"), ADMIN_A)
-    check("troca de modelo sem reenviar a chave", dados["modelo"] == "claude-sonnet-5", dados)
-    check("e reaproveitou a chave guardada",
-          VALIDAR.chamadas[-1][1] == CHAVE_ANTHROPIC, VALIDAR.chamadas[-1])
-
-    # Trocar de provedor sem chave nova nao tem como funcionar.
-    st, det = await erro(rai.salvar_conexao(rai.ConexaoIn(provedor="openai"), ADMIN_A))
-    check("trocar de provedor exige chave nova", st == 400, (st, det))
-
-    # Modelo inexistente.
-    st, det = await erro(rai.salvar_conexao(
-        rai.ConexaoIn(provedor="anthropic", modelo="claude-inventado"), ADMIN_A))
-    check("modelo fora do catalogo e recusado", st == 400, (st, det))
-
-    # Uma conexao por empresa: o segundo salvamento atualiza, nao duplica.
-    check("nao duplicou documento",
-          await DB.ai_connections.count_documents({"tenant_id": TENANT_A}) == 1)
+    globals()["AGENTE_A"] = agente
 
 
 async def etapa_isolamento():
-    print("\n[isolamento entre empresas]")
-    # A empresa B nao enxerga a conexao da A, mesmo sendo admin da propria.
-    visto = await rai.obter_conexao(ADMIN_B)
-    check("empresa B nao ve a conexao da empresa A", visto["conexao"] is None, visto)
+    print()
+    print("[uma empresa nao alcanca o agente da outra]")
+    agente_b = await rai.criar_agente(rai.AgenteIn(
+        nome="Do Bruno", provedor="openai", modelo="gpt-5-nano",
+        chave_api=CHAVE_OPENAI), ADMIN_B)
 
-    st, det = await erro(rai.testar_conexao(ADMIN_B))
-    check("testar sem conexao propria da 404", st == 404, (st, det))
+    vistos_b = await rai.listar_agentes(ADMIN_B)
+    check("B ve so o agente dele", [a["id"] for a in vistos_b] == [agente_b["id"]], vistos_b)
+    vistos_a = await rai.listar_agentes(ADMIN_A)
+    check("A ve so o dele", [a["id"] for a in vistos_a] == [AGENTE_A["id"]], vistos_a)
 
-    # E o delete da B nao pode apagar a da A.
-    await rai.remover_conexao(ADMIN_B)
-    check("delete da B nao apagou a conexao da A",
-          await DB.ai_connections.find_one({"tenant_id": TENANT_A}) is not None)
+    # B nao alcanca o agente de A por id — o tenant_id entra no filtro de todas.
+    st, _ = await erro(rai.ver_prompt(AGENTE_A["id"], ADMIN_B))
+    check("B nao le o prompt do agente de A", st == 404, st)
+    st, _ = await erro(rai.atualizar_agente(
+        AGENTE_A["id"], rai.AgenteIn(nome="invadido"), ADMIN_B))
+    check("B nao edita o agente de A", st == 404, st)
+    st, _ = await erro(rai.remover_agente(AGENTE_A["id"], ADMIN_B))
+    check("B nao apaga o agente de A", st == 404, st)
+    st, _ = await erro(rai.testar_agente(
+        AGENTE_A["id"], rai.TesteIn(mensagens=[{"role": "user", "content": "oi"}]), ADMIN_B))
+    check("B nao testa (nem gasta a chave de) A", st == 404, st)
+
+    sobrou = await DB.ai_agents.find_one({"id": AGENTE_A["id"]})
+    check("o agente de A segue intacto", sobrou and sobrou["nome"] == "Bia", sobrou)
 
 
 async def etapa_teste_de_conexao():
-    print("\n[reteste da conexao]")
-    # Chave revogada no console do provedor: o status tem que refletir isso.
-    VALIDAR.erro = "Chave de API recusada pelo provedor."
-    r = await rai.testar_conexao(ADMIN_A)
-    check("reteste com falha devolve ok=False", r["ok"] is False, r)
-    guardado = await DB.ai_connections.find_one({"tenant_id": TENANT_A})
-    check("status vira erro", guardado["status"] == "erro", guardado["status"])
-    check("o motivo fica gravado", "recusada" in (guardado["ultimo_erro"] or ""), guardado)
+    print()
+    print("[a chave pode morrer depois de salva]")
 
-    # Voltou a funcionar: limpa o erro.
-    VALIDAR.erro = None
-    r = await rai.testar_conexao(ADMIN_A)
-    check("reteste bem-sucedido devolve ok=True", r["ok"] is True, r)
-    guardado = await DB.ai_connections.find_one({"tenant_id": TENANT_A})
-    check("status volta a conectada", guardado["status"] == "conectada")
-    check("o erro anterior e limpo", guardado["ultimo_erro"] is None, guardado)
+    async def responder_ok(db, tenant_id, agente, instrucoes, historico):
+        return ai_client.Resposta(texto="ok", modelo="claude-haiku-4-5")
+
+    async def responder_morto(db, tenant_id, agente, instrucoes, historico):
+        raise ai_client.IAError("A conta no provedor esta sem saldo.")
+
+    original = ai_runtime.responder_por_agente
+    rai.ai_runtime.responder_por_agente = responder_ok
+    try:
+        msg = rai.TesteIn(mensagens=[{"role": "user", "content": "oi"}])
+        r = await rai.testar_agente(AGENTE_A["id"], msg, ADMIN_A)
+        check("teste responde quando a chave funciona", r["texto"] == "ok", r)
+
+        rai.ai_runtime.responder_por_agente = responder_morto
+        st, det = await erro(rai.testar_agente(AGENTE_A["id"], msg, ADMIN_A))
+        check("chave morta devolve 400 com o motivo", st == 400 and "saldo" in det, (st, det))
+        doc = await DB.ai_agents.find_one({"id": AGENTE_A["id"]})
+        check("e o agente fica marcado como quebrado",
+              doc["credencial_status"] == "erro", doc.get("credencial_status"))
+        check("guardando o motivo para a tela", "saldo" in (doc.get("credencial_erro") or ""))
+
+        rai.ai_runtime.responder_por_agente = responder_ok
+        await rai.testar_agente(AGENTE_A["id"], msg, ADMIN_A)
+        doc = await DB.ai_agents.find_one({"id": AGENTE_A["id"]})
+        check("e desmarca quando volta a funcionar",
+              doc["credencial_status"] == "ok", doc.get("credencial_status"))
+    finally:
+        rai.ai_runtime.responder_por_agente = original
 
 
 async def etapa_resolucao_de_credencial():
     print("\n[de quem e a conta]")
-    # A empresa A tem conexao propria: e a dela que responde.
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_A)
+    agente_a = await DB.ai_agents.find_one({"id": AGENTE_A["id"]}, {"_id": 0})
+    sem_chave = {"id": "ag-sem", "nome": "Sem chave", "tenant_id": TENANT_B}
+
+    # O agente de A tem chave propria: e a dela que responde.
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_A, agente_a)
     check("empresa com conexao usa a conta dela",
           cred["origem"] == ai_runtime.ORIGEM_CLIENTE, cred["origem"])
     check("e a chave decifrada e a certa", cred["chave"] == CHAVE_ANTHROPIC)
 
-    # A empresa B nao tem conexao e nao ha chave de plataforma: erro claro.
-    st, det = await erro(ai_runtime.resolver_credencial(DB, TENANT_B))
-    check("sem conexao e sem plataforma da 400", st == 400, (st, det))
-    check("com texto que a tela pode mostrar", "Conecte a conta" in det, det)
+    # Agente sem chave e sem chave de plataforma: erro claro.
+    st, det = await erro(ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave))
+    check("sem chave e sem plataforma da 400", st == 400, (st, det))
+    check("dizendo qual agente esta sem chave", "Sem chave" in det, det)
 
     # Com chave de plataforma configurada, a B passa a ter rede de seguranca.
     os.environ["AI_PLATFORM_KEY"] = "sk-plataforma"
     os.environ["AI_PLATFORM_PROVIDER"] = "openai"
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_B)
-    check("sem conexao propria cai na plataforma",
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave)
+    check("sem chave propria cai na plataforma",
           cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA, cred)
     check("com o modelo padrao do provedor da plataforma",
           cred["modelo"] == ai_client.modelo_padrao("openai"), cred["modelo"])
 
-    # Conexao propria continua tendo precedencia sobre a plataforma.
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_A)
-    check("conexao propria tem precedencia",
+    # A chave do agente continua tendo precedencia sobre a plataforma.
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_A, agente_a)
+    check("chave do agente tem precedencia",
           cred["origem"] == ai_runtime.ORIGEM_CLIENTE, cred["origem"])
 
-    # Conexao em erro nao e usada: cai na plataforma em vez de tentar uma
-    # chave que ja se sabe que nao funciona.
-    await DB.ai_connections.update_one({"tenant_id": TENANT_A}, {"$set": {"status": "erro"}})
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_A)
-    check("conexao com erro nao e usada",
+    # Credencial marcada como quebrada nao e usada: cai na plataforma em vez de
+    # insistir numa chave que ja se sabe que nao funciona.
+    cred = await ai_runtime.resolver_credencial(
+        DB, TENANT_A, {**agente_a, "credencial_status": "erro"})
+    check("credencial marcada como quebrada nao e reusada",
           cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA, cred["origem"])
-    await DB.ai_connections.update_one({"tenant_id": TENANT_A}, {"$set": {"status": "conectada"}})
 
     os.environ.pop("AI_PLATFORM_PROVIDER", None)
 
@@ -308,9 +321,12 @@ async def etapa_cota_do_plano():
     await DB.plans.insert_one({"id": "p-1", "nome": "Essencial", "max_tokens_ia_mes": 1000})
     await DB.tenants.update_one({"id": TENANT_B}, {"$set": {"plan_id": "p-1"}})
     os.environ["AI_PLATFORM_KEY"] = "sk-plataforma"
+    # Agente sem chave propria: e ele que consome a cota do plano.
+    sem_chave = {"id": "ag-sem", "nome": "Sem chave", "tenant_id": TENANT_B}
+    agente_a = await DB.ai_agents.find_one({"id": AGENTE_A["id"]}, {"_id": 0})
 
     # Abaixo do teto: passa.
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_B)
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave)
     check("abaixo do teto a plataforma responde",
           cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA)
 
@@ -319,21 +335,21 @@ async def etapa_cota_do_plano():
                                 tokens_entrada=2000, tokens_saida=0)
     await ai_runtime.registrar_uso(DB, TENANT_B, ai_runtime.ORIGEM_PLATAFORMA,
                                    "openai", "gpt-5-nano", grande)
-    st, det = await erro(ai_runtime.resolver_credencial(DB, TENANT_B))
+    st, det = await erro(ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave))
     check("acima do teto o plano barra", st == 403, (st, det))
-    check("a mensagem sugere conectar a conta propria", "Conecte a conta" in det, det)
+    check("a mensagem sugere usar chave propria", "chave de IA propria" in det.replace("ó", "o"), det)
 
-    # Empresa com conta propria nao tem teto nosso, mesmo estourada.
+    # Agente com chave propria nao tem teto nosso, mesmo com a empresa estourada.
     await DB.tenants.update_one({"id": TENANT_A}, {"$set": {"plan_id": "p-1"}})
     await ai_runtime.registrar_uso(DB, TENANT_A, ai_runtime.ORIGEM_CLIENTE,
                                    "openai", "gpt-5-nano", grande)
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_A)
-    check("conta propria nao tem teto do plano",
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_A, agente_a)
+    check("chave propria nao tem teto do plano",
           cred["origem"] == ai_runtime.ORIGEM_CLIENTE, cred["origem"])
 
     # Teto 0 = ilimitado.
     await DB.plans.update_one({"id": "p-1"}, {"$set": {"max_tokens_ia_mes": 0}})
-    cred = await ai_runtime.resolver_credencial(DB, TENANT_B)
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave)
     check("teto 0 significa ilimitado",
           cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA, cred)
 
@@ -345,8 +361,9 @@ async def etapa_barreira_de_permissao():
     # Chamar a funcao da rota direto NAO executa o Depends — a guarda so pode
     # ser conferida onde ela e declarada, na assinatura do endpoint.
     import auth
-    endpoints = [rai.listar_provedores, rai.obter_conexao, rai.salvar_conexao,
-                 rai.testar_conexao, rai.remover_conexao, rai.consumo]
+    endpoints = [rai.listar_provedores, rai.consumo, rai.catalogo_de_agentes,
+                 rai.listar_agentes, rai.criar_agente, rai.atualizar_agente,
+                 rai.remover_agente, rai.testar_agente, rai.ver_prompt]
     for fn in endpoints:
         deps = [p.default.dependency for p in inspect.signature(fn).parameters.values()
                 if hasattr(p.default, "dependency")]

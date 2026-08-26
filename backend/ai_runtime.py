@@ -3,16 +3,20 @@ usar, quanto ela já consumiu no mês e se ainda pode consumir.
 
 Separado de `ai_client.py` de propósito: lá é só protocolo (falar com o
 provedor); aqui é a regra de negócio (de quem é a conta, quem paga, até quanto
-pode). Quem precisa de uma resposta chama `responder_por_tenant`, e não o
+pode). Quem precisa de uma resposta chama `responder_por_agente`, e não o
 `ai_client` direto — é essa função que garante que o consumo foi medido e o
 teto respeitado.
 
-**Duas origens de credencial.** A empresa pode conectar a conta dela
-(`ai_connections`), e aí o consumo é dela e não tem teto nosso; ou não conectar
-nada, e aí cai na chave da plataforma, com o consumo medido e limitado pelo
-plano. As duas convivem porque atendem clientes diferentes: quem já tem conta
-no provedor quer usar a dele, e quem nunca ouviu falar de token quer que
-simplesmente funcione.
+**A credencial é do agente, não da empresa.** Cada agente carrega o próprio
+provedor, modelo e chave cifrada. Uma empresa pode perfeitamente ter o agente
+de suporte no Haiku com a chave da Anthropic e o de vendas no GPT-5 mini com a
+chave da OpenAI — são times, orçamentos e às vezes contas diferentes. Amarrar a
+credencial na empresa forçaria os dois a dividirem uma chave só.
+
+**Duas origens.** A chave do próprio agente vem primeiro, e aí o consumo é do
+cliente e não tem teto nosso. Sem ela, cai na chave da plataforma, com o
+consumo medido e limitado pelo plano — é o que faz o agente funcionar para quem
+nunca ouviu falar de token.
 
 **O consumo é gravado sempre**, nas duas origens. Na chave da plataforma
 porque é o que fatura; na chave do cliente porque é o que permite mostrar a
@@ -60,20 +64,21 @@ def _credencial_plataforma() -> dict | None:
     return {"provedor": provedor, "chave": chave, "modelo": modelo, "origem": ORIGEM_PLATAFORMA}
 
 
-async def resolver_credencial(db, tenant_id: str) -> dict:
-    """Qual conta responde por esta empresa. A dela vem primeiro.
+async def resolver_credencial(db, tenant_id: str, agente: dict) -> dict:
+    """Qual conta paga a resposta deste agente. A dele vem primeiro.
 
     Levanta 400/403 com texto que a tela pode mostrar — quem chama não precisa
     distinguir "não configurou" de "estourou o plano".
+
+    Credencial marcada como `erro` **não** é usada: já se sabe que ela não
+    funciona, e insistir só produz a mesma falha mais devagar. Cai na chave da
+    plataforma, que é o comportamento útil enquanto o cliente não conserta.
     """
-    conexao = await db.ai_connections.find_one(
-        {"tenant_id": tenant_id, "status": "conectada"}, {"_id": 0}
-    )
-    if conexao:
+    if agente.get("credencial") and agente.get("credencial_status") != "erro":
         return {
-            "provedor": conexao["provedor"],
-            "chave": ai_credentials.decifrar(conexao.get("credencial") or {}),
-            "modelo": conexao["modelo"],
+            "provedor": agente["provedor"],
+            "chave": ai_credentials.decifrar(agente["credencial"]),
+            "modelo": agente["modelo"],
             "origem": ORIGEM_CLIENTE,
         }
 
@@ -81,7 +86,8 @@ async def resolver_credencial(db, tenant_id: str) -> dict:
     if plataforma is None:
         raise HTTPException(
             status_code=400,
-            detail="Nenhuma conta de IA conectada. Conecte a conta da empresa em Agentes de IA.",
+            detail=(f"O agente \"{agente.get('nome') or 'sem nome'}\" não tem chave de IA "
+                    "configurada. Abra a configuração dele e informe uma."),
         )
     await _checar_cota(db, tenant_id)
     return plataforma
@@ -118,7 +124,7 @@ async def _checar_cota(db, tenant_id: str):
             detail=(
                 f"Limite de IA do plano \"{plano['nome']}\" atingido "
                 f"({usados['tokens']:,} de {teto:,} tokens no mês). "
-                "Conecte a conta de IA da empresa para continuar sem limite."
+                "Informe uma chave de IA própria no agente para continuar sem limite."
             ).replace(",", "."),
         )
 
@@ -128,7 +134,8 @@ async def _checar_cota(db, tenant_id: str):
 # ---------------------------------------------------------------------------
 
 async def registrar_uso(db, tenant_id: str, origem: str, provedor: str,
-                        modelo_id: str, resposta: ai_client.Resposta):
+                        modelo_id: str, resposta: ai_client.Resposta,
+                        agente_id: str | None = None):
     """Soma esta chamada no acumulado do dia.
 
     Um documento por (empresa, dia, modelo), incrementado — não um documento
@@ -147,7 +154,7 @@ async def registrar_uso(db, tenant_id: str, origem: str, provedor: str,
                   + resposta.tokens_cache_leitura + resposta.tokens_cache_escrita)
         await db.ai_usage.update_one(
             {"tenant_id": tenant_id, "dia": _hoje(), "provedor": provedor,
-             "modelo": modelo_id, "origem": origem},
+             "modelo": modelo_id, "origem": origem, "agente_id": agente_id},
             {
                 "$inc": {
                     "chamadas": 1,
@@ -198,17 +205,17 @@ async def consumo_do_mes(db, tenant_id: str, mes: str | None = None) -> dict:
 # O ponto de entrada de quem quer uma resposta
 # ---------------------------------------------------------------------------
 
-async def responder_por_tenant(db, tenant_id: str, instrucoes: str,
+async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str,
                                historico: list[dict]) -> ai_client.Resposta:
-    """Resolve a credencial, chama o provedor e mede — nesta ordem.
+    """Resolve a credencial do agente, chama o provedor e mede — nesta ordem.
 
-    É por aqui que o agente de IA, o nó de fluxo e a sugestão ao atendente
+    É por aqui que o atendimento, o chat de teste e (futuramente) o nó de fluxo
     devem passar. Chamar `ai_client.responder` direto pula a cota e a medição.
     """
-    cred = await resolver_credencial(db, tenant_id)
+    cred = await resolver_credencial(db, tenant_id, agente)
     resposta = await ai_client.responder(
         cred["provedor"], cred["chave"], cred["modelo"], instrucoes, historico
     )
     await registrar_uso(db, tenant_id, cred["origem"], cred["provedor"],
-                        cred["modelo"], resposta)
+                        cred["modelo"], resposta, agente.get("id"))
     return resposta

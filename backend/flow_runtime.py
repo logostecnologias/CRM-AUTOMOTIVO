@@ -8,7 +8,10 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from db import get_db
-from flow_engine import _find_node, _find_next, _find_start, _interp, _process_node
+from flow_engine import (
+    _find_node, _find_next, _find_start, _interp, _process_node,
+    FORMATO_BOTOES, FORMATO_LISTA, FORMATO_TEXTO, resolver_escolha_menu,
+)
 import media_store
 import wuzapi_client as wuzapi
 import ai_agents
@@ -123,6 +126,92 @@ async def _log_msg(db, session_id, tenant_id, direction, content, mtype="text", 
     return await log_message(db, session_id, tenant_id, direction, content, mtype, meta)
 
 
+def _itens_do_menu(o: dict) -> list[dict]:
+    """As opções com id.
+
+    Output antigo (de uma sessão que atravessou o deploy) só tem `options`, com
+    rótulos e sem id — daí o id sintetizado na mesma forma que
+    `flow_engine.ids_das_opcoes` usa.
+    """
+    if o.get("itens"):
+        return o["itens"]
+    return [{"id": f"opt_{i}", "label": rotulo, "descricao": ""}
+            for i, rotulo in enumerate(o.get("options") or [])]
+
+
+def _menu_em_texto(o: dict) -> str:
+    """O menu como lista numerada — o formato que chega sempre.
+
+    É o que sai no formato `texto` e é também a degradação dos outros dois. E é
+    sempre ele que vai para o histórico: o atendente que abre a conversa na
+    Central precisa ver quais opções o contato recebeu, e uma bolha dizendo
+    apenas "Escolha uma opção" não diz nada.
+    """
+    cabeca = "\n".join([p for p in (o.get("titulo"), o.get("content")) if p])
+    linhas = [cabeca, ""]
+    for i, item in enumerate(_itens_do_menu(o)):
+        rotulo = item.get("label") or ""
+        if item.get("descricao"):
+            rotulo = f"{rotulo} — {item['descricao']}"
+        linhas.append(f"{i+1}. {rotulo}")
+    if o.get("rodape"):
+        linhas += ["", o["rodape"]]
+    return "\n".join(linhas)
+
+
+async def _enviar_menu(db, tenant_id, token, number, session_id, o):
+    """Manda o Menu no formato escolhido no editor, caindo para texto se não der.
+
+    A degradação é o ponto do desenho, não um detalhe. O nó de Menu deixa a
+    conversa em `awaiting`: se a mensagem que faz a pergunta não chega, o
+    contato fica sem saber que devia responder e a conversa trava — e o
+    WhatsApp descarta mensagem interativa fora dos tetos **sem devolver erro**.
+    Receber a mesma pergunta como lista numerada é muito melhor que não receber.
+
+    São dois os motivos para degradar, e os dois ficam registrados em `meta`: a
+    configuração estourou um teto (`problemas`, calculado no motor) ou o envio
+    falhou de verdade — inclusive um gateway que não conheça a rota
+    /chat/send/buttons, que é o caso em que "os botões pararam de sair" precisa
+    ser respondível sem adivinhação.
+    """
+    formato = o.get("formato") or FORMATO_TEXTO
+    itens = _itens_do_menu(o)
+    texto = _menu_em_texto(o)
+    problemas = o.get("problemas") or []
+    motivo = "; ".join(problemas) if problemas else None
+
+    if formato in (FORMATO_BOTOES, FORMATO_LISTA) and itens and not problemas:
+        try:
+            if formato == FORMATO_BOTOES:
+                await wuzapi.send_buttons(
+                    token, number, o.get("content", ""), itens,
+                    titulo=o.get("titulo", ""), rodape=o.get("rodape", ""))
+            else:
+                await wuzapi.send_list(
+                    token, number, o.get("content", ""),
+                    o.get("botao_texto") or "Ver opções", itens,
+                    titulo=o.get("titulo", ""), rodape=o.get("rodape", ""),
+                    titulo_secao=o.get("titulo_secao", ""))
+            await _log_msg(db, session_id, tenant_id, "enviada", texto,
+                           mtype="menu", meta={"menu": {"formato": formato}})
+            return
+        except Exception as e:
+            # Qualquer falha, não só WuzapiError: `_request` deixa escapar erro
+            # de httpx que não está na lista de retry (PoolTimeout, por
+            # exemplo), e aí a pergunta se perderia. Logado como exceção porque
+            # um erro que não seja de rede é bug e precisa continuar visível.
+            motivo = str(e)
+            logger.exception("Menu interativo (%s) falhou, enviando como texto",
+                             formato)
+
+    meta = {"formato": FORMATO_TEXTO}
+    if formato != FORMATO_TEXTO:
+        meta.update({"pedido": formato, "degradado": motivo})
+    await wuzapi.send_text(token, number, texto)
+    await _log_msg(db, session_id, tenant_id, "enviada", texto,
+                   mtype="menu", meta={"menu": meta})
+
+
 async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
     for o in outputs:
         try:
@@ -130,12 +219,7 @@ async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
                 await wuzapi.send_text(token, number, o["content"])
                 await _log_msg(db, session_id, tenant_id, "enviada", o["content"])
             elif o["type"] == "menu":
-                lines = [o["content"], ""]
-                for i, opt in enumerate(o["options"]):
-                    lines.append(f"{i+1}. {opt}")
-                text = "\n".join(lines)
-                await wuzapi.send_text(token, number, text)
-                await _log_msg(db, session_id, tenant_id, "enviada", text, mtype="menu")
+                await _enviar_menu(db, tenant_id, token, number, session_id, o)
             elif o["type"] == "media":
                 # O nó de Mídia guarda uma URL pública; a WuzAPI só aceita o
                 # arquivo embutido, então ele é baixado e convertido aqui.
@@ -261,7 +345,7 @@ async def _agente_ia(db, tenant_id, conn, session, contact, text, media, outputs
     return False
 
 
-async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None):
+async def handle_incoming_message(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None, escolha: dict | None = None):
     """Called from webhook. Advances the conversation for this contact.
 
     `connection_id` identifies exactly which whatsapp_connection (and thus
@@ -271,6 +355,11 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
     webhook payload) — free, no extra API call needed.
     `media` descreve o anexo, quando houver (ver _extract_media no webhook);
     `text` é a legenda dele nesse caso.
+    `escolha` é {"id", "titulo"} quando o contato tocou num botão ou escolheu
+    um item de lista, em vez de digitar (ver _extract_escolha no webhook). O id
+    é o da opção do nó de Menu, e é por ele que a saída é resolvida: o rótulo
+    volta cortado em 20 caracteres nos botões, então casar por texto falharia
+    justamente nos menus mais descritivos.
     """
     db = get_db()
 
@@ -328,6 +417,26 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
     # Loga a mensagem antes de qualquer decisão: mesmo sem bot capaz de
     # atender, ela precisa aparecer no histórico da conversa.
     session_id = session["id"] if session else str(uuid.uuid4())
+
+    # Rótulo da opção tocada, recuperado do menu que fez a pergunta.
+    #
+    # A resposta de um botão chega com o id e, na prática, sem rótulo — e o
+    # último recurso do webhook é gravar o id. "t2_dur" no histórico faz o
+    # atendente ler um identificador interno no lugar do que o contato tocou.
+    # O rótulo guardado em `awaiting.rotulos` quando o menu saiu é a única
+    # fonte que existe para essa frase, e serve aos quatro formatos de resposta.
+    #
+    # `text` só é substituído quando ele veio da própria escolha (vazio, o id
+    # ou o rótulo cortado) — se o contato mandou texto de verdade junto, é o
+    # texto dele que vale.
+    if escolha and escolha.get("id"):
+        rotulo = (((session or {}).get("awaiting") or {})
+                  .get("rotulos") or {}).get(escolha["id"])
+        if rotulo:
+            if text in ("", escolha["id"], escolha.get("titulo") or ""):
+                text = rotulo
+            escolha["titulo"] = rotulo
+
     # O que o contato de fato escreveu, guardado antes de `text` poder virar um
     # aviso de sistema logo abaixo. É isto que o agente de IA recebe: responder
     # a "[image não pôde ser baixado]" como se fosse fala do contato é pior do
@@ -437,17 +546,10 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str, m
             menu_node = _find_node(flow["nodes"], awaiting["node_id"])
             if menu_node and menu_node["type"] == "menu":
                 opts = menu_node.get("data", {}).get("options", [])
-                handle = None
-                m = (text or "").strip()
-                if m.isdigit():
-                    i = int(m) - 1
-                    if 0 <= i < len(opts):
-                        handle = opts[i].get("id") or f"opt_{i}"
-                if handle is None:
-                    for i, o in enumerate(opts):
-                        if o.get("label", "").strip().lower() == m.lower():
-                            handle = o.get("id") or f"opt_{i}"
-                            break
+                # Mesma função que o chat de teste do editor usa: o id do botão
+                # primeiro, depois o número e o rótulo digitados.
+                handle = resolver_escolha_menu(
+                    opts, text, (escolha or {}).get("id"))
                 if handle is None:
                     next_id = _find_next(flow["edges"], menu_node["id"], "invalid")
                     if next_id is None:

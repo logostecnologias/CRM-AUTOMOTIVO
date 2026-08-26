@@ -58,7 +58,7 @@ async def list_sessions(
     limit: int = 200,
 ):
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Sem tenant")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     db = get_db()
     q: dict = {"tenant_id": user["tenant_id"]}
     if status:
@@ -84,7 +84,7 @@ async def unread_count(user: dict = Depends(get_current_user)):
     /sessions — usada pelo polling do sino/som de notificação e pelo badge de
     fila no menu lateral, que rodam a cada poucos segundos."""
     if not user.get("tenant_id"):
-        raise HTTPException(status_code=403, detail="Sem tenant")
+        raise HTTPException(status_code=403, detail="Usuário sem empresa vinculada")
     db = get_db()
     scope: dict = {"tenant_id": user["tenant_id"]}
     accessible = await _accessible_connection_ids(db, user)

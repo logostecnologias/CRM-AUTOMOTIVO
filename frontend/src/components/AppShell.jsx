@@ -57,7 +57,7 @@ export default function AppShell({ variant = "tenant" }) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-canvas">
+    <div className="h-dvh overflow-hidden flex flex-col bg-canvas">
       {impersonatedFrom === "super_admin" && variant === "tenant" && (
         <div className="w-full bg-warning-solid border-b border-line px-6 py-2 flex items-center justify-between text-warning-fg" data-testid="impersonation-bar">
           <div className="text-sm font-bold tracking-wide">
@@ -129,7 +129,7 @@ export default function AppShell({ variant = "tenant" }) {
           </div>
         </aside>
 
-        <main className="flex-1 overflow-x-hidden">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
           <Outlet />
         </main>
       </div>

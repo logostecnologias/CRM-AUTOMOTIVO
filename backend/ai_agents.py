@@ -213,6 +213,14 @@ def montar_instrucoes(agente: dict) -> str:
     if estrategia:
         partes.append("Seu objetivo:\n" + estrategia)
 
+    # Texto livre da empresa. Entra inteiro, sem reformatacao: e o campo onde
+    # ela escreve o que nenhuma lista de opcoes cobriria — o jeito de tratar um
+    # cliente antigo, o nome do produto que nao pode ser abreviado, a pergunta
+    # que sempre precisa ser feita antes de passar o orcamento.
+    if agente.get("instrucoes"):
+        partes.append("Instruções específicas da empresa — siga à risca:\n"
+                      + agente["instrucoes"].strip())
+
     tons = [TONS[t]["frase"] for t in (agente.get("tom") or []) if t in TONS]
     tamanho = TAMANHOS.get(agente.get("tamanho") or "normais", TAMANHOS["normais"])
     estilo = [f"Escreva em português do Brasil, com cerca de {tamanho['palavras']} palavras por resposta."]
@@ -418,8 +426,8 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
                              "encaminhado para atendimento humano")
 
     try:
-        resposta = await ai_runtime.responder_por_tenant(
-            db, tenant_id, montar_instrucoes(agente), historico
+        resposta = await ai_runtime.responder_por_agente(
+            db, tenant_id, agente, montar_instrucoes(agente), historico
         )
     except HTTPException as e:
         # Teto do plano ou nenhuma conta conectada. O detalhe já é texto para
