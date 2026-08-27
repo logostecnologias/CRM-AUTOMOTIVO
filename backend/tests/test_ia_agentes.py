@@ -16,15 +16,16 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
 import tempfile
-# As fotos do agente sao arquivos de verdade em disco: `DataUriStream` abre o
-# arquivo e levanta se ele nao existir, entao o teste precisa de um MEDIA_DIR.
+# As fotos do agente sao arquivos de verdade em disco: o envio sobe o arquivo
+# para a Meta e levanta se ele nao existir, entao o teste precisa de um
+# MEDIA_DIR de verdade.
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x",
+             "META_PLATFORM_TOKEN": "token-de-teste",
              "MEDIA_DIR": tempfile.mkdtemp(prefix="zz-teste-midia-")}.items():
     os.environ.setdefault(k, v)
 
 from cryptography.fernet import Fernet
-os.environ["AI_CREDENTIALS_KEY"] = Fernet.generate_key().decode()
+os.environ["CREDENTIALS_KEY"] = Fernet.generate_key().decode()
 
 from fakedb import FakeDB
 from fastapi import HTTPException
@@ -43,21 +44,24 @@ import routes.ai as rai
 ENVIADOS: list[tuple] = []
 
 
-async def fake_send_text(token, numero, texto):
+async def fake_send_text(cred, numero, texto):
     ENVIADOS.append((numero, texto))
-    return {"ok": True}
+    return f"wamid.t{len(ENVIADOS)}"
 
 
 MIDIAS_ENVIADAS: list[tuple] = []
 
 
-async def fake_send_media(token, numero, tipo, media, caption="", filename=None):
-    MIDIAS_ENVIADAS.append((numero, tipo, filename, caption))
-    return {"ok": True}
+async def fake_send_media(cred, numero, tipo, *, media_id=None, link=None,
+                          caption="", filename=None):
+    MIDIAS_ENVIADAS.append((numero, tipo, filename, caption, media_id))
+    return f"wamid.m{len(MIDIAS_ENVIADAS)}"
 
 
-async def _sem_avatar(*a, **kw):
-    return None
+async def fake_upload_media(cred, caminho, mime, filename=None):
+    """O upload da foto para a Meta. Na Cloud API a mídia não viaja embutida na
+    mensagem: sobe antes e o envio carrega o id devolvido."""
+    return "media-meta-1"
 
 
 class _IAFalsa:
@@ -93,9 +97,9 @@ def _conectar_fake():
     db_mod.get_db = lambda: DB
     for _m in _MODULOS_FAKE:
         _m.get_db = lambda: DB
-    flow_runtime.wuzapi.send_text = fake_send_text
-    flow_runtime.wuzapi.send_media = fake_send_media
-    flow_runtime._fetch_avatar_bg = _sem_avatar
+    flow_runtime.whatsapp.send_text = fake_send_text
+    flow_runtime.whatsapp.send_media = fake_send_media
+    flow_runtime.whatsapp.upload_media = fake_upload_media
     ai_runtime.responder_por_agente = IA
     ai_agents.ai_runtime.responder_por_agente = IA
 
@@ -191,7 +195,7 @@ async def semear(*, agente=None, com_bot=False, bot_trigger="first_message",
     for cid, nome in ((CONN_A, "Vendas"), (CONN_B, "Suporte")):
         await DB.whatsapp_connections.insert_one({
             "id": cid, "tenant_id": TENANT, "nome": nome,
-            "status": "conectado", "wuzapi_token": f"tok-{cid}"})
+            "status": "conectado", "phone_number_id": f"pn-{cid}", "waba_id": "waba-1"})
 
     if com_bot:
         await DB.bots.insert_one({

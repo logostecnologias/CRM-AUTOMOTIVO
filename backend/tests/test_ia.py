@@ -17,14 +17,14 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x"}.items():
+             "META_PLATFORM_TOKEN": "token-de-teste"}.items():
     os.environ.setdefault(k, v)
 
 from cryptography.fernet import Fernet
 
 # A chave mestra precisa existir antes de qualquer cifra. Gerada aqui para o
 # teste nao depender do .env da maquina.
-os.environ["AI_CREDENTIALS_KEY"] = Fernet.generate_key().decode()
+os.environ["CREDENTIALS_KEY"] = Fernet.generate_key().decode()
 
 from fakedb import FakeDB
 from fastapi import HTTPException
@@ -120,14 +120,14 @@ async def etapa_cifra():
           bloco["chave_versao"] == ai_credentials.CHAVE_VERSAO)
 
     # Chave mestra trocada: tem que dizer o que houve, nao devolver lixo.
-    original = os.environ["AI_CREDENTIALS_KEY"]
-    os.environ["AI_CREDENTIALS_KEY"] = Fernet.generate_key().decode()
+    original = os.environ["CREDENTIALS_KEY"]
+    os.environ["CREDENTIALS_KEY"] = Fernet.generate_key().decode()
     try:
         ai_credentials.decifrar(bloco)
         check("chave mestra errada e recusada", False, "decifrou o que nao devia")
     except ai_credentials.CredencialError as e:
-        check("chave mestra errada da erro explicito", "AI_CREDENTIALS_KEY" in str(e), e)
-    os.environ["AI_CREDENTIALS_KEY"] = original
+        check("chave mestra errada da erro explicito", "CREDENTIALS_KEY" in str(e), e)
+    os.environ["CREDENTIALS_KEY"] = original
 
     # Versao antiga: pede reconexao em vez de falhar como "credencial invalida".
     antigo = {**bloco, "chave_versao": 0}
@@ -135,7 +135,10 @@ async def etapa_cifra():
         ai_credentials.decifrar(antigo)
         check("versao anterior e recusada", False)
     except ai_credentials.CredencialError as e:
-        check("versao anterior pede reconexao", "reconectar" in str(e), e)
+        # A mensagem serve as duas credenciais que passam por aqui (chave de IA
+        # e token da Cloud API), entao ela pede para cadastrar de novo em vez de
+        # falar em "reconectar a conta de IA".
+        check("versao anterior pede cadastro de novo", "cadastrá-la de novo" in str(e), e)
 
 
 async def etapa_salvar():

@@ -98,6 +98,38 @@ def normaliza_numero(bruto: str, ddi: str = DDI_PADRAO) -> tuple[str | None, str
     return None, f"número não reconhecido ({len(digitos)} dígitos)"
 
 
+def variantes_br(numero: str) -> list[str]:
+    """As duas grafias possíveis de um celular brasileiro, para **procurar**.
+
+    O WhatsApp identifica cada pessoa por um `wa_id`, e no Brasil ele nem
+    sempre tem o nono dígito: números registrados antes de 2012 fora do
+    Sudeste continuam com oito dígitos no aplicativo, embora se disque com
+    nove. Então o mesmo contato pode estar cadastrado aqui como
+    `5585999998888` (planilha, cadastro manual) e chegar do webhook como
+    `558599998888`, e sem cotejar as duas formas ele viraria dois contatos,
+    com duas conversas e dois históricos.
+
+    Isto é para consulta, **nunca** para escolher o número de envio: continua
+    valendo que não se inventa dígito (ver `normaliza_numero`). Quando existe
+    um `wa_id` observado numa mensagem recebida, é ele que vale no envio,
+    porque é o identificador que a própria Meta usou.
+
+    Só mexe em celular brasileiro (DDI 55 + DDD + 8 ou 9 dígitos começando
+    por 9). Fixo e número estrangeiro voltam sozinhos, sem variante.
+    """
+    digitos = re.sub(r"\D", "", numero or "")
+    if not digitos.startswith(DDI_PADRAO):
+        return [digitos] if digitos else []
+    resto = digitos[len(DDI_PADRAO):]
+    if len(resto) == 11 and resto[2] == "9":
+        return [digitos, DDI_PADRAO + resto[:2] + resto[3:]]
+    if len(resto) == 10 and resto[2] in "6789":
+        # Oito dígitos começando em 6-9 é celular antigo; 2-5 é fixo, que
+        # nunca ganhou nono dígito e não pode ganhar um aqui.
+        return [digitos, DDI_PADRAO + resto[:2] + "9" + resto[2:]]
+    return [digitos]
+
+
 def detecta_delimitador(amostra: str) -> str:
     """`;` é o que o Excel em português gera; `,` é o padrão de todo o resto."""
     try:

@@ -120,6 +120,28 @@ def texto_de(tipo: str, agendamento: dict, config: dict) -> str:
     return montar(modelo, agendamento, config)
 
 
+def template_de(tipo: str, agendamento: dict, config: dict) -> dict | None:
+    """O modelo aprovado deste aviso, com as variáveis já preenchidas.
+
+    Aviso de agenda é o caso em que a janela de 24h quase sempre está fechada:
+    o lembrete sai um dia antes, e quem marcou horário há duas semanas não
+    escreveu nada desde então. Sem modelo aprovado, o WhatsApp recusa o envio,
+    e é justamente o lembrete que faz este módulo se pagar.
+
+    Cada variável é um texto que passa pelo mesmo `montar` do corpo livre,
+    então `{contato}` e `{data_completa}` funcionam igual nos dois lugares.
+    """
+    cfg = config.get(f"template_{tipo}") or {}
+    if not cfg.get("nome"):
+        return None
+    return {
+        "nome": cfg["nome"],
+        "idioma": cfg.get("idioma") or "pt_BR",
+        "valores": [montar(v or "", agendamento, config).strip() or " "
+                    for v in (cfg.get("variaveis") or [])],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Envio
 # ---------------------------------------------------------------------------
@@ -195,8 +217,28 @@ async def avisar(db, tenant_id: str, agendamento: dict, tipo: str, config: dict 
             # precisa ser atendido, não posto na fila em silêncio.
             aguardar_primeira_resposta=False,
         )
-        await flow_runtime.send_human_message(
-            tenant_id, session["id"], texto_de(tipo, agendamento, config))
+        texto = texto_de(tipo, agendamento, config)
+        modelo = template_de(tipo, agendamento, config)
+
+        # Texto livre só chega enquanto a janela de 24h estiver aberta, e para
+        # aviso de agenda ela quase sempre está fechada. Quando há modelo
+        # configurado ele é o caminho preferido; o texto livre fica para a
+        # conversa que acabou de acontecer, onde é mais natural e não custa
+        # modelo. Sem nenhum dos dois, o aviso não sai e o motivo fica no
+        # histórico, em vez de a mensagem sumir sem explicação.
+        if flow_runtime.janela_aberta(session):
+            await flow_runtime.send_human_message(tenant_id, session["id"], texto)
+        elif modelo:
+            await flow_runtime.send_template_message(
+                tenant_id, session["id"], modelo["nome"], modelo["idioma"],
+                modelo["valores"], texto)
+        else:
+            await flow_runtime.log_message(
+                db, session["id"], tenant_id, "sistema",
+                f"Aviso de agenda ({tipo}) não enviado: a janela de 24h desta "
+                "conversa está fechada e não há modelo aprovado configurado "
+                "em Agenda > Configuração.", mtype="system")
+            return False
 
         if marcar_espera:
             # De qual agendamento o "CONFIRMAR" da próxima mensagem fala. Sem

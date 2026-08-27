@@ -116,24 +116,31 @@ async def etapa_audit():
 
 
 def etapa_rotacao_ia():
-    print("\n[ZZ-21] rotação da chave de IA")
+    print("\n[ZZ-21] rotação da chave mestra das credenciais")
+    # A mesma cifra guarda a chave de IA e o token da Cloud API do cliente.
+    # `ai_credentials` continua sendo a porta de entrada do lado da IA; a
+    # lógica mora em `cripto`, e é a chave dele que este teste gira.
     import ai_credentials as ac
+    guardado = os.environ.get("CREDENTIALS_KEY")
     A = Fernet.generate_key().decode()
     B = Fernet.generate_key().decode()
-    os.environ["AI_CREDENTIALS_KEY"] = A
-    os.environ.pop("AI_CREDENTIALS_KEY_PREV", None)
+    os.environ["CREDENTIALS_KEY"] = A
+    os.environ.pop("CREDENTIALS_KEY_PREV", None)
     blob = ac.cifrar("sk-ant-ROT")
-    os.environ["AI_CREDENTIALS_KEY"] = B
-    os.environ["AI_CREDENTIALS_KEY_PREV"] = A
+    os.environ["CREDENTIALS_KEY"] = B
+    os.environ["CREDENTIALS_KEY_PREV"] = A
     check("decifra a cred antiga após rotação (B primária, A em PREV)",
           ac.decifrar(blob) == "sk-ant-ROT")
-    os.environ.pop("AI_CREDENTIALS_KEY_PREV", None)
+    os.environ.pop("CREDENTIALS_KEY_PREV", None)
     try:
         ac.decifrar(blob); falhou = False
     except ac.CredencialError:
         falhou = True
     check("sem a chave anterior, a cred antiga não decifra", falhou)
-    os.environ.pop("AI_CREDENTIALS_KEY", None)
+    if guardado:
+        os.environ["CREDENTIALS_KEY"] = guardado
+    else:
+        os.environ.pop("CREDENTIALS_KEY", None)
 
 
 def test_suite():

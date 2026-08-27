@@ -21,7 +21,7 @@ O que só este arquivo prova, e o Mongo falso (`fakedb.py`) não:
     resposta, e o sintoma seria "ele fica perguntando a mesma coisa".
 
 Tudo roda em tenants próprios (`smoke-agenda`, `smoke-fluxo`) e é **apagado no
-fim**. O envio para a WuzAPI é dublado: não há como mandar mensagem de verdade
+fim**. O envio para a Cloud API é dublado: não há como mandar mensagem de verdade
 sem ocupar um dos dois slots de gatilho da conexão do cliente, que atendem
 gente. O que continua faltando, e exige uma conexão livre, é o toque de um dedo
 humano num menu enviado por um fluxo publicado de verdade.
@@ -100,24 +100,20 @@ async def limpar(db, *tenants):
 
 # --- dublês de envio -------------------------------------------------------
 
-async def _texto(token, numero, texto, *a, **kw):
+async def _texto(cred, numero, texto, *a, **kw):
     ENVIADAS.append(("texto", texto))
-    return {"ok": True}
+    return "wamid.fumaca"
 
 
-async def _lista(token, numero, corpo, botao, itens, *a, **kw):
+async def _lista(cred, numero, corpo, botao, itens, *a, **kw):
     ENVIADAS.append(("lista", corpo, [i["label"] for i in itens],
                      [i["id"] for i in itens]))
-    return {"ok": True}
+    return "wamid.fumaca"
 
 
-async def _botoes(token, numero, corpo, itens, *a, **kw):
+async def _botoes(cred, numero, corpo, itens, *a, **kw):
     ENVIADAS.append(("botoes", corpo, [i["label"] for i in itens]))
-    return {"ok": True}
-
-
-async def _sem_avatar(*a, **kw):
-    return None
+    return "wamid.fumaca"
 
 
 # ---------------------------------------------------------------------------
@@ -279,10 +275,9 @@ async def suite_fluxo(db):
     ADM = admin(T_FLUXO)
     await limpar(db, T_FLUXO)
 
-    flow_runtime.wuzapi.send_text = _texto
-    flow_runtime.wuzapi.send_list = _lista
-    flow_runtime.wuzapi.send_buttons = _botoes
-    flow_runtime._fetch_avatar_bg = _sem_avatar
+    flow_runtime.whatsapp.send_text = _texto
+    flow_runtime.whatsapp.send_list = _lista
+    flow_runtime.whatsapp.send_buttons = _botoes
 
     corte = await rs.criar_servico(rs.ServicoIn(
         nome="Corte fumaça", duracao_min=30, preco=50.0), ADM)
@@ -291,7 +286,7 @@ async def suite_fluxo(db):
     conn_id = str(uuid.uuid4())
     await db.whatsapp_connections.insert_one({
         "id": conn_id, "tenant_id": T_FLUXO, "nome": "Fumaça",
-        "wuzapi_token": "token-falso", "status": "conectado"})
+        "phone_number_id": "pn-teste", "waba_id": "waba-teste", "status": "conectado"})
 
     bot_id, flow_id = str(uuid.uuid4()), str(uuid.uuid4())
     await db.bots.insert_one({

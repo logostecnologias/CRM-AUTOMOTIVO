@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x"}.items():
+             "META_PLATFORM_TOKEN": "token-de-teste"}.items():
     os.environ.setdefault(k, v)
 
 from fakedb import FakeDB
@@ -606,17 +606,12 @@ async def etapa_resposta_solta_ao_lembrete(ctx):
         enviadas.append(texto)
         return {"ok": True}
 
-    async def sem_avatar(*a, **kw):
-        return None
-
-    originais = (flow_runtime.get_db, flow_runtime.wuzapi.send_text,
-                 flow_runtime._fetch_avatar_bg)
+    originais = (flow_runtime.get_db, flow_runtime.whatsapp.send_text)
     flow_runtime.get_db = lambda: DB
-    flow_runtime.wuzapi.send_text = fake_send
-    flow_runtime._fetch_avatar_bg = sem_avatar
+    flow_runtime.whatsapp.send_text = fake_send
     try:
         await DB.whatsapp_connections.insert_one({
-            "id": "conn-ag", "tenant_id": TENANT, "wuzapi_token": "tok",
+            "id": "conn-ag", "tenant_id": TENANT, "phone_number_id": "pn-teste", "waba_id": "waba-teste",
             "status": "conectado"})
         await DB.conversation_sessions.insert_one({
             "id": "sess-ag", "tenant_id": TENANT, "contact_id": "c-1",
@@ -642,8 +637,7 @@ async def etapa_resposta_solta_ao_lembrete(ctx):
         check("a conversa entra na fila em vez de ficar muda",
               sessao["status_atendimento"] == "aguardando", sessao["status_atendimento"])
     finally:
-        (flow_runtime.get_db, flow_runtime.wuzapi.send_text,
-         flow_runtime._fetch_avatar_bg) = originais
+        (flow_runtime.get_db, flow_runtime.whatsapp.send_text) = originais
 
 
 async def etapa_duplicata(ctx):
@@ -741,18 +735,13 @@ async def etapa_corrida_de_mensagens(ctx):
     async def fake_send(token, numero, texto, *a, **kw):
         return {"ok": True}
 
-    async def sem_avatar(*a, **kw):
-        return None
-
-    guardados = (flow_runtime.get_db, flow_runtime.wuzapi.send_text,
-                 flow_runtime._fetch_avatar_bg)
+    guardados = (flow_runtime.get_db, flow_runtime.whatsapp.send_text)
     flow_runtime._uma_por_vez = espiao
     flow_runtime.get_db = lambda: DB
-    flow_runtime.wuzapi.send_text = fake_send
-    flow_runtime._fetch_avatar_bg = sem_avatar
+    flow_runtime.whatsapp.send_text = fake_send
     try:
         await DB.whatsapp_connections.insert_one({
-            "id": "conn-corrida", "tenant_id": TENANT, "wuzapi_token": "tok",
+            "id": "conn-corrida", "tenant_id": TENANT, "phone_number_id": "pn-teste", "waba_id": "waba-teste",
             "status": "conectado"})
         await flow_runtime.handle_incoming_message(
             TENANT, "5511977776666", "oi", "corrida-1", connection_id="conn-corrida")
@@ -760,8 +749,7 @@ async def etapa_corrida_de_mensagens(ctx):
               chaves == [f"{TENANT}:conn-corrida:5511977776666"], chaves)
     finally:
         flow_runtime._uma_por_vez = original
-        (flow_runtime.get_db, flow_runtime.wuzapi.send_text,
-         flow_runtime._fetch_avatar_bg) = guardados
+        (flow_runtime.get_db, flow_runtime.whatsapp.send_text) = guardados
 
 
 async def etapa_ferramentas_ia(ctx):

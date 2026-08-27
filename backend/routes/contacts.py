@@ -11,11 +11,12 @@ from pymongo import InsertOne, UpdateOne
 
 from db import get_db
 from auth import accessible_connection_ids, require_tenant_admin, require_tenant_member
-from flow_runtime import send_human_message as _send_human
+from flow_runtime import JanelaFechada, send_human_message as _send_human
 import audit
 import contatos
 import contatos_csv
 import outbound
+import whatsapp_client as whatsapp
 
 router = APIRouter(prefix="/api", tags=["contacts"])
 
@@ -57,9 +58,21 @@ class NotaIn(BaseModel):
     texto: str
 
 
+class TemplateEnvioIn(BaseModel):
+    """Modelo aprovado, para quem está fora da janela de 24h.
+
+    `texto` do envio continua sendo o que vai para o histórico: o corpo do
+    modelo já preenchido, para o atendente ver o que o contato leu.
+    """
+    nome: str
+    idioma: str = "pt_BR"
+    valores: list[str] = Field(default_factory=list)
+
+
 class EnvioIn(BaseModel):
     texto: str
     whatsapp_connection_id: str | None = None
+    template: TemplateEnvioIn | None = None
 
 
 TIPOS_COM_OPCOES = ("selecao",)
@@ -954,8 +967,9 @@ async def _resolve_conexao(db, tenant_id: str, contact: dict, conn_id: str | Non
             status_code=400,
             detail=f"A conexão '{conn.get('nome')}' está {conn.get('status')}",
         )
-    if not conn.get("wuzapi_token"):
-        raise HTTPException(status_code=400, detail="Conexão sem token de envio")
+    if not whatsapp.credencial(conn):
+        raise HTTPException(status_code=400,
+                            detail="Conexão sem credencial da Cloud API cadastrada")
     return conn
 
 
@@ -979,9 +993,17 @@ async def send_to_contact(contact_id: str, body: EnvioIn, user=Depends(require_t
 
     conn = await _resolve_conexao(db, tenant_id, contact, body.whatsapp_connection_id, user)
     try:
-        return await outbound.send_direct(db, tenant_id, contact, conn, texto, user["id"])
+        return await outbound.send_direct(
+            db, tenant_id, contact, conn, texto, user["id"],
+            template=body.template.model_dump() if body.template else None)
     except HTTPException:
         raise
+    except JanelaFechada as e:
+        # Contato que nunca escreveu (ou escreveu ha mais de 24h) so recebe
+        # modelo aprovado. E a regra da plataforma, entao a ficha diz isso em
+        # vez de mostrar "falha ao enviar", que mandaria a pessoa tentar de
+        # novo indefinidamente.
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha ao enviar via WhatsApp: {e}")
 

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import agenda_flow
 import net_guard
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 
 _test_sessions: dict[str, dict] = {}
 
@@ -54,26 +54,26 @@ def validar_menu(data: dict) -> list[str]:
         return [(o.get(campo) or "") for o in opcoes if len(o.get(campo) or "") > limite]
 
     if formato == FORMATO_BOTOES:
-        if len(opcoes) > wuzapi.MAX_BOTOES:
+        if len(opcoes) > whatsapp.MAX_BOTOES:
             problemas.append(
-                f"botões aceitam no máximo {wuzapi.MAX_BOTOES} opções "
+                f"botões aceitam no máximo {whatsapp.MAX_BOTOES} opções "
                 f"(este menu tem {len(opcoes)}) — use o formato Lista")
-        passou = longos(wuzapi.LIMITE_ROTULO_BOTAO, "label")
+        passou = longos(whatsapp.LIMITE_ROTULO_BOTAO, "label")
         if passou:
             problemas.append(
-                f"rótulo de botão passa de {wuzapi.LIMITE_ROTULO_BOTAO} "
+                f"rótulo de botão passa de {whatsapp.LIMITE_ROTULO_BOTAO} "
                 f"caracteres: {', '.join(passou)}")
     elif formato == FORMATO_LISTA:
-        if len(opcoes) > wuzapi.MAX_ITENS_LISTA:
+        if len(opcoes) > whatsapp.MAX_ITENS_LISTA:
             problemas.append(
-                f"uma lista aceita no máximo {wuzapi.MAX_ITENS_LISTA} opções "
+                f"uma lista aceita no máximo {whatsapp.MAX_ITENS_LISTA} opções "
                 f"(este menu tem {len(opcoes)})")
         if not (data.get("botao_texto") or "").strip():
             problemas.append("a lista precisa do texto do botão que abre as opções")
-        passou = longos(wuzapi.LIMITE_ROTULO_ITEM, "label")
+        passou = longos(whatsapp.LIMITE_ROTULO_ITEM, "label")
         if passou:
             problemas.append(
-                f"opção de lista passa de {wuzapi.LIMITE_ROTULO_ITEM} "
+                f"opção de lista passa de {whatsapp.LIMITE_ROTULO_ITEM} "
                 f"caracteres: {', '.join(passou)}")
     else:
         problemas.append(f"formato de menu desconhecido: {formato}")
@@ -92,7 +92,7 @@ def resolver_escolha_menu(opcoes: list[dict], texto: str,
 
     Ordem: o id que veio do botão/lista, o número digitado, o rótulo digitado.
 
-    O id vem primeiro porque é o único confiável. A WuzAPI corta o rótulo do
+    O id vem primeiro porque é o único confiável. O WhatsApp corta o rótulo do
     botão em 20 caracteres, então o texto que volta de um botão longo nunca é
     igual ao rótulo configurado — casar por rótulo falharia justamente nos
     menus mais descritivos. O número e o rótulo continuam valendo: o contato

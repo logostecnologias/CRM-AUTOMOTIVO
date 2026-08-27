@@ -73,16 +73,24 @@ def etapa_classify_svg():
 
 def etapa_serialize_conexao():
     print("\n[ZZ-06] whatsapp._serialize")
-    conn = {"_id": 1, "id": "c1", "nome": "cx", "wuzapi_token": "SEGREDO",
-            "wuzapi_user_id": "iid", "qrcode_atual": "data:...", "status": "pareando"}
+    conn = {"_id": 1, "id": "c1", "nome": "cx", "status": "conectado",
+            "phone_number_id": "pn-1", "waba_id": "waba-1",
+            "token_cifrado": {"cifrada": "SEGREDO", "chave_versao": 1},
+            "token_mascara": "EAAGm0P…7xQz"}
     adm = rw._serialize(conn, True)
-    check("admin: sem wuzapi_token", "wuzapi_token" not in adm)
-    check("admin: sem wuzapi_user_id", "wuzapi_user_id" not in adm)
+    # O token da Cloud API e a credencial de envio da conta do cliente: quem o
+    # copia manda mensagem em nome da empresa para a base inteira de contatos.
+    check("admin: sem token_cifrado", "token_cifrado" not in adm)
     check("admin: sem _id", "_id" not in adm)
-    check("admin: COM qrcode_atual", "qrcode_atual" in adm)
+    check("admin: COM a mascara, para reconhecer qual token foi cadastrado",
+          adm.get("token_mascara") == "EAAGm0P…7xQz")
+    check("admin: COM os ids da Meta, que a tela de conexao mostra",
+          adm.get("phone_number_id") == "pn-1" and adm.get("waba_id") == "waba-1")
     agente = rw._serialize(conn, False)
-    check("agente: sem wuzapi_token", "wuzapi_token" not in agente)
-    check("agente: SEM qrcode_atual", "qrcode_atual" not in agente)
+    check("agente: sem token_cifrado", "token_cifrado" not in agente)
+    check("agente: sem mascara do token", "token_mascara" not in agente)
+    check("agente: sem os ids da Meta", "phone_number_id" not in agente
+          and "waba_id" not in agente)
 
 
 def etapa_cookie_secure():

@@ -13,14 +13,18 @@ saber que o túnel subiu) para o backend local. Qualquer outro caminho recebe
 
 Dois cuidados que não podem mudar:
 
-  - **O corpo é repassado byte a byte.** O HMAC do webhook é calculado sobre os
-    bytes crus (`WUZAPI_GLOBAL_HMAC_KEY`); reserializar o JSON quebraria a
-    assinatura. Aqui o corpo é lido e reenviado sem tocar.
-  - **A assinatura viaja intacta.** O header `x-hmac-signature` é repassado
+  - **O corpo é repassado byte a byte.** A assinatura do webhook da Meta é
+    calculada sobre os bytes crus do corpo (HMAC-SHA256 com o App Secret);
+    reserializar o JSON quebraria a conferência. Aqui o corpo é lido e
+    reenviado sem tocar.
+  - **A assinatura viaja intacta.** O header `x-hub-signature-256` é repassado
     como qualquer outro; só os hop-by-hop (RFC 7230) são removidos.
 
-Defesa em profundidade: mesmo o que passa (o webhook) continua exigindo HMAC no
-backend. Este proxy remove a superfície; o HMAC autentica o que sobra.
+O `GET` também passa, e precisa passar: é por ele que a Meta verifica a URL
+(`hub.challenge`) na hora de cadastrar o webhook no painel do app.
+
+Defesa em profundidade: mesmo o que passa continua exigindo assinatura válida
+no backend. Este proxy remove a superfície; a assinatura autentica o que sobra.
 
 Uso: `python webhook_proxy.py` — portas via PROXY_PORT / BACKEND_PORT.
 Nota: é ferramenta de desenvolvimento. Em produção o certo é não tunelar a

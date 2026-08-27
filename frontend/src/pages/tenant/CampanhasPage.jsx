@@ -20,7 +20,13 @@ const STATUS_META = {
 const EMPTY = {
   nome: "",
   whatsapp_connection_id: "",
-  conteudo: { tipo: "text", texto: "", media_id: null },
+  // Modelo aprovado e o padrao, e nao uma opcao entre outras: fora da janela de
+  // 24h o WhatsApp so entrega template, e num publico de campanha quase todo
+  // mundo esta fora dela (a pessoa nao escreveu para a empresa hoje).
+  conteudo: {
+    tipo: "template", texto: "", media_id: null,
+    template: { nome: "", idioma: "pt_BR", corpo: "", variaveis: [], media_id: null },
+  },
   publico: { tipo: "todos", tags: [], contact_ids: [] },
   cadencia: { por_minuto: 12 },
   agendada_para: "",
@@ -49,6 +55,113 @@ function Campo({ label, hint, children, className = "" }) {
       {children}
       {hint && <div className="text-[10px] text-ink-3 mt-1">{hint}</div>}
     </div>
+  );
+}
+
+function BotaoTipo({ atual, valor, onClick, children }) {
+  // Seleção é `border-info` + anel, nunca a troca de um cinza por outro: os
+  // dois cinzas são quase iguais e o sinal desaparece.
+  const ativo = atual === valor || (valor === "text" && atual === "media");
+  return (
+    <button type="button" onClick={onClick} data-testid={`campaign-tipo-${valor}`}
+      className={`px-4 py-2 rounded-lg border text-sm font-bold ${
+        ativo ? "border-info ring-1 ring-info text-info bg-info-soft"
+              : "border-line text-ink-2 hover:bg-surface-2"}`}>
+      {children}
+    </button>
+  );
+}
+
+// A lista vem da conta da Meta do cliente, e só com os modelos APROVADOS:
+// oferecer um em análise produziria uma campanha que falha em todos os
+// destinatários, uma mensagem por vez.
+function EscolhaDeModelo({ conexaoId, template, onChange }) {
+  const [modelos, setModelos] = useState(null);
+  const [erro, setErro] = useState(null);
+
+  useEffect(() => {
+    if (!conexaoId) { setModelos(null); return; }
+    setModelos(null);
+    setErro(null);
+    api.get(`/whatsapp/connections/${conexaoId}/templates`)
+      .then((r) => setModelos(r.data))
+      .catch((e) => setErro(formatApiErrorDetail(e.response?.data?.detail) || "Não foi possível listar os modelos"));
+  }, [conexaoId]);
+
+  const escolhido = (modelos || []).find(
+    (m) => m.nome === template.nome && m.idioma === template.idioma);
+
+  const escolher = (chave) => {
+    const m = (modelos || []).find((x) => `${x.nome}|${x.idioma}` === chave);
+    if (!m) return onChange({ nome: "", idioma: "pt_BR", corpo: "", variaveis: [], media_id: null });
+    onChange({
+      nome: m.nome, idioma: m.idioma, corpo: m.corpo,
+      // Um valor por variável do corpo. Nasce com {primeiro_nome} na primeira,
+      // que é o uso mais comum e o que a pessoa ia digitar de qualquer forma.
+      variaveis: Array.from({ length: m.variaveis }, (_, i) => (i === 0 ? "{primeiro_nome}" : "")),
+      media_id: null,
+    });
+  };
+
+  if (!conexaoId) {
+    return (
+      <div className="sm:col-span-2 lg:col-span-3 text-sm text-ink-2 border border-dashed border-line rounded-lg p-4">
+        Escolha a conexão primeiro: os modelos vêm da conta da Meta daquele número.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Campo label="Modelo aprovado" className="sm:col-span-2 lg:col-span-3"
+        hint={erro || "Cadastrados no painel da Meta, em WhatsApp > Modelos de mensagem."}>
+        <select required className="zz-input" data-testid="campaign-template"
+          value={template.nome ? `${template.nome}|${template.idioma}` : ""}
+          onChange={(e) => escolher(e.target.value)}>
+          <option value="">{modelos === null ? "Carregando…" : "Selecione…"}</option>
+          {(modelos || []).map((m) => (
+            <option key={`${m.nome}|${m.idioma}`} value={`${m.nome}|${m.idioma}`}>
+              {m.nome} ({m.idioma}) · {String(m.categoria || "").toLowerCase()}
+            </option>
+          ))}
+        </select>
+        {modelos !== null && modelos.length === 0 && !erro && (
+          <div className="text-[11px] text-warning mt-1">
+            Nenhum modelo aprovado nesta conta ainda. Crie um no painel da Meta e espere a aprovação.
+          </div>
+        )}
+      </Campo>
+
+      {escolhido && (
+        <div className="sm:col-span-2 lg:col-span-3 border border-line rounded-lg p-4 bg-surface-2">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-ink-3 mb-2">
+            Texto do modelo
+          </div>
+          <div className="text-sm text-ink whitespace-pre-wrap font-sans">{escolhido.corpo}</div>
+          {template.variaveis.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {template.variaveis.map((v, i) => (
+                <div key={i}>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
+                    Variável {`{{${i + 1}}}`}
+                  </label>
+                  <input className="zz-input" value={v} data-testid={`campaign-var-${i}`}
+                    placeholder="{primeiro_nome} ou um texto fixo"
+                    onChange={(e) => {
+                      const novas = [...template.variaveis];
+                      novas[i] = e.target.value;
+                      onChange({ ...template, variaveis: novas });
+                    }} />
+                </div>
+              ))}
+              <div className="sm:col-span-2 text-[10px] text-ink-3">
+                Aceita as mesmas variáveis do texto livre: {"{nome_contato}"}, {"{primeiro_nome}"}, {"{numero}"}.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -221,7 +334,12 @@ export default function CampanhasPage() {
     setForm({
       nome: c.nome,
       whatsapp_connection_id: c.whatsapp_connection_id || "",
-      conteudo: { tipo: c.conteudo?.tipo || "text", texto: c.conteudo?.texto || "", media_id: c.conteudo?.media_id || null },
+      conteudo: {
+        tipo: c.conteudo?.tipo || "template",
+        texto: c.conteudo?.texto || "",
+        media_id: c.conteudo?.media_id || null,
+        template: c.conteudo?.template || { nome: "", idioma: "pt_BR", corpo: "", variaveis: [], media_id: null },
+      },
       publico: { tipo: c.publico?.tipo || "todos", tags: c.publico?.tags || [], contact_ids: c.publico?.contact_ids || [] },
       cadencia: { por_minuto: c.cadencia?.por_minuto || 12 },
       agendada_para: paraInputLocal(c.agendada_para),
@@ -317,11 +435,12 @@ export default function CampanhasPage() {
       <div className="border border-warning bg-warning-soft p-4 mb-6 flex gap-3 rounded-lg" data-testid="campaign-warning">
         <Warning size={18} weight="bold" className="text-warning shrink-0 mt-0.5" />
         <div className="text-sm text-ink">
-          <strong className="font-bold">Disparo em volume derruba número de WhatsApp.</strong> Esta conexão usa a
-          API não oficial: não existe template aprovado nem garantia de entrega, e o bloqueio recai sobre o número
-          da empresa. Mande para quem já falou com você, mantenha a cadência baixa e sempre ofereça a saída
-          (o contato que responder <span className="font-mono">SAIR</span> é removido dos próximos disparos
-          automaticamente).
+          <strong className="font-bold">Cada modelo entregue é cobrado pela Meta.</strong> Fora da janela de 24
+          horas o WhatsApp só entrega modelo aprovado, e é isso que o disparo usa. Marketing custa mais que
+          utilidade, e conteúdo que o contato denuncia derruba a nota de qualidade do número, o que reduz o
+          limite diário de conversas e chega a suspender o número da empresa. Mande para quem espera receber
+          e sempre ofereça a saída (o contato que responder <span className="font-mono">SAIR</span> é removido
+          dos próximos disparos automaticamente).
         </div>
       </div>
 
@@ -347,14 +466,40 @@ export default function CampanhasPage() {
             </select>
           </Campo>
 
-          <Campo label="Mensagem" className="col-span-3"
-            hint="Variáveis: {nome_contato}, {primeiro_nome}, {numero}. Com anexo, o texto vira a legenda.">
-            <textarea required rows={4} className="zz-input font-sans" data-testid="campaign-text"
-              value={form.conteudo.texto}
-              onChange={(e) => setForm({ ...form, conteudo: { ...form.conteudo, texto: e.target.value } })} />
+          <Campo label="O que enviar" className="sm:col-span-2 lg:col-span-3">
+            <div className="flex flex-wrap gap-2">
+              <BotaoTipo atual={form.conteudo.tipo} valor="template"
+                onClick={() => setForm({ ...form, conteudo: { ...form.conteudo, tipo: "template" } })}>
+                Modelo aprovado
+              </BotaoTipo>
+              <BotaoTipo atual={form.conteudo.tipo} valor="text"
+                onClick={() => setForm({ ...form, conteudo: { ...form.conteudo, tipo: anexo ? "media" : "text" } })}>
+                Texto livre
+              </BotaoTipo>
+            </div>
+            <div className="text-[11px] text-ink-3 mt-2">
+              {form.conteudo.tipo === "template"
+                ? "Chega a qualquer contato da lista. O modelo precisa estar aprovado na conta da Meta."
+                : "Só chega a quem falou com a empresa nas últimas 24 horas. Os demais ficam como ignorados, com o motivo."}
+            </div>
           </Campo>
 
-          <div className="col-span-3 flex items-center gap-3">
+          {form.conteudo.tipo === "template" ? (
+            <EscolhaDeModelo
+              conexaoId={form.whatsapp_connection_id}
+              template={form.conteudo.template}
+              onChange={(t) => setForm({ ...form, conteudo: { ...form.conteudo, template: t } })}
+            />
+          ) : (
+            <Campo label="Mensagem" className="sm:col-span-2 lg:col-span-3"
+              hint="Variáveis: {nome_contato}, {primeiro_nome}, {numero}. Com anexo, o texto vira a legenda.">
+              <textarea required rows={4} className="zz-input font-sans" data-testid="campaign-text"
+                value={form.conteudo.texto}
+                onChange={(e) => setForm({ ...form, conteudo: { ...form.conteudo, texto: e.target.value } })} />
+            </Campo>
+          )}
+
+          <div className={`sm:col-span-2 lg:col-span-3 flex items-center gap-3 ${form.conteudo.tipo === "template" ? "hidden" : ""}`}>
             <input ref={arquivoRef} type="file" className="hidden" data-testid="campaign-file"
               onChange={(e) => enviarArquivo(e.target.files?.[0])} />
             <button type="button" onClick={() => arquivoRef.current?.click()} className="zz-btn zz-btn-secondary">
@@ -414,7 +559,7 @@ export default function CampanhasPage() {
             )}
           </Campo>
 
-          <Campo label="Ritmo (mensagens/min)" hint="Quanto mais devagar, menor o risco de bloqueio.">
+          <Campo label="Ritmo (mensagens/min)" hint="Cadência do disparo. A vazão do número é bem maior; devagar deixa a conexão livre para quem está conversando.">
             <input required type="number" min="1" max="60" className="zz-input" data-testid="campaign-rate"
               value={form.cadencia.por_minuto}
               onChange={(e) => setForm({ ...form, cadencia: { por_minuto: Number(e.target.value) } })} />
@@ -476,7 +621,11 @@ export default function CampanhasPage() {
                   {expandida ? <CaretDown size={12} weight="bold" /> : <CaretRight size={12} weight="bold" />}
                   <div className="min-w-0">
                     <div className="font-semibold truncate">{c.nome}</div>
-                    <div className="text-[11px] text-ink-3 truncate">{c.conteudo?.texto}</div>
+                    <div className="text-[11px] text-ink-3 truncate">
+                      {c.conteudo?.tipo === "template"
+                        ? (c.conteudo?.template?.corpo || `modelo ${c.conteudo?.template?.nome || ""}`)
+                        : c.conteudo?.texto}
+                    </div>
                   </div>
                 </button>
                 <div className="col-span-2">

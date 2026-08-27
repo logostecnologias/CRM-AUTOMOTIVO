@@ -64,12 +64,37 @@ async def backfill_last_message(db) -> int:
     return total
 
 
+async def limpar_conexoes_da_api_antiga(db) -> int:
+    """Conexão que ficou de pé na API não oficial não pode parecer conectada.
+
+    O pareamento por QR deixava a conexão em `conectado` com um token de
+    instância. Esse token não existe mais, e sem `phone_number_id` a conexão
+    não envia nem recebe nada. Deixá-la como "conectado" faria a tela mentir e,
+    pior, faria a campanha tentar disparar por ela: o runner só pausa quando o
+    status é diferente de conectado.
+
+    Os campos mortos saem junto, para o documento não carregar credencial de um
+    sistema que não é mais usado.
+
+    Idempotente: na segunda subida o filtro não casa mais nada.
+    """
+    res = await db.whatsapp_connections.update_many(
+        {"phone_number_id": None},
+        {"$set": {"status": "desconectado"},
+         "$unset": {"wuzapi_token": "", "wuzapi_user_id": "", "qrcode_atual": ""}},
+    )
+    return res.modified_count
+
+
 async def _run():
     await asyncio.sleep(STARTUP_DELAY)
     db = get_db()
     filled = await backfill_last_message(db)
     if filled:
         logger.info("Backfill de last_message: %d conversas atualizadas", filled)
+    limpas = await limpar_conexoes_da_api_antiga(db)
+    if limpas:
+        logger.info("Conexões sem número da Cloud API marcadas como desconectadas: %d", limpas)
 
 
 async def _guarded():

@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x"}.items():
+             "META_PLATFORM_TOKEN": "token-de-teste"}.items():
     os.environ.setdefault(k, v)
 
 from fakedb import FakeDB

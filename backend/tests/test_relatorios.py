@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x"}.items():
+             "META_PLATFORM_TOKEN": "token-de-teste"}.items():
     os.environ.setdefault(k, v)
 
 from fakedb import FakeDB
@@ -89,10 +89,10 @@ async def semear():
         await DB.users.insert_one(dict(u))
     await DB.whatsapp_connections.insert_one({
         "id": CONN_A, "tenant_id": TENANT, "nome": "Comercial", "status": "conectado",
-        "wuzapi_token": "tok-a"})
+        "phone_number_id": "pn-teste", "waba_id": "waba-teste"})
     await DB.whatsapp_connections.insert_one({
         "id": CONN_B, "tenant_id": TENANT, "nome": "Suporte", "status": "conectado",
-        "wuzapi_token": "tok-b"})
+        "phone_number_id": "pn-teste", "waba_id": "waba-teste"})
     # Bia so alcanca a conexao A
     await DB.user_connection_access.insert_one({
         "tenant_id": TENANT, "user_id": "u-bia", "whatsapp_connection_id": CONN_A})

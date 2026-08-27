@@ -1,7 +1,7 @@
 """Regressão dos Médios determinísticos (ZZ-10 a ZZ-17).
 
   ZZ-10  server._cors_origins exige a var e recusa '*'.
-  ZZ-11  webhooks._validate_hmac: 503 sem chave, 401 com assinatura errada.
+  ZZ-11  webhooks._validar_assinatura: 503 sem App Secret, 401 com assinatura errada.
   ZZ-12  login_guard trava por conta e por IP, e o acerto zera a conta.
   ZZ-13  _csv_safe neutraliza célula que começaria como fórmula.
   ZZ-15  UserIn/UserUpdate recusam senha curta (validação pydantic).
@@ -29,7 +29,7 @@ def check(nome, cond, *extra):
 
 
 def _req_com_assinatura(assin: str) -> Request:
-    return Request({"type": "http", "headers": [(b"x-hmac-signature", assin.encode())]})
+    return Request({"type": "http", "headers": [(b"x-hub-signature-256", assin.encode())]})
 
 
 def etapa_cors():
@@ -55,33 +55,43 @@ def etapa_cors():
 
 
 def etapa_hmac():
-    print("\n[ZZ-11] HMAC fail-closed")
+    print("\n[ZZ-11] assinatura do webhook, fail-closed")
     import hmac as _h, hashlib
     import routes.webhooks as w
     corpo = b'{"x":1}'
-    old = os.environ.pop("WUZAPI_GLOBAL_HMAC_KEY", None)
+    old = os.environ.pop("META_APP_SECRET", None)
     try:
-        w._validate_hmac(corpo, _req_com_assinatura("qualquer")); code = 200
+        w._validar_assinatura(corpo, _req_com_assinatura("qualquer")); code = 200
     except HTTPException as e:
         code = e.status_code
-    check("sem chave -> 503 (nao passa em silencio)", code == 503)
+    check("sem App Secret -> 503 (nao passa em silencio)", code == 503)
 
-    os.environ["WUZAPI_GLOBAL_HMAC_KEY"] = "chave-teste"
+    os.environ["META_APP_SECRET"] = "chave-teste"
     try:
-        w._validate_hmac(corpo, _req_com_assinatura("assinatura-errada")); code = 200
+        w._validar_assinatura(corpo, _req_com_assinatura("assinatura-errada")); code = 200
     except HTTPException as e:
         code = e.status_code
     check("assinatura errada -> 401", code == 401)
+
     boa = _h.new(b"chave-teste", corpo, hashlib.sha256).hexdigest()
+    # O prefixo `sha256=` faz parte do cabecalho da Meta. Sem ele a assinatura
+    # e recusada de proposito: aceitar os dois formatos seria aceitar tambem um
+    # cabecalho que veio de outro lugar qualquer.
     try:
-        w._validate_hmac(corpo, _req_com_assinatura(boa)); passou = True
+        w._validar_assinatura(corpo, _req_com_assinatura(boa)); code = 200
+    except HTTPException as e:
+        code = e.status_code
+    check("sem o prefixo sha256= -> 401", code == 401)
+
+    try:
+        w._validar_assinatura(corpo, _req_com_assinatura(f"sha256={boa}")); passou = True
     except HTTPException:
         passou = False
     check("assinatura correta passa", passou)
     if old is not None:
-        os.environ["WUZAPI_GLOBAL_HMAC_KEY"] = old
+        os.environ["META_APP_SECRET"] = old
     else:
-        os.environ.pop("WUZAPI_GLOBAL_HMAC_KEY", None)
+        os.environ.pop("META_APP_SECRET", None)
 
 
 def etapa_login_guard():

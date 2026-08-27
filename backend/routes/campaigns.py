@@ -29,16 +29,36 @@ class PublicoIn(BaseModel):
     contact_ids: list[str] = []
 
 
+class TemplateIn(BaseModel):
+    """O modelo aprovado que a campanha dispara.
+
+    `corpo` é guardado junto de propósito, mesmo sendo uma cópia do que está na
+    Meta: é dele que sai o texto do histórico de cada conversa, e a lista de
+    campanhas mostra a prévia sem precisar consultar a Meta a cada abertura de
+    tela. `variaveis` é um valor por `{{n}}` do corpo, e cada um passa pelo
+    mesmo `render` do texto livre.
+    """
+    nome: str = ""
+    idioma: str = "pt_BR"
+    corpo: str = ""
+    variaveis: list[str] = Field(default_factory=list)
+    media_id: str | None = None
+
+
 class ConteudoIn(BaseModel):
-    tipo: str = Field(default="text", pattern="^(text|media)$")
+    # `template` é o padrão: fora da janela de 24h o WhatsApp só entrega modelo
+    # aprovado, e num público de campanha quase todo mundo está fora dela.
+    tipo: str = Field(default="template", pattern="^(template|text|media)$")
     texto: str = ""
     media_id: str | None = None
+    template: TemplateIn = TemplateIn()
 
 
 class CadenciaIn(BaseModel):
     # 12/min é o default por ser cadência de gente, não de robô. O teto de 60
-    # não é técnico: acima disso o risco de bloqueio do número do cliente
-    # cresce rápido, e o prejuízo é dele, não nosso.
+    # não é técnico: é o que mantém a conexão livre para quem está conversando
+    # enquanto o disparo corre, e o que evita gastar a vazão do número inteira
+    # numa campanha só.
     por_minuto: int = Field(default=12, ge=1, le=60)
 
 
@@ -90,6 +110,10 @@ async def _validar_vinculos(db, tenant_id: str, body: CampaignIn):
         )
         if not dept:
             raise HTTPException(status_code=400, detail="Departamento inválido")
+    if body.conteudo.tipo == "template" and not body.conteudo.template.nome:
+        # Sem modelo escolhido a campanha falharia num destinatário por vez, e
+        # o erro só apareceria depois de a lista inteira estar materializada.
+        raise HTTPException(status_code=400, detail="Escolha o modelo aprovado da campanha")
     if body.conteudo.tipo == "media":
         if not body.conteudo.media_id:
             raise HTTPException(status_code=400, detail="Anexe o arquivo da campanha")
@@ -141,10 +165,11 @@ async def create_campaign(body: CampaignIn, user=Depends(require_tenant_admin)):
         "id": str(uuid.uuid4()),
         "tenant_id": user["tenant_id"],
         "nome": body.nome,
-        # Fixo por ora, mas gravado: quando a Cloud API oficial entrar, é este
-        # campo que decide por onde a campanha sai — e as antigas continuam
-        # legíveis sem migração.
-        "canal": "wuzapi",
+        # Gravado em cada campanha: é o campo que decide por onde ela sai. Hoje
+        # só existe um canal, mas ele continua aqui porque a alternativa (a
+        # Marketing Messages API, ou um segundo provedor) chegaria sem forma de
+        # distinguir as campanhas antigas das novas.
+        "canal": "cloud_api",
         "whatsapp_connection_id": body.whatsapp_connection_id,
         "conteudo": body.conteudo.model_dump(),
         "publico": body.publico.model_dump(),

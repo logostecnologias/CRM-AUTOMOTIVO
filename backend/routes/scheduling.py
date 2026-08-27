@@ -45,6 +45,22 @@ class BloqueioIn(BaseModel):
     motivo: str | None = None
 
 
+class TemplateAvisoIn(BaseModel):
+    """Modelo aprovado usado quando a janela de 24h está fechada.
+
+    Aviso de agenda é o caso em que ela quase sempre está: o lembrete sai um
+    dia antes, e quem marcou há duas semanas não escreveu nada desde então.
+    Sem modelo, o WhatsApp recusa o envio, e é justamente o lembrete que faz
+    este módulo se pagar.
+
+    Cada variável é um texto que passa pelo mesmo `montar` do corpo livre, então
+    `{contato}` e `{data_completa}` funcionam igual nos dois lugares.
+    """
+    nome: str = ""
+    idioma: str = "pt_BR"
+    variaveis: list[str] = Field(default_factory=list)
+
+
 class ConfigIn(BaseModel):
     fuso: str | None = None
     passo_min: int | None = Field(default=None, ge=5, le=240)
@@ -58,6 +74,9 @@ class ConfigIn(BaseModel):
     mensagem_confirmacao: str | None = None
     mensagem_lembrete: str | None = None
     mensagem_cancelamento: str | None = None
+    template_confirmacao: TemplateAvisoIn | None = None
+    template_lembrete: TemplateAvisoIn | None = None
+    template_cancelamento: TemplateAvisoIn | None = None
 
 
 @router.get("/config")

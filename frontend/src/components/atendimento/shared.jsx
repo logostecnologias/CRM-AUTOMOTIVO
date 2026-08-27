@@ -299,21 +299,51 @@ export function MessageBubble({ m }) {
         )}
         {media && <div className="mb-1"><MediaContent media={media} /></div>}
         {m.content && <div className="whitespace-pre-wrap">{m.content}</div>}
-        <div className="text-[9px] text-ink-3 mt-1 font-mono">{new Date(m.timestamp).toLocaleTimeString("pt-BR")}</div>
+        <div className="text-[9px] text-ink-3 mt-1 font-mono flex items-center gap-1 justify-end">
+          {new Date(m.timestamp).toLocaleTimeString("pt-BR")}
+          {isOut && <Entrega meta={m.meta} />}
+        </div>
       </div>
     </div>
   );
 }
 
-const MAX_MB = { image: 5, video: 16, audio: 16, document: 20 };
+// Status de entrega, que só existe desde a API oficial: o envio devolve um id
+// e o que aconteceu com a mensagem chega depois, por webhook. Falha vem com o
+// código da Meta, que é o que distingue "não tem WhatsApp" de "a janela de 24h
+// fechou", duas coisas que o atendente resolve de formas opostas.
+function Entrega({ meta }) {
+  const estado = meta?.entrega;
+  if (!estado) return null;
+  if (estado === "falha") {
+    const detalhe = meta?.entrega_erro?.detalhe || "não entregue";
+    return (
+      <span className="text-danger font-bold" title={detalhe} data-testid="entrega-falha">
+        não entregue
+      </span>
+    );
+  }
+  const marca = { enviada: "✓", entregue: "✓✓", lida: "✓✓" }[estado] || "";
+  return (
+    <span className={estado === "lida" ? "text-info font-bold" : ""} title={estado}>
+      {marca}
+    </span>
+  );
+}
+
+// Os tetos da Cloud API, iguais aos do backend (media_store.MAX_BYTES).
+const MAX_MB = { image: 5, video: 16, audio: 16, document: 100 };
+
+// Mesma lista de `media_store.AUDIO_SUPORTADO`: fora dela o arquivo vai como
+// documento, porque a Meta recusa o envio inteiro por mime não suportado.
+const AUDIO_OK = ["audio/aac", "audio/mp4", "audio/mpeg", "audio/amr",
+                  "audio/ogg", "audio/opus"];
 
 function kindOf(file) {
   const mime = (file.type || "").toLowerCase();
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
-  // Áudio que não é ogg/opus segue como documento — mesma regra do backend,
-  // aplicada aqui só para o limite de tamanho conferir antes do upload.
-  if (mime === "audio/ogg" || mime === "audio/opus") return "audio";
+  if (AUDIO_OK.includes(mime)) return "audio";
   return "document";
 }
 

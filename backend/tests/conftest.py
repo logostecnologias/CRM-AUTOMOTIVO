@@ -27,6 +27,14 @@ for _chave, _valor in {
     "MONGO_URL": "mongodb://fake/",
     "DB_NAME": "fake",
     "JWT_SECRET": "teste",
-    "WUZAPI_GATEWAY_URL": "http://fake",
+    "META_APP_SECRET": "segredo-de-teste",
+    # Token de plataforma: faz `whatsapp_client.credencial()` devolver uma
+    # credencial usável para qualquer conexão de teste que tenha
+    # `phone_number_id`, sem cada fixture precisar cifrar um token próprio.
+    "META_PLATFORM_TOKEN": "token-de-teste",
+    "META_WEBHOOK_VERIFY_TOKEN": "verifica-teste",
+    # Chave de cifra das credenciais (token da Cloud API, chave de IA). Fixa e
+    # de fachada: o teste precisa cifrar e decifrar, nunca proteger nada.
+    "CREDENTIALS_KEY": "VlKvCmSGH9QsR1bwg10fq1e4oiOZ_0MP3B-YxhSL1oo=",
 }.items():
     os.environ.setdefault(_chave, _valor)

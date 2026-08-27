@@ -36,7 +36,7 @@ import campaign_runner
 import health_monitor
 import media_retention
 import migrations
-import wuzapi_client
+import whatsapp_client
 
 
 app = FastAPI(title="ZappZen API")
@@ -232,6 +232,10 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("campaign_recipients", [("tenant_id", 1), ("status", 1), ("sent_at", 1)], {}),
     # "Quais campanhas este contato já recebeu?" — bloco da ficha.
     ("campaign_recipients", [("tenant_id", 1), ("contact_id", 1)], {}),
+    # Falha de entrega chega por webhook e casa com o destinatário pelo wamid.
+    # Numa campanha de 20.000 sem índice, cada status de falha varreria a lista
+    # inteira de destinatários da empresa.
+    ("campaign_recipients", [("tenant_id", 1), ("wamid", 1)], {"sparse": True}),
 
     # A lista da Central filtra por `status_atendimento` e ordena por
     # `updated_at`. O índice que existia cobria `status` — outro campo, com
@@ -256,6 +260,10 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # tenham podem descartá-lo.
     ("messages_log", [("session_id", 1), ("timestamp", 1), ("_id", 1)], {}),
     ("messages_log", [("meta.media.id", 1)], {"sparse": True}),
+    # Status de entrega chega por webhook e casa com a bolha pelo wamid. Uma
+    # mensagem entregue e lida gera duas buscas por aqui, então sem índice
+    # seria uma varredura do histórico inteiro por evento.
+    ("messages_log", [("tenant_id", 1), ("meta.wamid", 1)], {"sparse": True}),
     # Contagem de mensagens do mês no dashboard e a série por dia do relatório
     # de atendimento (agrupada pelo prefixo do ISO em `timestamp`).
     ("messages_log", [("tenant_id", 1), ("timestamp", 1)], {}),
@@ -264,9 +272,10 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("processed_messages", [("at", 1)], {"expireAfterSeconds": PROCESSED_MESSAGES_TTL}),
 
     ("whatsapp_connections", [("tenant_id", 1), ("id", 1)], {}),
-    ("whatsapp_connections", [("wuzapi_token", 1)], {"sparse": True}),
-    # Webhook sem ids na URL resolve a conexão pelo `userID` do payload.
-    ("whatsapp_connections", [("wuzapi_user_id", 1)], {"sparse": True}),
+    # O webhook da Cloud API chega num endereço só, para todas as empresas, e
+    # o que diz de quem ele é são os metadados do payload. Este índice está no
+    # caminho de TODA mensagem recebida do sistema inteiro.
+    ("whatsapp_connections", [("phone_number_id", 1)], {"sparse": True}),
     # Varredura do health_monitor.
     ("whatsapp_connections", [("status", 1), ("last_webhook_event_at", 1)], {}),
 
@@ -370,10 +379,14 @@ async def on_startup():
     media_retention.start()
     campaign_runner.start()
     agenda_worker.start()
-    if not os.environ.get("WUZAPI_GLOBAL_HMAC_KEY"):
+    faltando = [v for v in ("META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN")
+                if not os.environ.get(v)]
+    if faltando:
         # Não derruba o boot (um ambiente pode subir sem webhook por um tempo),
-        # mas grita: sem a chave, todo webhook é recusado com 503 (ZZ-11).
-        logger.warning("WUZAPI_GLOBAL_HMAC_KEY ausente — webhooks serão RECUSADOS até configurá-la")
+        # mas grita: sem o App Secret todo webhook é recusado com 503 (ZZ-11), e
+        # sem o token de verificação a própria Meta não aceita cadastrar a URL.
+        logger.warning("%s ausente: webhooks serão RECUSADOS até configurar",
+                       " e ".join(faltando))
     logger.info("ZappZen backend started, super admin seeded.")
 
 
@@ -384,5 +397,5 @@ async def on_shutdown():
     media_retention.stop()
     campaign_runner.stop()
     agenda_worker.stop()
-    await wuzapi_client.close_client()
+    await whatsapp_client.close_client()
     close_db()

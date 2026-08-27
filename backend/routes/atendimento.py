@@ -7,7 +7,8 @@ from pydantic import BaseModel
 import media_store
 from db import get_db
 from auth import accessible_connection_ids, get_current_user
-from flow_runtime import log_message, send_human_message, send_human_media
+from flow_runtime import (JanelaFechada, log_message, send_human_message,
+                          send_human_media)
 
 router = APIRouter(prefix="/api/atendimento", tags=["atendimento"])
 
@@ -270,11 +271,19 @@ class SendIn(BaseModel):
 
 @router.post("/sessions/{session_id}/send")
 async def send(session_id: str, body: SendIn, user: dict = Depends(get_current_user)):
-    """Human agent sends a message via WuzAPI."""
+    """Human agent sends a message through the official Cloud API.
+
+    A janela de 24h volta como 409, e nao como falha de envio: sao coisas
+    diferentes para quem esta atendendo. Falha pede tentar de novo; janela
+    fechada pede outra acao (esperar o contato escrever, ou mandar um modelo),
+    e um "erro ao enviar" ali faria o atendente repetir o clique para sempre.
+    """
     db = get_db()
     await _authorize_send(db, session_id, user)
     try:
         await send_human_message(user["tenant_id"], session_id, body.content)
+    except JanelaFechada as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Falha ao enviar: {e}")
     return {"ok": True}
@@ -287,7 +296,7 @@ async def send_media(
     caption: str = Form(""),
     user: dict = Depends(get_current_user),
 ):
-    """Human agent sends an image/video/audio/document via WuzAPI.
+    """Human agent sends an image/video/audio/document via the Cloud API.
 
     The file is stored first and only then sent: if the send fails the upload
     is discarded, so nothing shows in the panel that the contact never got.
@@ -311,6 +320,8 @@ async def send_media(
     except Exception as e:
         await db.media_files.delete_one({"id": doc["id"]})
         media_store.file_path(doc).unlink(missing_ok=True)
+        if isinstance(e, JanelaFechada):
+            raise HTTPException(status_code=409, detail=str(e))
         raise HTTPException(status_code=502, detail=f"Falha ao enviar: {e}")
     return {"ok": True, "media": media_store.public_payload(doc)}
 

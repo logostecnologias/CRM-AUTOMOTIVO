@@ -1,142 +1,106 @@
-"""Periodic health check for WhatsApp connections.
+"""Vigia das conexões de WhatsApp, no mesmo padrão start/stop dos outros workers.
 
-Two things happen on every CHECK_INTERVAL sweep:
-  - status='pareando' connections are always probed against WuzAPI's
-    /session/status — if it reports connected+loggedIn, we promote them to
-    'conectado' locally. This is what makes pairing complete in the UI even
-    when the WuzAPI -> gateway -> backend webhook can't be delivered (e.g.
-    local dev, where the backend isn't publicly reachable) — it's a
-    polling fallback for the same signal the 'PairSuccess'/'Connected'
-    webhook events would have given us.
-  - status='conectado' connections whose last_webhook_event_at is older
-    than STALE_AFTER are probed too — if WuzAPI no longer reports them as
-    connected+loggedIn, we flip the local status to 'desconectado' so the
-    tenant knows and can reconnect.
+O que este monitor vigia mudou por completo com a Cloud API oficial. Antes ele
+existia para completar o pareamento: havia um QR na tela e uma sessão que podia
+cair sozinha, então ele varria de cinco em cinco segundos perguntando à WuzAPI
+se o aparelho já tinha escaneado, e de trinta em trinta se a sessão continuava
+de pé. Sessão não existe mais: um número da Cloud API está registrado na conta
+da Meta e não "cai".
+
+Sobraram duas formas de uma conexão morrer em silêncio, e são as duas que este
+laço procura:
+
+  - **O token deixou de valer.** Foi revogado, expirou (token de usuário de
+    sistema pode ter validade), ou perdeu permissão quando alguém mexeu no
+    Business Manager do cliente. O sintoma é toda mensagem falhando com 190 ou
+    0, e sem esta varredura o cliente descobre pelo contato que não foi
+    respondido.
+
+  - **A qualidade do número caiu.** A Meta rebaixa a nota (GREEN, YELLOW, RED)
+    quando muitos contatos bloqueiam ou denunciam, e nota baixa reduz o limite
+    diário de conversas iniciadas pela empresa até suspender o número. É o
+    número do cliente, e é ele quem precisa saber a tempo de mudar o conteúdo
+    dos disparos.
+
+Por isso o intervalo é de quinze minutos, e não de cinco segundos: nada disto
+muda de um instante para outro, e cada varredura é uma chamada por conexão
+cadastrada de toda a base.
 """
 import asyncio
 import logging
-import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from db import get_db
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 
 logger = logging.getLogger("zappzen.health")
 
-# Dois ritmos, porque as duas varreduras têm urgências diferentes: quem está
-# pareando tem o QR na tela esperando confirmação, e um atraso ali é visível;
-# quem já está conectado só precisa ser reavaliado de vez em quando, e essa
-# varredura roda para o sistema inteiro, não para uma tela aberta.
-PAIRING_INTERVAL = 5         # seconds between pairing sweeps
-HEALTH_INTERVAL = 30         # seconds between 'conectado' health sweeps
-STALE_AFTER = 5 * 60         # 5 minutes with no webhook event → probe a 'conectado' row
+INTERVALO = 15 * 60
 
 _task: asyncio.Task | None = None
 
 
-def _numero_from_jid(jid: str) -> str | None:
-    return jid.split(":")[0].split("@")[0] if jid else None
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-async def _probe_pareando(row: dict):
+async def _probe(row: dict):
     db = get_db()
     conn_id = row["id"]
-    token = row.get("wuzapi_token")
-    if not token:
+    cred = whatsapp.credencial(row)
+    if not cred:
         return
+
     try:
-        state = await wuzapi.connection_state(token)
-    except wuzapi.WuzapiError as e:
-        logger.warning("WuzAPI session/status failed for %s: %s", conn_id, e)
+        perfil = await whatsapp.perfil_numero(cred)
+    except whatsapp.WhatsAppError as e:
+        if e.codigo in whatsapp.CODIGOS_TOKEN:
+            # Credencial morta: a conexão para de servir para tudo, e dizer
+            # isso na tela é a diferença entre o cliente cadastrar um token
+            # novo hoje e descobrir na semana que vem que ninguém foi atendido.
+            logger.warning("Conexão %s com credencial inválida: %s", conn_id, e)
+            await db.whatsapp_connections.update_one(
+                {"id": conn_id},
+                {"$set": {"status": "erro", "ultimo_erro": str(e), "updated_at": _now()}},
+            )
+        else:
+            # Erro passageiro (rede, 5xx da Meta) não derruba o status: uma
+            # conexão marcada como quebrada por causa de uma oscilação faria a
+            # campanha pausar sozinha.
+            logger.warning("Falha ao consultar a conexão %s: %s", conn_id, e)
         return
 
-    if state.get("connected") and state.get("loggedIn"):
-        now = datetime.now(timezone.utc).isoformat()
-        logger.info("Connection %s finished pairing (detected via polling) — marking conectado", conn_id)
-        await db.whatsapp_connections.update_one(
-            {"id": conn_id},
-            {"$set": {
-                "status": "conectado",
-                "qrcode_atual": None,
-                "numero": _numero_from_jid(state.get("jid", "")),
-                "last_webhook_event_at": now,
-                "updated_at": now,
-            }},
-        )
+    await db.whatsapp_connections.update_one(
+        {"id": conn_id},
+        {"$set": {
+            "status": "conectado",
+            "ultimo_erro": None,
+            "qualidade": perfil.get("quality_rating"),
+            "nome_verificado": perfil.get("verified_name"),
+            "updated_at": _now(),
+        }},
+    )
 
 
-async def _probe_conectado(row: dict):
+async def _sweep():
     db = get_db()
-    conn_id = row["id"]
-    token = row.get("wuzapi_token")
-    if not token:
-        return
-    try:
-        state = await wuzapi.connection_state(token)
-    except wuzapi.WuzapiError as e:
-        logger.warning("WuzAPI session/status failed for %s: %s", conn_id, e)
-        return
-
-    now = datetime.now(timezone.utc).isoformat()
-    if state.get("connected") and state.get("loggedIn"):
-        # Alive — bump the timestamp so we don't probe again immediately.
-        await db.whatsapp_connections.update_one(
-            {"id": conn_id},
-            {"$set": {"last_webhook_event_at": now, "updated_at": now}},
-        )
-    else:
-        logger.info("Connection %s appears dead (connected=%r loggedIn=%r) — marking desconectado",
-                    conn_id, state.get("connected"), state.get("loggedIn"))
-        await db.whatsapp_connections.update_one(
-            {"id": conn_id},
-            {"$set": {"status": "desconectado", "qrcode_atual": None, "updated_at": now}},
-        )
-
-
-async def _sweep_pareando():
-    db = get_db()
-    async for row in db.whatsapp_connections.find({"status": "pareando"}):
+    async for row in db.whatsapp_connections.find({"phone_number_id": {"$ne": None}}):
         try:
-            await _probe_pareando(row)
+            await _probe(row)
         except Exception as e:
-            logger.exception("Pairing probe failed for connection %s: %s", row.get("id"), e)
-
-
-async def _sweep_conectado():
-    db = get_db()
-    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=STALE_AFTER)).isoformat()
-    cursor = db.whatsapp_connections.find({
-        "status": "conectado",
-        "$or": [
-            {"last_webhook_event_at": None},
-            {"last_webhook_event_at": {"$lt": cutoff}},
-        ],
-    })
-    async for row in cursor:
-        try:
-            await _probe_conectado(row)
-        except Exception as e:
-            logger.exception("Health probe failed for tenant %s: %s", row.get("tenant_id"), e)
+            logger.exception("Probe falhou para a conexão %s: %s", row.get("id"), e)
 
 
 async def _loop():
-    logger.info("WhatsApp health monitor started (pareamento=%ds, saúde=%ds, stale=%ds)",
-                PAIRING_INTERVAL, HEALTH_INTERVAL, STALE_AFTER)
-    # Zero e não `time.monotonic()`: a primeira volta já roda a varredura de
-    # saúde, para o estado das conexões ficar correto logo após um restart.
-    last_health = 0.0
+    logger.info("Vigia de conexões iniciado (a cada %ds)", INTERVALO)
     while True:
         try:
-            await _sweep_pareando()
-            now = time.monotonic()
-            if now - last_health >= HEALTH_INTERVAL:
-                await _sweep_conectado()
-                last_health = now
+            await _sweep()
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.exception("Health sweep crashed: %s", e)
-        await asyncio.sleep(PAIRING_INTERVAL)
+            logger.exception("Varredura de saúde falhou: %s", e)
+        await asyncio.sleep(INTERVALO)
 
 
 def start():

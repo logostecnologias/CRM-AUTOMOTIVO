@@ -5,12 +5,22 @@ dentro de uma conversa que já existia. Campanha inverte isso — a plataforma
 escreve primeiro. Duas consequências moldam este módulo:
 
   - **A sessão ainda não existe.** `conversation_sessions` sempre nasceu em
-    `flow_runtime.handle_incoming_message`. Um disparo que apenas chamasse
-    `wuzapi.send_text` entregaria a mensagem e deixaria a resposta do contato
-    cair numa conversa nova, sem vínculo nenhum com a campanha — o atendente
-    veria um "quanto custa?" solto, sem saber o que foi oferecido. Por isso
+    `flow_runtime.handle_incoming_message`. Um disparo que apenas mandasse a
+    mensagem entregaria o texto e deixaria a resposta do contato cair numa
+    conversa nova, sem vínculo nenhum com a campanha: o atendente veria um
+    "quanto custa?" solto, sem saber o que foi oferecido. Por isso
     `ensure_session` cria (ou reaproveita) a conversa **antes** do envio, e é
     ela que carrega `campanha_id`.
+
+  - **Fora da janela de 24h, só modelo aprovado.** Esta é a regra da Cloud API
+    oficial e é o que mais mudou aqui. Quase todo mundo em qualquer público de
+    campanha está fora da janela (é o normal: a pessoa não escreveu para a
+    empresa nas últimas 24 horas), então uma campanha de texto livre chegaria
+    a quase ninguém, uma recusa por destinatário. Daí `tipo: "template"` ser o
+    padrão. O texto livre continua existindo para o caso legítimo de
+    acompanhamento de quem acabou de falar com a empresa, e ali quem está fora
+    da janela é marcado como `ignorado`, com o motivo, em vez de `falha`: não
+    é erro de entrega, é uma regra da plataforma.
 
   - **Ninguém pediu esta mensagem.** Daí `opt_out` do contato ser respeitado
     aqui, e o destinatário recusado virar `ignorado` em vez de `falha`: não é
@@ -20,10 +30,11 @@ O estado de cada destinatário vive em `campaign_recipients`, um documento por
 contato. É o que permite retomar exatamente de onde parou depois de um
 restart — e é de onde saem as métricas da campanha, sem varrer `messages_log`.
 
-O envio em si passa por `wuzapi_client`, que vai pelo gateway: é ele que já
-aplica rate limiting e normaliza o número. A cadência daqui (ver
-`campaign_runner`) é outra coisa — é sobre não parecer robô para o WhatsApp,
-não sobre proteger a WuzAPI.
+O envio passa por `whatsapp_client`, como todo o resto. A cadência daqui (ver
+`campaign_runner`) continua existindo, mas por outro motivo: na API não oficial
+ela evitava o bloqueio do número; aqui ela existe para respeitar a vazão do
+número na Cloud API (80 mensagens por segundo por padrão) e para o disparo não
+consumir a fila inteira de uma vez.
 """
 import logging
 import re
@@ -33,9 +44,9 @@ from datetime import datetime, timezone
 
 import media_store
 import outbound
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 from flow_engine import _interp
-from flow_runtime import log_message
+from flow_runtime import destino, janela_aberta, log_message
 
 logger = logging.getLogger("zappzen.campaigns")
 
@@ -258,7 +269,65 @@ def render(texto: str, contact: dict) -> str:
     })
 
 
-async def send_one(db, campaign: dict, recipient: dict, token: str) -> tuple[str, str | None]:
+def valores_do_template(conteudo: dict, contact: dict) -> list[str]:
+    """As variáveis do modelo, já preenchidas para este contato.
+
+    Cada variável configurada é um texto que passa pelo mesmo `render` do
+    corpo livre, então `{nome_contato}` funciona igual nos dois lugares. Valor
+    vazio vira um espaço: a Meta recusa parâmetro em branco (erro 132000) e
+    perder o disparo inteiro por um contato sem nome cadastrado seria trocar
+    uma linha imperfeita por uma mensagem não entregue.
+    """
+    modelo = conteudo.get("template") or {}
+    return [render(v or "", contact).strip() or " " for v in (modelo.get("variaveis") or [])]
+
+
+def texto_do_template(conteudo: dict, valores: list[str]) -> str:
+    """O corpo do modelo com as variáveis substituídas, para o histórico.
+
+    O que a Meta guarda é o modelo; o que o contato leu é isto. Sem essa
+    reconstrução, a Central mostraria "modelo promo_agosto" numa bolha, e o
+    atendente que abre a conversa não saberia o que a empresa ofereceu.
+    """
+    modelo = conteudo.get("template") or {}
+    corpo = modelo.get("corpo") or ""
+    for i, valor in enumerate(valores, start=1):
+        corpo = corpo.replace("{{" + str(i) + "}}", valor)
+    return corpo or f"[modelo {modelo.get('nome') or ''}]"
+
+
+async def _componentes(db, campaign: dict, conteudo: dict, valores: list[str], cred):
+    """Os `components` do envio de modelo: cabeçalho de mídia e corpo.
+
+    O cabeçalho só entra quando o modelo aprovado tem um, e o arquivo é o
+    mesmo mecanismo de todo envio de mídia: sobe uma vez e o id fica guardado
+    no documento, senão uma campanha de 1.800 pessoas subiria a mesma imagem
+    1.800 vezes.
+    """
+    componentes = []
+    media_id = (conteudo.get("template") or {}).get("media_id")
+    if media_id:
+        doc = await db.media_files.find_one(
+            {"id": media_id, "tenant_id": campaign["tenant_id"]}, {"_id": 0}
+        )
+        if not doc:
+            raise ValueError("Mídia do modelo não encontrada")
+        if doc.get("purged_at"):
+            raise ValueError("Mídia do modelo expirou pela retenção")
+        id_meta = await media_store.id_na_meta(db, doc, cred)
+        componentes.append({
+            "type": "header",
+            "parameters": [{"type": doc["kind"], doc["kind"]: {"id": id_meta}}],
+        })
+    if valores:
+        componentes.append({
+            "type": "body",
+            "parameters": [{"type": "text", "text": v} for v in valores],
+        })
+    return componentes
+
+
+async def send_one(db, campaign: dict, recipient: dict, cred) -> tuple[str, str | None]:
     """Dispara para um destinatário. Devolve (status, erro).
 
     Nunca levanta: o runner precisa seguir para o próximo destinatário mesmo
@@ -275,18 +344,38 @@ async def send_one(db, campaign: dict, recipient: dict, token: str) -> tuple[str
         # Pediu para sair depois de a lista ter sido congelada.
         return "ignorado", "Contato optou por não receber campanhas"
 
-    numero = contact.get("numero_whatsapp")
+    numero = destino(contact)
     if not numero:
         return "falha", "Contato sem número"
 
     conteudo = campaign.get("conteudo") or {}
+    tipo = conteudo.get("tipo") or "template"
     texto = render(conteudo.get("texto") or "", contact)
 
     session = await ensure_session(db, campaign, contact)
     session_id = session["id"]
+    marca = {"campanha_id": campaign["id"], "campanha_nome": campaign.get("nome")}
+
+    if tipo != "template" and not janela_aberta(session):
+        # Regra da plataforma, não falha nossa: fora da janela de 24h o
+        # WhatsApp só aceita modelo. Marcado como `ignorado` para a campanha
+        # não contabilizar como erro de entrega algo que nunca teve chance.
+        return "ignorado", "Fora da janela de 24h: só modelo aprovado chega a este contato"
 
     try:
-        if conteudo.get("tipo") == "media":
+        if tipo == "template":
+            valores = valores_do_template(conteudo, contact)
+            componentes = await _componentes(db, campaign, conteudo, valores, cred)
+            modelo = conteudo.get("template") or {}
+            if not modelo.get("nome"):
+                return "falha", "Campanha sem modelo escolhido"
+            wamid = await whatsapp.send_template(
+                cred, numero, modelo["nome"], modelo.get("idioma") or "pt_BR", componentes)
+            await log_message(db, session_id, tenant_id, "enviada",
+                              texto_do_template(conteudo, valores),
+                              meta={**marca, "wamid": wamid,
+                                    "template": modelo.get("nome")})
+        elif tipo == "media":
             media_doc = await db.media_files.find_one(
                 {"id": conteudo.get("media_id"), "tenant_id": tenant_id}, {"_id": 0}
             )
@@ -294,31 +383,31 @@ async def send_one(db, campaign: dict, recipient: dict, token: str) -> tuple[str
                 return "falha", "Mídia da campanha não encontrada"
             if media_doc.get("purged_at"):
                 return "falha", "Mídia da campanha expirou pela retenção"
-            # Lido do disco em blocos durante o envio — o arquivo nunca cabe
-            # inteiro na memória, e numa campanha ele é reenviado a cada
-            # destinatário.
-            data_uri = media_store.DataUriStream(media_doc)
-            await wuzapi.send_media(token, numero, media_doc["kind"], data_uri,
-                                    texto, filename=media_doc["filename"])
+            id_meta = await media_store.id_na_meta(db, media_doc, cred)
+            wamid = await whatsapp.send_media(cred, numero, media_doc["kind"],
+                                              media_id=id_meta, caption=texto,
+                                              filename=media_doc["filename"])
             await log_message(db, session_id, tenant_id, "enviada", texto,
                               mtype=media_doc["kind"],
                               meta={"media": media_store.public_payload(media_doc),
-                                    "campanha_id": campaign["id"],
-                                    "campanha_nome": campaign.get("nome")})
+                                    "wamid": wamid, **marca})
         else:
             if not texto.strip():
                 return "falha", "Campanha sem texto"
-            await wuzapi.send_text(token, numero, texto)
+            wamid = await whatsapp.send_text(cred, numero, texto)
             await log_message(db, session_id, tenant_id, "enviada", texto,
-                              meta={"campanha_id": campaign["id"],
-                                    "campanha_nome": campaign.get("nome")})
+                              meta={**marca, "wamid": wamid})
     except Exception as e:
         logger.warning("Falha no disparo da campanha %s para %s: %s",
                        campaign["id"], numero, e)
         return "falha", str(e)[:300]
 
     await db.campaign_recipients.update_one(
-        {"id": recipient["id"]}, {"$set": {"session_id": session_id}}
+        # O `wamid` fica no destinatário porque é por ele que o webhook de
+        # status casa uma falha de entrega com a linha certa da campanha. Sem
+        # isso, "1.800 enviados" continuaria dizendo 1.800 mesmo com 200 que
+        # nunca chegaram ao aparelho de ninguém.
+        {"id": recipient["id"]}, {"$set": {"session_id": session_id, "wamid": wamid}}
     )
     await db.conversation_sessions.update_one(
         {"id": session_id}, {"$set": {"updated_at": _now()}}

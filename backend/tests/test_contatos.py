@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # teste rodar de qualquer lugar (pytest na raiz do backend, ou direto).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 for k, v in {"MONGO_URL": "mongodb://fake/", "DB_NAME": "fake", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://fake"}.items():
+             "META_PLATFORM_TOKEN": "token-de-teste"}.items():
     os.environ.setdefault(k, v)
 # Mídia num diretório temporário: a anonimização apaga arquivo de disco, e isso
 # não pode acontecer dentro do repositório.

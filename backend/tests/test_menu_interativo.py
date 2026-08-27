@@ -1,20 +1,21 @@
 """Teste do nó de Menu nos formatos interativos: botões de resposta rápida e
 lista de opções.
 
-O risco deste módulo não está em montar o payload — está em duas coisas que
-falham **em silêncio**:
+O risco deste módulo está em duas coisas que travam a conversa sem dar erro
+visível:
 
-1. O WhatsApp descarta mensagem interativa fora dos tetos dele (mais de 3
-   botões, rótulo acima de 20 caracteres) sem devolver erro nenhum. Como o nó
-   de Menu deixa a conversa em `awaiting`, uma mensagem descartada trava a
-   conversa: o contato não sabe que devia responder e o fluxo espera para
-   sempre. O que precisa ficar provado é que nada disso vira mensagem perdida —
-   a publicação recusa, e o envio degrada para texto numerado.
+1. Menu fora dos tetos do WhatsApp (mais de 3 botões, rótulo acima de 20
+   caracteres). Na Cloud API isso volta com erro 100 em vez de sumir calado,
+   que é uma melhora, mas o efeito para o contato seria o mesmo: o nó de Menu
+   deixa a conversa em `awaiting`, e uma pergunta que não chega deixa o fluxo
+   esperando para sempre. O que precisa ficar provado é que nada disso vira
+   mensagem perdida: a publicação recusa, e o envio degrada para texto
+   numerado.
 
-2. A resposta do contato chega num nó do payload que não é `conversation`, e o
-   rótulo volta cortado em 20 caracteres. Casar por texto falharia justamente
-   nos menus mais descritivos, então a correspondência é pelo id — e o id é o
-   mesmo `sourceHandle` da saída do nó.
+2. A escolha do contato chega em `interactive.button_reply` /
+   `interactive.list_reply` (e em `button`, quando o menu saiu num modelo),
+   nunca como texto comum. A correspondência é pelo id, que é o mesmo
+   `sourceHandle` da saída do nó, e não pelo rótulo.
 
 Nada sai para a rede: `send_text`/`send_buttons`/`send_list` são substituídos
 por gravadores, e o payload do cliente é conferido espionando `_request`.
@@ -26,7 +27,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 for k, v in {"MONGO_URL": "mongodb://x/", "DB_NAME": "x", "JWT_SECRET": "x",
-             "WUZAPI_GATEWAY_URL": "http://x"}.items():
+             "META_PLATFORM_TOKEN": "token-de-teste"}.items():
     os.environ.setdefault(k, v)
 
 from fakedb import FakeDB
@@ -38,16 +39,17 @@ db_mod.get_db = lambda: DB
 
 import flow_engine
 import flow_runtime
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 import routes.flows as rflows
 import routes.webhooks as rwebhooks
 
-# As funções de verdade, guardadas antes de qualquer dublê. `flow_runtime.wuzapi`
-# É o próprio módulo `wuzapi_client`, então substituir por lá troca a função
-# para todo mundo — inclusive para a etapa que quer justamente exercitar a
-# original.
-REAL_SEND_BUTTONS = wuzapi.send_buttons
-REAL_SEND_LIST = wuzapi.send_list
+# As funções de verdade, guardadas antes de qualquer dublê.
+# `flow_runtime.whatsapp` é o próprio módulo `whatsapp_client`, então
+# substituir por lá troca a função para todo mundo, inclusive para a etapa que
+# quer justamente exercitar a original.
+REAL_SEND_BUTTONS = whatsapp.send_buttons
+REAL_SEND_LIST = whatsapp.send_list
+CRED = whatsapp.Credencial("pn-teste", "token-de-teste", "waba-teste")
 
 # Cada chamada de envio fica aqui: (rota, kwargs).
 ENVIADOS: list[tuple] = []
@@ -56,31 +58,27 @@ ENVIADOS: list[tuple] = []
 FALHA_INTERATIVA = {"erro": None}
 
 
-async def fake_send_text(token, numero, texto):
+async def fake_send_text(cred, numero, texto):
     ENVIADOS.append(("text", {"numero": numero, "texto": texto}))
-    return {"ok": True}
+    return f"wamid.{len(ENVIADOS)}"
 
 
-async def fake_send_buttons(token, numero, body, itens, titulo="", rodape=""):
+async def fake_send_buttons(cred, numero, body, itens, titulo="", rodape=""):
     if FALHA_INTERATIVA["erro"]:
         raise FALHA_INTERATIVA["erro"]
     ENVIADOS.append(("buttons", {"body": body, "itens": itens,
                                  "titulo": titulo, "rodape": rodape}))
-    return {"ok": True}
+    return f"wamid.{len(ENVIADOS)}"
 
 
-async def fake_send_list(token, numero, body, texto_botao, itens,
+async def fake_send_list(cred, numero, body, texto_botao, itens,
                          titulo="", rodape="", titulo_secao=""):
     if FALHA_INTERATIVA["erro"]:
         raise FALHA_INTERATIVA["erro"]
     ENVIADOS.append(("list", {"body": body, "texto_botao": texto_botao,
                               "itens": itens, "titulo": titulo,
                               "rodape": rodape, "titulo_secao": titulo_secao}))
-    return {"ok": True}
-
-
-async def _sem_avatar(*a, **kw):
-    return None
+    return f"wamid.{len(ENVIADOS)}"
 
 
 _MODULOS_FAKE = (flow_runtime, rflows)
@@ -97,10 +95,9 @@ def _conectar_fake():
     db_mod.get_db = lambda: DB
     for m in _MODULOS_FAKE:
         m.get_db = lambda: DB
-    flow_runtime.wuzapi.send_text = fake_send_text
-    flow_runtime.wuzapi.send_buttons = fake_send_buttons
-    flow_runtime.wuzapi.send_list = fake_send_list
-    flow_runtime._fetch_avatar_bg = _sem_avatar
+    flow_runtime.whatsapp.send_text = fake_send_text
+    flow_runtime.whatsapp.send_buttons = fake_send_buttons
+    flow_runtime.whatsapp.send_list = fake_send_list
 
 
 TENANT = "t-1"
@@ -212,7 +209,7 @@ async def semear(menu: dict, *, opcoes=None):
     await DB.users.insert_one(dict(ADMIN))
     await DB.whatsapp_connections.insert_one({
         "id": CONN, "tenant_id": TENANT, "nome": "Recepção",
-        "status": "conectado", "wuzapi_token": "tok-a"})
+        "status": "conectado", "phone_number_id": "pn-teste", "waba_id": "waba-teste"})
     await DB.bots.insert_one({
         "id": "bot-1", "tenant_id": TENANT, "nome": "Robo",
         "connection_id": CONN, "trigger": "first_message",
@@ -286,7 +283,7 @@ async def etapa_resposta_por_botao():
     await receber("oi")
     ENVIADOS.clear()
 
-    cortado = "Sim, autorizo o uso"  # os 20 primeiros caracteres, como a WuzAPI manda
+    cortado = "Sim, autorizo o uso"  # o rotulo cortado em 20, como o botao mostra
     await receber(cortado, escolha={"id": "op_sim", "titulo": cortado})
 
     check("seguiu a saída certa mesmo com o rótulo cortado",
@@ -327,7 +324,7 @@ async def etapa_rotulo_recuperado_do_menu():
           msgs[-1]["content"] == "Sim, autorizo o uso dos meus dados",
           msgs[-1]["content"])
     check("e o rótulo é o completo, não o cortado em 20",
-          len(msgs[-1]["content"]) > wuzapi.LIMITE_ROTULO_BOTAO, msgs[-1]["content"])
+          len(msgs[-1]["content"]) > whatsapp.LIMITE_ROTULO_BOTAO, msgs[-1]["content"])
     check("e a saída certa foi seguida",
           [kw["texto"] for kw in so("text")] == ["AUTORIZOU"], ENVIADOS)
 
@@ -435,20 +432,20 @@ async def etapa_teto_degrada_em_vez_de_perder():
 
 
 async def etapa_falha_de_envio_degrada():
-    """Gateway que não conheça /chat/send/buttons, WuzAPI fora do ar: a
-    pergunta ainda tem que chegar."""
+    """Meta fora do ar, modelo recusado, rede caindo: a pergunta ainda tem que
+    chegar de alguma forma."""
     print("\n[falha no envio interativo: cai para texto]")
     _conectar_fake()
     await semear({"formato": flow_engine.FORMATO_BOTOES})
-    FALHA_INTERATIVA["erro"] = wuzapi.WuzapiError(
-        "WuzAPI POST /chat/send/buttons -> 404: not found")
+    FALHA_INTERATIVA["erro"] = whatsapp.WhatsAppError(
+        "Cloud API 400: (#100) Invalid parameter", codigo=100, http=400)
     await receber("oi")
 
     check("a pergunta chegou como texto", len(so("text")) == 1, ENVIADOS)
     meta = (await menu_no_historico())["meta"]["menu"]
     check("o formato pedido ficou registrado", meta["pedido"] == "botoes", meta)
     check("e o motivo da degradação também",
-          "404" in (meta.get("degradado") or ""), meta)
+          "#100" in (meta.get("degradado") or ""), meta)
 
 
 async def etapa_publicacao_recusa_menu_invalido():
@@ -489,103 +486,162 @@ async def etapa_lista_sem_texto_de_botao():
 async def etapa_payload_do_cliente():
     """O payload que iria para a rede.
 
-    É a parte que erra em silêncio: id na grafia errada não dá erro nenhum, só
+    É a parte que erra em silêncio: um id fora do lugar não dá erro nenhum, só
     faz a escolha do contato voltar sem id e cair como resposta inválida.
     """
     print("\n[cliente: o payload que sai na rede]")
     capturado = {}
 
-    async def espiao(method, path, headers, json=None, body=None):
-        capturado["path"] = path
+    async def espiao(metodo, caminho, token, *, json=None, params=None,
+                     files=None, data=None, repetivel=True):
+        capturado["caminho"] = caminho
         capturado["json"] = json
-        return {"ok": True}
+        return {"messages": [{"id": "wamid.espiao"}]}
 
-    original = wuzapi._request
-    wuzapi._request = espiao
+    original = whatsapp._request
+    whatsapp._request = espiao
     try:
         await REAL_SEND_BUTTONS(
-            "tok", NUM, "Autoriza?",
+            CRED, NUM, "Autoriza?",
             [{"id": "op_sim", "label": "Sim, autorizo o uso dos meus dados"},
              {"id": "op_nao", "label": "Não"},
              {"id": "op_3", "label": "Depois"},
              {"id": "op_4", "label": "Excedente"}],
             titulo="Termo", rodape="Rodapé")
         p = capturado["json"]
-        check("rota de botões", capturado["path"] == "/chat/send/buttons", capturado["path"])
-        check("corta no teto de botões", len(p["Buttons"]) == wuzapi.MAX_BOTOES, p["Buttons"])
-        b = p["Buttons"][0]
+        # Na Cloud API tudo sai pelo mesmo endereço, e o que muda é o `type`.
+        check("rota de mensagens do número",
+              capturado["caminho"] == "/pn-teste/messages", capturado["caminho"])
+        check("é mensagem interativa de botões",
+              p["type"] == "interactive" and p["interactive"]["type"] == "button", p)
+        check("messaging_product obrigatório vai junto",
+              p["messaging_product"] == "whatsapp", p)
+        botoes = p["interactive"]["action"]["buttons"]
+        check("corta no teto de botões", len(botoes) == whatsapp.MAX_BOTOES, botoes)
+        b = botoes[0]
         check("tipo de resposta rápida", b["type"] == "reply", b)
         # 20 caracteres cairiam no meio de "dos", e o corte não pode deixar
         # espaço sobrando no fim do botão.
         check("o rótulo é cortado no teto de 20, sem espaço sobrando",
-              b["title"] == "Sim, autorizo o uso"
-              and len(b["title"]) <= wuzapi.LIMITE_ROTULO_BOTAO, repr(b["title"]))
-        check("o id vai nas duas grafias que o handler aceita",
-              b["id"] == "op_sim" and b["buttonId"] == "op_sim", b)
-        check("título e rodapé nos campos da WuzAPI",
-              p["Title"] == "Termo" and p["Footer"] == "Rodapé", p)
+              b["reply"]["title"] == "Sim, autorizo o uso"
+              and len(b["reply"]["title"]) <= whatsapp.LIMITE_ROTULO_BOTAO,
+              repr(b["reply"]["title"]))
+        check("o id da saída do nó vai no botão",
+              b["reply"]["id"] == "op_sim", b)
+        check("título vira header de texto e rodapé vira footer",
+              p["interactive"]["header"] == {"type": "text", "text": "Termo"}
+              and p["interactive"]["footer"] == {"text": "Rodapé"}, p["interactive"])
 
         capturado.clear()
         await REAL_SEND_LIST(
-            "tok", NUM, "Qual agendamento?", "Agendamentos",
+            CRED, NUM, "Qual agendamento?", "Agendamentos",
             [{"id": f"op_{i}", "label": f"Opção {i}", "descricao": "d"}
              for i in range(12)],
             titulo="Agendamentos", titulo_secao="Especialidades")
         p = capturado["json"]
-        check("rota de lista", capturado["path"] == "/chat/send/list", capturado["path"])
+        check("lista sai pelo mesmo endereço",
+              capturado["caminho"] == "/pn-teste/messages", capturado["caminho"])
+        check("é mensagem interativa de lista",
+              p["interactive"]["type"] == "list", p)
+        secoes = p["interactive"]["action"]["sections"]
         check("corta no teto de itens",
-              len(p["Sections"][0]["rows"]) == wuzapi.MAX_ITENS_LISTA,
-              len(p["Sections"][0]["rows"]))
-        linha = p["Sections"][0]["rows"][0]
-        check("o id da linha vai nas duas grafias",
-              linha["RowId"] == "op_0" and linha["rowId"] == "op_0", linha)
-        check("o corpo vai em Desc", p["Desc"] == "Qual agendamento?", p)
-        check("o botão que abre a lista vai em ButtonText",
-              p["ButtonText"] == "Agendamentos", p)
-        check("a seção leva o título", p["Sections"][0]["title"] == "Especialidades", p)
+              len(secoes[0]["rows"]) == whatsapp.MAX_ITENS_LISTA, len(secoes[0]["rows"]))
+        linha = secoes[0]["rows"][0]
+        check("a linha leva id, título e descrição",
+              linha == {"id": "op_0", "title": "Opção 0", "description": "d"}, linha)
+        check("o corpo vai em body.text",
+              p["interactive"]["body"]["text"] == "Qual agendamento?", p)
+        check("o botão que abre a lista vai em action.button",
+              p["interactive"]["action"]["button"] == "Agendamentos", p)
+        check("a seção leva o título", secoes[0]["title"] == "Especialidades", secoes[0])
+
+        # Corpo vazio é recusado ANTES da rede: a Cloud API devolveria erro 100,
+        # e o nó de Menu ficaria esperando resposta de uma pergunta que não saiu.
+        capturado.clear()
+        try:
+            await REAL_SEND_BUTTONS(CRED, NUM, "   ", [{"id": "a", "label": "A"}])
+            recusou = False
+        except whatsapp.WhatsAppError:
+            recusou = True
+        check("menu sem corpo é recusado sem ir à rede",
+              recusou and not capturado, capturado)
     finally:
-        wuzapi._request = original
+        whatsapp._request = original
 
 
 def etapa_extrator_do_webhook():
-    """As quatro formas em que a escolha chega. Cobrir só uma faria a resposta
-    do contato ser descartada como "mensagem sem texto"."""
+    """As três formas em que a escolha chega na Cloud API. Cobrir só uma faria
+    a resposta do contato ser descartada como "mensagem sem texto"."""
     print("\n[webhook: extrai a escolha de cada formato de resposta]")
-    e = rwebhooks._extract_escolha
+    e = rwebhooks._extrair_escolha
 
-    check("botão clássico",
-          e({"buttonsResponseMessage": {"selectedButtonId": "op_sim",
-                                        "selectedDisplayText": "Sim"}})
+    check("botão de resposta rápida",
+          e({"type": "interactive",
+             "interactive": {"type": "button_reply",
+                             "button_reply": {"id": "op_sim", "title": "Sim"}}})
           == {"id": "op_sim", "titulo": "Sim"})
-    check("lista",
-          e({"listResponseMessage": {"title": "Oncologia",
-                                     "singleSelectReply": {"selectedRowId": "op_onc"}}})
+    check("item de lista",
+          e({"type": "interactive",
+             "interactive": {"type": "list_reply",
+                             "list_reply": {"id": "op_onc", "title": "Oncologia",
+                                            "description": "Consultas"}}})
           == {"id": "op_onc", "titulo": "Oncologia"})
-    check("botão de template",
-          e({"templateButtonReplyMessage": {"selectedId": "op_nao",
-                                            "selectedDisplayText": "Não"}})
+    # Botão de modelo: nao e `interactive`, chega com `payload` (o id) e `text`
+    # (o rotulo). E o caso do "Confirmar"/"Cancelar" de um lembrete enviado por
+    # template, entao ignora-lo perderia justamente a resposta ao lembrete.
+    check("botão de modelo (template)",
+          e({"type": "button", "button": {"payload": "op_nao", "text": "Não"}})
           == {"id": "op_nao", "titulo": "Não"})
-    # O que a WuzAPI de fato produz hoje: NativeFlowButton, com o id dentro de
-    # um JSON **em string**. Sem desempacotar, a escolha vem sem id.
-    check("native flow (o formato da WuzAPI)",
-          e({"interactiveResponseMessage": {
-              "body": {"text": "Sim, estou de acordo"},
-              "nativeFlowResponseMessage": {
-                  "name": "quick_reply",
-                  "paramsJson": '{"id":"op_sim","display_text":"Sim, estou de acordo"}'}}})
-          == {"id": "op_sim", "titulo": "Sim, estou de acordo"})
-    check("grafia alternativa de paramsJson",
-          e({"interactiveResponseMessage": {
-              "nativeFlowResponseMessage": {"paramsJSON": '{"id":"op_x"}'}}})
-          == {"id": "op_x", "titulo": ""})
-    check("paramsJson corrompido não levanta",
-          e({"interactiveResponseMessage": {
-              "body": {"text": "Sim"},
-              "nativeFlowResponseMessage": {"paramsJson": "{nao-e-json"}}})
-          == {"id": None, "titulo": "Sim"})
     check("mensagem de texto comum não é escolha",
-          e({"conversation": "bom dia"}) is None)
-    check("nó vazio não é escolha", e({"buttonsResponseMessage": {}}) is None)
+          e({"type": "text", "text": {"body": "bom dia"}}) is None)
+    check("nó vazio não é escolha",
+          e({"type": "interactive", "interactive": {}}) is None)
+
+
+def etapa_extrator_de_midia():
+    """O anexo recebido, reduzido ao que o runtime precisa para buscá-lo."""
+    print("\n[webhook: extrai o anexo]")
+    m = rwebhooks._extrair_midia
+
+    check("imagem com legenda",
+          m({"type": "image", "image": {"id": "mid-1", "mime_type": "image/jpeg",
+                                        "sha256": "x", "caption": "olha isso"}})
+          == {"kind": "image", "media_id": "mid-1", "mime": "image/jpeg",
+              "filename": None, "caption": "olha isso", "voz": False})
+    check("documento leva o nome do arquivo",
+          m({"type": "document", "document": {"id": "mid-2", "mime_type": "application/pdf",
+                                              "filename": "contrato.pdf"}})["filename"]
+          == "contrato.pdf")
+    check("recado de voz vem marcado",
+          m({"type": "audio", "audio": {"id": "mid-3", "mime_type": "audio/ogg",
+                                        "voice": True}})["voz"] is True)
+    check("figurinha entra como imagem",
+          m({"type": "sticker", "sticker": {"id": "mid-4", "mime_type": "image/webp"}})["kind"]
+          == "image")
+    check("texto não tem anexo", m({"type": "text", "text": {"body": "oi"}}) is None)
+    check("nó de mídia sem id é ignorado",
+          m({"type": "image", "image": {"mime_type": "image/jpeg"}}) is None)
+
+
+def etapa_texto_da_mensagem():
+    """O que vai para a bolha do histórico, por tipo de mensagem."""
+    print("\n[webhook: o texto que vai para o histórico]")
+    t = rwebhooks._texto_da_mensagem
+
+    check("texto comum", t({"type": "text", "text": {"body": "bom dia"}}, None, None)
+          == "bom dia")
+    check("escolha entra pelo rótulo, nunca pelo id",
+          t({"type": "interactive"}, None, {"id": "op_sim", "titulo": "Sim"}) == "Sim")
+    check("sem rótulo, o id é o último recurso (bolha vazia seria pior)",
+          t({"type": "interactive"}, None, {"id": "op_sim", "titulo": ""}) == "op_sim")
+    check("legenda do anexo vira o texto",
+          t({"type": "image"}, {"caption": "olha isso"}, None) == "olha isso")
+    check("localização vira uma linha legível",
+          t({"type": "location", "location": {"name": "Clínica Central",
+                                              "latitude": -23.5, "longitude": -46.6}},
+            None, None) == "[localização] Clínica Central")
+    check("tipo não suportado não vira bolha vazia",
+          t({"type": "unsupported"}, None, None).startswith("[mensagem não suportada"))
 
 
 def etapa_resolvedor():
@@ -660,6 +716,8 @@ def test_suite():
     etapa_resolvedor()
     etapa_validador()
     etapa_extrator_do_webhook()
+    etapa_extrator_de_midia()
+    etapa_texto_da_mensagem()
     asyncio.run(_assincronas())
     print(f"\n{ok} verificações passaram")
 

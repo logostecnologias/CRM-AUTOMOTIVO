@@ -8,7 +8,7 @@ sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
 os.environ.setdefault("MONGO_URL", "mongodb://x/")
 os.environ.setdefault("DB_NAME", "x")
 os.environ.setdefault("JWT_SECRET", "x")
-os.environ.setdefault("WUZAPI_GATEWAY_URL", "http://x")
+os.environ.setdefault("META_PLATFORM_TOKEN", "token-de-teste")
 
 from fakedb import FakeDB
 from fastapi import HTTPException
@@ -28,19 +28,24 @@ for mod in (campaigns, flow_runtime, outbound, rc):
 ENVIADOS = []
 
 
-async def fake_send_text(token, numero, texto):
-    ENVIADOS.append((token, numero, texto))
-    return {"ok": True}
+async def fake_send_text(cred, numero, texto):
+    ENVIADOS.append((cred.phone_number_id, numero, texto))
+    return f"wamid.{len(ENVIADOS)}"
 
 
-flow_runtime.wuzapi.send_text = fake_send_text
+async def fake_send_template(cred, numero, nome, idioma, componentes=None):
+    valores = []
+    for c in (componentes or []):
+        if c.get("type") == "body":
+            valores = [p.get("text") for p in c.get("parameters") or []]
+    ENVIADOS.append((cred.phone_number_id, numero, f"[modelo {nome}]", valores))
+    return f"wamid.{len(ENVIADOS)}"
 
 
-async def _sem_avatar(*a, **k):
-    return None
+flow_runtime.whatsapp.send_text = fake_send_text
+flow_runtime.whatsapp.send_template = fake_send_template
 
 
-flow_runtime._fetch_avatar_bg = _sem_avatar
 
 _MODULOS_FAKE = (campaigns, flow_runtime, outbound, rc)
 
@@ -56,8 +61,8 @@ def _conectar_fake():
     db_mod.get_db = lambda: DB
     for _m in _MODULOS_FAKE:
         _m.get_db = lambda: DB
-    flow_runtime.wuzapi.send_text = fake_send_text
-    flow_runtime._fetch_avatar_bg = _sem_avatar
+    flow_runtime.whatsapp.send_text = fake_send_text
+    flow_runtime.whatsapp.send_template = fake_send_template
 
 
 TENANT = "t-1"
@@ -95,10 +100,10 @@ async def semear():
                                "email": "o@x.com"})
     await DB.whatsapp_connections.insert_one({
         "id": CONN, "tenant_id": TENANT, "nome": "Comercial", "status": "conectado",
-        "wuzapi_token": "tok-1", "departamento_padrao_id": "dep-1"})
+        "phone_number_id": "pn-teste", "waba_id": "waba-teste", "departamento_padrao_id": "dep-1"})
     await DB.whatsapp_connections.insert_one({
         "id": CONN2, "tenant_id": TENANT, "nome": "Suporte", "status": "conectado",
-        "wuzapi_token": "tok-2"})
+        "phone_number_id": "pn-teste", "waba_id": "waba-teste"})
 
 
 async def etapa_criacao_e_dados():
@@ -205,12 +210,23 @@ async def etapa_envio_direto():
     c = await rc.create_contact(rc.ContactIn(nome="Joao Souza", numero_whatsapp="5511900000002"), ADMIN)
     ENVIADOS.clear()
 
-    res = await rc.send_to_contact(c["id"], rc.EnvioIn(texto="Oi Joao, tudo bem?"), ADMIN)
+    # Contato que nunca escreveu esta fora da janela de 24h, e ai o WhatsApp so
+    # entrega modelo aprovado. Texto livre e recusado com 409 e o motivo, em vez
+    # de "falha ao enviar", que mandaria o atendente clicar de novo para sempre.
+    st, det = await erro(rc.send_to_contact(c["id"], rc.EnvioIn(texto="Oi Joao"), ADMIN))
+    check("texto livre para contato frio e recusado", st == 409, (st, det))
+    check("e o motivo explica a janela de 24h", "24 horas" in (det or ""), det)
+    check("nada foi enviado", len(ENVIADOS) == 0, ENVIADOS)
+
+    res = await rc.send_to_contact(
+        c["id"],
+        rc.EnvioIn(texto="Oi Joao, tudo bem?",
+                   template=rc.TemplateEnvioIn(nome="primeiro_contato", idioma="pt_BR",
+                                               valores=["Joao"])),
+        ADMIN)
     check("conversa criada no primeiro envio", res["criada"] is True, res)
-    check("mensagem saiu pela WuzAPI", len(ENVIADOS) == 1, ENVIADOS)
-    check("saiu com o nome de quem enviou",
-          ENVIADOS[0][2].startswith("*Marcos Vendas:*"), ENVIADOS[0][2])
-    check("texto limpo vai no corpo", "Oi Joao, tudo bem?" in ENVIADOS[0][2], ENVIADOS[0][2])
+    check("modelo saiu pela Cloud API", len(ENVIADOS) == 1, ENVIADOS)
+    check("com a variavel preenchida", ENVIADOS[0][3] == ["Joao"], ENVIADOS[0])
 
     s = await DB.conversation_sessions.find_one({"contact_id": c["id"]})
     check("conversa ja nasce em atendimento", s["status_atendimento"] == "em_atendimento", s["status_atendimento"])
@@ -226,8 +242,12 @@ async def etapa_envio_direto():
           msgs[0]["content"] == "Oi Joao, tudo bem?", msgs[0]["content"])
     check("previa da conversa preenchida", bool(s.get("last_message")), s.get("last_message"))
 
-    # segundo envio reaproveita a conversa
-    res2 = await rc.send_to_contact(c["id"], rc.EnvioIn(texto="Segunda"), ADMIN)
+    # segundo envio reaproveita a conversa (a janela segue fechada: o contato
+    # ainda nao respondeu, entao continua sendo caso de modelo)
+    res2 = await rc.send_to_contact(
+        c["id"],
+        rc.EnvioIn(texto="Segunda", template=rc.TemplateEnvioIn(nome="primeiro_contato")),
+        ADMIN)
     check("segundo envio reaproveita a conversa", res2["criada"] is False, res2)
     check("mesma conversa", res2["session_id"] == s["id"], (res2, s["id"]))
     check("uma conversa so", await DB.conversation_sessions.count_documents({"contact_id": c["id"]}) == 1)
@@ -243,6 +263,17 @@ async def etapa_envio_direto():
     s = await DB.conversation_sessions.find_one({"contact_id": c["id"]})
     check("conversa segue com o mesmo atendente", s["atendente_id"] == "u-admin", s["atendente_id"])
     check("nao lida incrementada", s.get("unread_count", 0) >= 1, s.get("unread_count"))
+    check("a resposta do contato abriu a janela de 24h",
+          bool(s.get("janela_expira_em")), s.get("janela_expira_em"))
+
+    # Com a janela aberta, texto livre volta a ser o caminho normal: e o mesmo
+    # envio do painel de atendimento, com o nome de quem escreveu na frente.
+    ENVIADOS.clear()
+    await rc.send_to_contact(c["id"], rc.EnvioIn(texto="Que bom, Joao!"), ADMIN)
+    check("com a janela aberta, o texto livre sai", len(ENVIADOS) == 1, ENVIADOS)
+    check("saiu com o nome de quem enviou",
+          ENVIADOS[0][2].startswith("*Marcos Vendas:*"), ENVIADOS[0][2])
+    check("texto limpo vai no corpo", "Que bom, Joao!" in ENVIADOS[0][2], ENVIADOS[0][2])
     return c
 
 

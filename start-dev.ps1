@@ -1,7 +1,5 @@
 $ErrorActionPreference = "Stop"
 
-$GatewayEnvFile = "/home/ubuntu/evolution/.env"
-$GatewayComposeDir = "/home/ubuntu/evolution"
 $CloudflaredLogOut = Join-Path $env:TEMP "zappzen-cloudflared.out.log"
 $CloudflaredLogErr = Join-Path $env:TEMP "zappzen-cloudflared.err.log"
 
@@ -15,7 +13,7 @@ function Stop-StaleProcesses {
     Write-Host "Encerrando tuneis e processos antigos (se houver)..." -ForegroundColor Cyan
 
     Get-CimInstance Win32_Process -Filter "Name = 'ssh.exe'" -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -match "27017:127\.0\.0\.1:27017" -or $_.CommandLine -match "8090:127\.0\.0\.1:8090"
+        $_.CommandLine -match "27017:127\.0\.0\.1:27017"
     } | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
@@ -113,22 +111,18 @@ function Start-WebhookTunnel {
         return $proc
     }
 
-    Write-Host "Tunel Cloudflare pronto: $tunnelUrl" -ForegroundColor Green
-    Write-Host "Reconfigurando o gateway remoto para apontar pra esse tunel..." -ForegroundColor Cyan
-
-    $webhookUrl = "$tunnelUrl/api/webhooks/wuzapi"
-    $webhookTemplateUrl = "$tunnelUrl/api/webhooks/wuzapi/{tenant_id}/{connection_id}"
-    $remoteCmd = "sed -i 's#^DOWNSTREAM_WEBHOOK_URL=.*#DOWNSTREAM_WEBHOOK_URL=$webhookUrl#' $GatewayEnvFile && " +
-        "sed -i 's#^DOWNSTREAM_WEBHOOK_URL_TEMPLATE=.*#DOWNSTREAM_WEBHOOK_URL_TEMPLATE=$webhookTemplateUrl#' $GatewayEnvFile && " +
-        "cd $GatewayComposeDir && (docker compose up -d gateway || docker-compose up -d gateway)"
-
-    try {
-        ssh -o ConnectTimeout=10 -o BatchMode=yes WuzAPI $remoteCmd
-        Write-Host "Gateway remoto reconfigurado - webhooks reais do WhatsApp devem chegar no seu backend local agora." -ForegroundColor Green
-    }
-    catch {
-        Write-Host "Falha ao reconfigurar o gateway remoto: $_" -ForegroundColor Red
-    }
+    # A URL do tunel muda a cada execucao (tunel efemero), e o webhook da Cloud
+    # API e cadastrado a mao no painel do app da Meta: nao existe API para
+    # troca-lo. Por isso aqui so imprimimos o endereco, em vez de reconfigurar
+    # nada sozinho. Para trabalhar sem colar a URL a cada dia, use um tunel
+    # nomeado do Cloudflare (dominio fixo) e cadastre-o uma vez.
+    Write-Host ""
+    Write-Host "Tunel Cloudflare pronto." -ForegroundColor Green
+    Write-Host "Cadastre esta URL no painel do app da Meta, em WhatsApp > Configuracao > Webhook:" -ForegroundColor Cyan
+    Write-Host "    $tunnelUrl/api/webhooks/whatsapp" -ForegroundColor Yellow
+    Write-Host "O campo 'Verificar token' e o valor de META_WEBHOOK_VERIFY_TOKEN do backend/.env." -ForegroundColor Cyan
+    Write-Host "Assine o campo 'messages' na mesma tela, senao nada entra." -ForegroundColor Cyan
+    Write-Host ""
 
     return $proc
 }
@@ -138,19 +132,17 @@ Stop-StaleProcesses
 Write-Host "Abrindo tunel SSH para o banco de dados (bancos-db)..." -ForegroundColor Cyan
 $dbTunnel = Start-Process -FilePath "ssh" -ArgumentList "-N", "-L", "27017:127.0.0.1:27017", "bancos-db" -WindowStyle Hidden -PassThru
 
-Write-Host "Abrindo tunel SSH para o gateway WuzAPI..." -ForegroundColor Cyan
-$wuzapiTunnel = Start-Process -FilePath "ssh" -ArgumentList "-N", "-L", "8090:127.0.0.1:8090", "WuzAPI" -WindowStyle Hidden -PassThru
-
+# So o banco precisa de tunel. A Cloud API e um endereco publico da Meta
+# (graph.facebook.com), entao o envio sai direto da maquina; o que precisa de
+# tunel e o caminho de VOLTA, o webhook, e disso cuida o cloudflared abaixo.
 $dbOk = Wait-Port 27017 "banco de dados"
-$wuzapiOk = Wait-Port 8090 "gateway WuzAPI"
 
-if (-not $dbOk -or -not $wuzapiOk) {
+if (-not $dbOk) {
     Stop-Process -Id $dbTunnel.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $wuzapiTunnel.Id -Force -ErrorAction SilentlyContinue
     exit 1
 }
 
-Write-Host "Tuneis abertos. Subindo backend + frontend..." -ForegroundColor Green
+Write-Host "Tunel aberto. Subindo backend + frontend..." -ForegroundColor Green
 
 $cloudflaredProc = Start-WebhookTunnel
 
@@ -160,7 +152,6 @@ try {
 finally {
     Write-Host "Encerrando tuneis e processos..." -ForegroundColor Cyan
     Stop-Process -Id $dbTunnel.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $wuzapiTunnel.Id -Force -ErrorAction SilentlyContinue
     if ($cloudflaredProc) {
         Stop-Process -Id $cloudflaredProc.Id -Force -ErrorAction SilentlyContinue
     }

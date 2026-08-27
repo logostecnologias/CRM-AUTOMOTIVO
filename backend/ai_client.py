@@ -1,6 +1,6 @@
 """Camada única de chamada aos provedores de IA (Anthropic e OpenAI).
 
-Mesmo papel que `wuzapi_client.py` tem para o WhatsApp: nenhuma outra parte do
+Mesmo papel que `whatsapp_client.py` tem para o WhatsApp: nenhuma outra parte do
 backend fala com provedor de IA diretamente. Quem chama passa provedor, modelo
 e credencial, e recebe sempre a mesma `Resposta` — com o texto e a contagem de
 tokens já normalizada, porque é dela que sai a medição de consumo.
@@ -8,14 +8,14 @@ tokens já normalizada, porque é dela que sai a medição de consumo.
 Decisões que valem registro:
 
   - **SDK oficial de cada provedor, não httpx cru.** O resto do projeto tem
-    cliente próprio (WuzAPI não tem SDK), mas aqui os dois têm, e são eles que
+    cliente próprio (a Cloud API é REST simples), mas aqui os dois têm, e são eles que
     acertam a semântica de cache de prompt, os tipos de erro e o retry. O
     import é preguiçoso para o backend continuar subindo num ambiente onde só
     um dos dois (ou nenhum) esteja instalado.
 
   - **Um client por chamada, fechado no fim** — o oposto do
-    `wuzapi_client._get_client()`. Lá o client é único do processo porque são
-    muitas chamadas curtas pelo túnel; aqui a credencial é *de cada empresa*, e
+    `whatsapp_client._get_client()`. Lá o client é único do processo porque são
+    muitas chamadas curtas para o mesmo host; aqui a credencial é *de cada empresa*, e
     um pool compartilhado significaria manter chaves de clientes vivas num
     dicionário de módulo. O custo é um handshake TLS por resposta, contra 1-3s
     da própria chamada — irrelevante.

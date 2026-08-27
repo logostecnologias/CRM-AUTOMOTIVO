@@ -1,14 +1,15 @@
-"""Teste de ponta a ponta do fluxo de campanha, com Mongo falso e WuzAPI falsa."""
+"""Teste de ponta a ponta do fluxo de campanha, com Mongo falso e Cloud API falsa."""
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, r"c:\Projetos DEV\LOGOS - ZappZen\ZappZen-BotsWpp\backend")
 os.environ.setdefault("MONGO_URL", "mongodb://x/")
 os.environ.setdefault("DB_NAME", "x")
 os.environ.setdefault("JWT_SECRET", "x")
-os.environ.setdefault("WUZAPI_GATEWAY_URL", "http://x")
+os.environ.setdefault("META_PLATFORM_TOKEN", "token-de-teste")
 
 from fakedb import FakeDB
 
@@ -20,7 +21,7 @@ import campaigns
 import campaign_runner
 import flow_runtime
 import outbound
-import wuzapi_client
+import whatsapp_client
 
 # get_db foi importado por nome dentro dos modulos — troca cada referencia.
 for mod in (campaigns, campaign_runner, flow_runtime, outbound):
@@ -29,22 +30,41 @@ for mod in (campaigns, campaign_runner, flow_runtime, outbound):
 ENVIADOS = []
 
 
-async def fake_send_text(token, numero, texto):
-    ENVIADOS.append(("text", token, numero, texto))
-    return {"ok": True}
+async def fake_send_text(cred, numero, texto):
+    ENVIADOS.append(("text", cred.phone_number_id, numero, texto))
+    return f"wamid.{len(ENVIADOS)}"
 
 
-async def fake_send_media(token, numero, kind, media, caption, filename=None):
-    ENVIADOS.append(("media", token, numero, caption))
-    return {"ok": True}
+async def fake_send_media(cred, numero, kind, *, media_id=None, link=None,
+                          caption="", filename=None):
+    ENVIADOS.append(("media", cred.phone_number_id, numero, caption))
+    return f"wamid.{len(ENVIADOS)}"
 
 
-for mod in (campaigns, flow_runtime):
-    mod.wuzapi.send_text = fake_send_text
-    mod.wuzapi.send_media = fake_send_media
-async def _sem_avatar(*a, **k):
-    return None
-flow_runtime._fetch_avatar_bg = _sem_avatar
+async def fake_send_template(cred, numero, nome, idioma, componentes=None):
+    # O corpo do modelo mora na Meta; o que se pode conferir aqui e o que foi
+    # pedido: nome, idioma e os valores das variaveis.
+    valores = []
+    for c in (componentes or []):
+        if c.get("type") == "body":
+            valores = [p.get("text") for p in c.get("parameters") or []]
+    ENVIADOS.append(("template", cred.phone_number_id, numero, nome, idioma, valores))
+    return f"wamid.{len(ENVIADOS)}"
+
+
+async def fake_upload(cred, caminho, mime, filename=None):
+    return "media-meta-1"
+
+
+def _dublar_envio():
+    for _m in (campaigns, flow_runtime):
+        _m.whatsapp.send_text = fake_send_text
+        _m.whatsapp.send_media = fake_send_media
+        _m.whatsapp.send_template = fake_send_template
+        _m.whatsapp.upload_media = fake_upload
+
+
+_dublar_envio()
 
 _MODULOS_FAKE = (campaign_runner, campaigns, flow_runtime, outbound)
 
@@ -60,10 +80,7 @@ def _conectar_fake():
     db_mod.get_db = lambda: DB
     for _m in _MODULOS_FAKE:
         _m.get_db = lambda: DB
-    for _m in (campaigns, flow_runtime):
-        _m.wuzapi.send_text = fake_send_text
-        _m.wuzapi.send_media = fake_send_media
-    flow_runtime._fetch_avatar_bg = _sem_avatar
+    _dublar_envio()
 
 
 TENANT = "t-1"
@@ -87,7 +104,7 @@ async def semear():
     await DB.plans.insert_one({"id": "p1", "nome": "Pro", "max_disparos_mes": 100})
     await DB.whatsapp_connections.insert_one({
         "id": CONN, "tenant_id": TENANT, "nome": "Comercial",
-        "status": "conectado", "wuzapi_token": "tok-abc",
+        "status": "conectado", "phone_number_id": "pn-abc", "waba_id": "waba-1",
         "departamento_padrao_id": "dep-1",
     })
     for i, (nome, num, tags, opt) in enumerate([
@@ -105,9 +122,15 @@ async def semear():
 
 async def nova_campanha(publico, **kw):
     doc = {
-        "id": "camp-1", "tenant_id": TENANT, "nome": "Promo Agosto", "canal": "wuzapi",
+        "id": "camp-1", "tenant_id": TENANT, "nome": "Promo Agosto", "canal": "cloud_api",
         "whatsapp_connection_id": CONN,
-        "conteudo": {"tipo": "text", "texto": "Oi {primeiro_nome}, temos novidade!", "media_id": None},
+        # Modelo aprovado e o padrao, e nao uma opcao: fora da janela de 24h o
+        # WhatsApp so entrega template, e num publico de campanha quase todo
+        # mundo esta fora dela.
+        "conteudo": {"tipo": "template", "media_id": None,
+                     "template": {"nome": "promo_agosto", "idioma": "pt_BR",
+                                  "corpo": "Oi {{1}}, temos novidade!",
+                                  "variaveis": ["{primeiro_nome}"]}},
         "publico": publico,
         "cadencia": {"por_minuto": 60},
         "agendada_para": None, "resposta_modo": "aguardando", "bot_id": None,
@@ -142,10 +165,13 @@ async def etapa_publico_e_disparo():
     await campaign_runner._run_campaign("camp-1")
 
     check("3 mensagens enviadas", len(ENVIADOS) == 3, len(ENVIADOS))
-    check("interpolou o primeiro nome",
-          any("Oi Maria, temos novidade!" == e[3] for e in ENVIADOS),
-          [e[3] for e in ENVIADOS])
-    check("usou o token da conexao", all(e[1] == "tok-abc" for e in ENVIADOS))
+    check("todas sairam como modelo aprovado", all(e[0] == "template" for e in ENVIADOS),
+          [e[0] for e in ENVIADOS])
+    check("modelo e idioma corretos",
+          all(e[3] == "promo_agosto" and e[4] == "pt_BR" for e in ENVIADOS))
+    check("interpolou o primeiro nome na variavel do modelo",
+          any(e[5] == ["Maria"] for e in ENVIADOS), [e[5] for e in ENVIADOS])
+    check("usou o numero da conexao", all(e[1] == "pn-abc" for e in ENVIADOS))
     check("nao mandou para quem pediu para sair",
           not any(e[2] == "5511900000003" for e in ENVIADOS))
 
@@ -167,6 +193,15 @@ async def etapa_publico_e_disparo():
     check("mensagem gravada no historico de cada conversa", len(msgs) == 3, len(msgs))
     check("mensagem marcada com a campanha",
           all(m["meta"]["campanha_id"] == "camp-1" for m in msgs))
+    # O que a Meta guarda e o modelo; o que o contato leu e isto. Sem a
+    # reconstrucao, a Central mostraria "modelo promo_agosto" numa bolha.
+    check("historico guarda o texto do modelo ja preenchido",
+          any(m["content"] == "Oi Maria, temos novidade!" for m in msgs),
+          [m["content"] for m in msgs])
+    check("wamid gravado para o status de entrega casar depois",
+          all(m["meta"].get("wamid") for m in msgs))
+    dest = await DB.campaign_recipients.find({}).to_list(None)
+    check("wamid tambem no destinatario", all(d.get("wamid") for d in dest))
     sess = sessoes[0]
     check("previa da conversa preenchida (last_message)", bool(sess.get("last_message")), sess.get("last_message"))
 
@@ -302,6 +337,39 @@ async def etapa_metricas():
 
 
 
+async def etapa_janela_de_24h():
+    print("\n[9] Texto livre so chega a quem esta dentro da janela de 24h")
+    await semear()
+    camp = await nova_campanha(
+        {"tipo": "todos", "tags": [], "contact_ids": []},
+        conteudo={"tipo": "text", "texto": "Oi {primeiro_nome}!", "media_id": None},
+    )
+    await campaigns.materialize_recipients(DB, camp)
+
+    # Maria escreveu ha pouco: a janela dela esta aberta. Os outros dois nunca
+    # escreveram, que e a situacao normal de um publico de campanha.
+    await outbound.ensure_session(DB, TENANT, CONN, {"id": "c1", "nome": "Maria Silva",
+                                                     "numero_whatsapp": "5511900000001"},
+                                  campanha_id="camp-1")
+    daqui_a_pouco = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+    await DB.conversation_sessions.update_many(
+        {"contact_id": "c1"}, {"$set": {"janela_expira_em": daqui_a_pouco}})
+
+    ENVIADOS.clear()
+    campaign_runner.JITTER = (0, 0)
+    await campaign_runner._run_campaign("camp-1")
+
+    check("so quem tem janela aberta recebeu", len(ENVIADOS) == 1, ENVIADOS)
+    check("e foi como texto livre", ENVIADOS[0][0] == "text", ENVIADOS)
+    ignorados = await DB.campaign_recipients.find({"status": "ignorado"}).to_list(None)
+    check("os demais viraram 'ignorado', nao 'falha'", len(ignorados) == 2, len(ignorados))
+    check("o motivo explica a regra da plataforma",
+          all("janela" in (d.get("erro") or "").lower() for d in ignorados),
+          [d.get("erro") for d in ignorados])
+    falhas = await DB.campaign_recipients.count_documents({"status": "falha"})
+    check("nenhuma falha de entrega contabilizada", falhas == 0, falhas)
+
+
 # ---------------------------------------------------------------------------
 # Entradas do pytest.
 #
@@ -322,5 +390,6 @@ def test_suite():
         await etapa_conexao_caida_pausa()
         await etapa_claim_nao_duplica()
         await etapa_metricas()
+        await etapa_janela_de_24h()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

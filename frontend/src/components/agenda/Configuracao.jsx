@@ -22,6 +22,7 @@ export default function Configuracao({ config, onSalvo }) {
     mensagem_lembrete: config.mensagem_lembrete || "",
     mensagem_confirmacao: config.mensagem_confirmacao || "",
     mensagem_cancelamento: config.mensagem_cancelamento || "",
+    template_lembrete: config.template_lembrete || { nome: "", idioma: "pt_BR", variaveis: [] },
   }));
   const [salvando, setSalvando] = useState(false);
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -48,6 +49,11 @@ export default function Configuracao({ config, onSalvo }) {
         mensagem_lembrete: form.mensagem_lembrete || "",
         mensagem_confirmacao: form.mensagem_confirmacao || "",
         mensagem_cancelamento: form.mensagem_cancelamento || "",
+        template_lembrete: {
+          nome: (form.template_lembrete?.nome || "").trim(),
+          idioma: form.template_lembrete?.idioma || "pt_BR",
+          variaveis: (form.template_lembrete?.variaveis || []).filter((v) => v !== null),
+        },
       });
       toast.success("Configuração salva");
       onSalvo();
@@ -107,12 +113,43 @@ export default function Configuracao({ config, onSalvo }) {
           <span>Mandar lembrete pelo WhatsApp antes do horário</span>
         </label>
         {form.lembrete_ativo && (
-          <Campo label="Quanto tempo antes"
-            nota="Horas:minutos, de 01:00 a 99:59. 24:00 é o mais comum, um dia antes.">
-            <CampoDuracao minutos={Math.round(Number(form.lembrete_horas || 0) * 60)}
-              min={60} testid="config-lembrete-horas"
-              onChange={(m) => set({ lembrete_horas: emHoras(m) })} />
-          </Campo>
+          <>
+            <Campo label="Quanto tempo antes"
+              nota="Horas:minutos, de 01:00 a 99:59. 24:00 é o mais comum, um dia antes.">
+              <CampoDuracao minutos={Math.round(Number(form.lembrete_horas || 0) * 60)}
+                min={60} testid="config-lembrete-horas"
+                onChange={(m) => set({ lembrete_horas: emHoras(m) })} />
+            </Campo>
+
+            {/* O lembrete sai um dia antes, quando quase sempre já se passaram
+                24h desde a última mensagem do contato. Nessa situação o
+                WhatsApp só entrega modelo aprovado: sem um configurado aqui, o
+                aviso simplesmente não sai, e o motivo fica no histórico da
+                conversa. Com a janela aberta (o contato acabou de escrever), o
+                texto livre acima continua sendo o que vale. */}
+            <Campo label="Modelo aprovado do lembrete"
+              nota="Nome exato do modelo na sua conta da Meta. Fora da janela de 24h, é ele que o WhatsApp entrega; sem modelo, o lembrete não sai.">
+              <input className="zz-input" data-testid="config-template-lembrete"
+                placeholder="ex: lembrete_agendamento"
+                value={form.template_lembrete?.nome || ""}
+                onChange={(e) => set({
+                  template_lembrete: { ...form.template_lembrete, nome: e.target.value },
+                })} />
+            </Campo>
+            <Campo label="Variáveis do modelo, na ordem"
+              nota="Uma por linha, na ordem de {{1}}, {{2}}... Aceita {contato}, {servico}, {profissional}, {data}, {hora} e {data_completa}.">
+              <textarea rows={3} className="zz-input font-mono text-xs"
+                data-testid="config-template-variaveis"
+                placeholder={"{contato}\n{servico}\n{data_completa}"}
+                value={(form.template_lembrete?.variaveis || []).join("\n")}
+                onChange={(e) => set({
+                  template_lembrete: {
+                    ...form.template_lembrete,
+                    variaveis: e.target.value.split("\n"),
+                  },
+                })} />
+            </Campo>
+          </>
         )}
       </Bloco>
 

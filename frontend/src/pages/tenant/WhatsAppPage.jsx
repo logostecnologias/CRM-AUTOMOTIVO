@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import api from "@/lib/api";
+import api, { formatApiErrorDetail } from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import {
-  WhatsappLogo, CheckCircle, QrCode, XCircle, ArrowClockwise, Plus, Trash,
+  WhatsappLogo, CheckCircle, XCircle, ArrowClockwise, Plus, Trash, Key,
+  WarningCircle, Eye, EyeSlash,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -21,7 +22,7 @@ export default function WhatsAppPage() {
   const [creating, setCreating] = useState(false);
   const [newForm, setNewForm] = useState({ nome: "", departamento_padrao_id: "" });
   const [busyId, setBusyId] = useState(null);
-  const [expandedQrId, setExpandedQrId] = useState(null);
+  const [editandoId, setEditandoId] = useState(null);
 
   const load = () => api.get("/whatsapp/connections").then((r) => setConnections(r.data));
   useEffect(() => {
@@ -29,14 +30,6 @@ export default function WhatsAppPage() {
     api.get("/departments").then((r) => setDepts(r.data)).catch(() => {});
     api.get("/bots").then((r) => setBots(r.data)).catch(() => {});
   }, []);
-
-  // Poll while any connection is pairing, so QR/status updates from the webhook show up.
-  useEffect(() => {
-    if (connections.some((c) => c.status === "pareando")) {
-      const t = setInterval(load, 3000);
-      return () => clearInterval(t);
-    }
-  }, [connections]);
 
   const [createConnection, criando] = useAcao(async (e) => {
     e.preventDefault();
@@ -49,35 +42,41 @@ export default function WhatsAppPage() {
       setConnections((cs) => [...cs, data]);
       setNewForm({ nome: "", departamento_padrao_id: "" });
       setCreating(false);
-      toast.success("Conexão criada. Clique em Conectar para gerar o QR Code.");
+      setEditandoId(data.id);
+      toast.success("Conexão criada. Agora cadastre o número da Cloud API.");
     } catch (ex) {
-      toast.error(ex.response?.data?.detail || "Erro ao criar conexão");
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail) || "Erro ao criar conexão");
     }
   });
 
-  const connect = async (id) => {
+  const salvarCredenciais = async (id, corpo) => {
     setBusyId(id);
     try {
-      const { data } = await api.post(`/whatsapp/connections/${id}/connect`);
+      const { data } = await api.post(`/whatsapp/connections/${id}/credenciais`, corpo);
       setConnections((cs) => cs.map((c) => (c.id === id ? data : c)));
-      setExpandedQrId(id);
-      toast.success("Instância criada. Escaneie o QR Code.");
+      setEditandoId(null);
+      if (data.aviso) toast.warning(data.aviso, { duration: 12000 });
+      else toast.success("Número validado e webhook assinado.");
     } catch (ex) {
-      toast.error(ex.response?.data?.detail || "Erro ao conectar");
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail) || "Não foi possível validar",
+        { duration: 10000 });
     } finally { setBusyId(null); }
   };
 
-  const disconnect = async (id) => {
+  const verificar = async (id) => {
     setBusyId(id);
     try {
-      const { data } = await api.post(`/whatsapp/connections/${id}/disconnect`);
+      const { data } = await api.post(`/whatsapp/connections/${id}/verificar`);
       setConnections((cs) => cs.map((c) => (c.id === id ? data : c)));
-      toast.info("Desconectado do WhatsApp");
+      toast.success("Conexão verificada");
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail) || "Falha ao verificar");
+      load();
     } finally { setBusyId(null); }
   };
 
   const removeConnection = async (id) => {
-    if (!(await confirmToast("Excluir esta conexão? Isso desconecta o número e apaga o vínculo.", { confirmLabel: "Excluir" }))) return;
+    if (!(await confirmToast("Excluir esta conexão? O número deixa de receber e enviar por aqui.", { confirmLabel: "Excluir" }))) return;
     setBusyId(id);
     try {
       await api.delete(`/whatsapp/connections/${id}`);
@@ -98,7 +97,8 @@ export default function WhatsAppPage() {
         <div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Conexões WhatsApp</h1>
           <p className="text-ink-2 mt-2 max-w-2xl">
-            Cada conexão é um número de WhatsApp independente, com sua própria instância e departamento padrão. Os robôs são vinculados na tela de Robôs.
+            Cada conexão é um número da API oficial do WhatsApp (Cloud API da Meta),
+            com seu próprio departamento padrão. Os robôs são vinculados na tela de Robôs.
           </p>
         </div>
         <button data-testid="new-connection-btn" onClick={() => setCreating((v) => !v)} className="zz-btn">
@@ -122,7 +122,7 @@ export default function WhatsAppPage() {
               {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
             </select>
           </div>
-          <div className="col-span-3 flex gap-2 justify-end">
+          <div className="sm:col-span-2 lg:col-span-3 flex gap-2 justify-end">
             <button type="button" onClick={() => setCreating(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
             <button type="submit" className="zz-btn" data-testid="new-connection-submit"
               disabled={criando}>{criando ? "Criando…" : "Criar conexão"}</button>
@@ -145,10 +145,10 @@ export default function WhatsAppPage() {
             depts={depts}
             bots={bots}
             busy={busyId === conn.id}
-            expanded={expandedQrId === conn.id}
-            onToggleExpand={() => setExpandedQrId(expandedQrId === conn.id ? null : conn.id)}
-            onConnect={() => connect(conn.id)}
-            onDisconnect={() => disconnect(conn.id)}
+            editando={editandoId === conn.id}
+            onEditar={() => setEditandoId(editandoId === conn.id ? null : conn.id)}
+            onSalvarCredenciais={(corpo) => salvarCredenciais(conn.id, corpo)}
+            onVerificar={() => verificar(conn.id)}
             onRemove={() => removeConnection(conn.id)}
             onUpdateField={(patch) => updateField(conn.id, patch)}
           />
@@ -158,16 +158,14 @@ export default function WhatsAppPage() {
   );
 }
 
-function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onConnect, onDisconnect, onRemove, onUpdateField }) {
-  const qrSrc = conn.qrcode_atual
-    ? (conn.qrcode_atual.startsWith("data:") ? conn.qrcode_atual : `data:image/png;base64,${conn.qrcode_atual}`)
-    : null;
-
+function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarCredenciais,
+                          onVerificar, onRemove, onUpdateField }) {
   const botsDaConexao = bots.filter((b) => b.connection_id === conn.id);
   // Espelha _pick_bot_for_new_session: só bot desta conexão, ativo e publicado.
   const temBotPrimeiraMensagem = botsDaConexao.some(
     (b) => usavel(b) && (b.trigger || "first_message") === "first_message"
   );
+  const cadastrado = Boolean(conn.phone_number_id);
 
   return (
     <div className="border border-line-strong bg-surface p-6 zz-panel-hard rounded-lg" data-testid={`connection-card-${conn.id}`}>
@@ -180,51 +178,54 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
             <div className="font-heading text-xl font-black tracking-tighter">{conn.nome}</div>
             <div className="text-xs font-mono text-ink-3">
               Status: <StatusBadge status={conn.status} />
+              {conn.qualidade && <QualidadeBadge nota={conn.qualidade} />}
             </div>
-            {conn.numero && <div className="text-xs text-ink mt-1">Número: <span className="font-mono">{conn.numero}</span></div>}
+            {conn.numero_exibicao && (
+              <div className="text-xs text-ink mt-1">
+                <span className="font-mono">{conn.numero_exibicao}</span>
+                {conn.nome_verificado && <span className="text-ink-2"> · {conn.nome_verificado}</span>}
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {conn.status === "pareando" && (
-            <button onClick={onToggleExpand} className="p-3 border border-line hover:bg-surface-2 rounded-lg" title="Ver QR Code" data-testid={`toggle-qr-${conn.id}`}>
-              <QrCode size={14} weight="bold" />
+          {cadastrado && (
+            <button onClick={onVerificar} disabled={busy} className="zz-btn zz-btn-secondary"
+              data-testid={`verify-btn-${conn.id}`}>
+              <ArrowClockwise size={14} weight="bold" /> {busy ? "Verificando…" : "Verificar"}
             </button>
           )}
-          {(!conn.status || conn.status === "desconectado") && (
-            <button onClick={onConnect} disabled={busy} className="zz-btn" data-testid={`connect-btn-${conn.id}`}>
-              <QrCode size={14} weight="bold" /> {busy ? "Conectando..." : "Conectar"}
-            </button>
-          )}
-          {(conn.status === "conectado" || conn.status === "pareando") && (
-            <button onClick={onDisconnect} disabled={busy} className="zz-btn zz-btn-danger" data-testid={`disconnect-btn-${conn.id}`}>
-              <XCircle size={14} weight="bold" /> Desconectar
-            </button>
-          )}
+          <button onClick={onEditar} disabled={busy} className="zz-btn" data-testid={`creds-btn-${conn.id}`}>
+            <Key size={14} weight="bold" /> {cadastrado ? "Credenciais" : "Cadastrar número"}
+          </button>
           <button onClick={onRemove} disabled={busy} className="p-3 border border-line hover:bg-danger-soft text-danger rounded-lg" title="Excluir conexão" data-testid={`delete-btn-${conn.id}`}>
             <Trash size={14} weight="bold" />
           </button>
         </div>
       </div>
 
-      {conn.status === "pareando" && expanded && (
-        <div className="flex gap-8 items-start flex-wrap mt-4 pt-4 border-t border-line">
-          {qrSrc ? (
-            <img src={qrSrc} alt="QR Code" className="w-56 h-56 border border-line-strong bg-surface p-2 rounded-lg" data-testid={`qr-image-${conn.id}`} />
-          ) : (
-            <div className="w-56 h-56 border-2 border-dashed border-line-strong rounded-lg flex items-center justify-center text-ink-3 text-sm">
-              Aguardando QR Code...
-            </div>
-          )}
-          <div className="flex-1 min-w-[220px] space-y-2">
-            <div className="text-sm text-ink">
-              Escaneie com o WhatsApp deste número. A tela atualiza sozinha quando a conexão for concluída.
-            </div>
-            <div className="text-xs text-warning bg-warning-soft border border-warning p-2 rounded-lg">
-              O QR expira em ~60s — se expirar, desconecte e conecte novamente.
-            </div>
+      {conn.status === "erro" && conn.ultimo_erro && (
+        <div className="mt-4 text-xs text-danger bg-danger-soft border border-danger p-3 rounded-lg flex gap-2"
+          data-testid={`conn-error-${conn.id}`}>
+          <WarningCircle size={16} weight="bold" className="shrink-0 mt-px" />
+          <div>
+            <strong>A Meta recusou esta conexão.</strong> {conn.ultimo_erro}
           </div>
         </div>
+      )}
+
+      {cadastrado && conn.webhook_assinado === false && (
+        <div className="mt-4 text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg">
+          <strong>Webhook não assinado.</strong> O número envia mensagens, mas as respostas
+          dos contatos não chegam até o app ser assinado na conta da Meta. Cadastre as
+          credenciais de novo com um token que tenha a permissão
+          <span className="font-mono"> whatsapp_business_management</span>.
+        </div>
+      )}
+
+      {editando && (
+        <FormCredenciais conn={conn} busy={busy} onSalvar={onSalvarCredenciais} />
       )}
 
       <div className="mt-4 pt-4 border-t border-line grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -250,18 +251,103 @@ function ConnectionCard({ conn, depts, bots, busy, expanded, onToggleExpand, onC
   );
 }
 
+// O token nunca volta do servidor, só a máscara. Por isso o campo nasce vazio
+// numa conexão já cadastrada: deixá-lo em branco mantém o que está guardado, e
+// preenchê-lo troca a credencial. Devolver o token para "preencher o campo de
+// edição" o faria trafegar a cada abertura de tela.
+function FormCredenciais({ conn, busy, onSalvar }) {
+  const [form, setForm] = useState({
+    phone_number_id: conn.phone_number_id || "",
+    waba_id: conn.waba_id || "",
+    token: "",
+  });
+  const [vendoToken, setVendoToken] = useState(false);
+
+  const [enviar, enviando] = useAcao(async (e) => {
+    e.preventDefault();
+    await onSalvar({
+      phone_number_id: form.phone_number_id.trim(),
+      waba_id: form.waba_id.trim(),
+      token: form.token.trim() || null,
+    });
+  });
+
+  return (
+    <form onSubmit={enviar} className="mt-4 pt-4 border-t border-line"
+      data-testid={`creds-form-${conn.id}`}>
+      <div className="text-xs text-ink-2 mb-3 max-w-3xl">
+        Os três valores estão no painel da Meta, em <strong>WhatsApp &gt; Configuração da API</strong>.
+        O número é validado agora: se algo estiver errado, nada é gravado.
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
+            ID do número (phone number ID)
+          </label>
+          <input required className="zz-input" inputMode="numeric"
+            value={form.phone_number_id} placeholder="106540352242922"
+            onChange={(e) => setForm({ ...form, phone_number_id: e.target.value })}
+            data-testid={`pnid-${conn.id}`} />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
+            ID da conta (WABA ID)
+          </label>
+          <input required className="zz-input" inputMode="numeric"
+            value={form.waba_id} placeholder="102290129340398"
+            onChange={(e) => setForm({ ...form, waba_id: e.target.value })}
+            data-testid={`waba-${conn.id}`} />
+        </div>
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
+            Token de acesso {conn.token_mascara && <span className="font-mono normal-case text-ink-2">({conn.token_mascara})</span>}
+          </label>
+          <div className="relative">
+            <input className="zz-input pr-10" type={vendoToken ? "text" : "password"}
+              autoComplete="new-password"
+              value={form.token} required={!conn.token_mascara}
+              placeholder={conn.token_mascara ? "deixe vazio para manter" : "EAAG…"}
+              onChange={(e) => setForm({ ...form, token: e.target.value })}
+              data-testid={`token-${conn.id}`} />
+            <button type="button" onClick={() => setVendoToken((v) => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-3 hover:text-ink"
+              title={vendoToken ? "Ocultar" : "Mostrar"}>
+              {vendoToken ? <EyeSlash size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="flex justify-end mt-4">
+        <button type="submit" className="zz-btn" disabled={busy || enviando}
+          data-testid={`save-creds-${conn.id}`}>
+          {busy || enviando ? "Validando com a Meta…" : "Validar e salvar"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function StatusBadge({ status }) {
   const map = {
     conectado: "text-success",
-    pareando: "text-warning",
+    erro: "text-danger",
     desconectado: "text-ink-3",
   };
-  const label = { conectado: "conectado", pareando: "pareando", desconectado: "desconectado" }[status] || "—";
+  const label = { conectado: "conectado", erro: "com erro", desconectado: "sem número" }[status] || "—";
   return (
     <span className={`inline-flex items-center gap-1 font-bold ${map[status] || "text-ink-3"}`}>
       {status === "conectado" && <CheckCircle size={12} weight="bold" />}
-      {status === "pareando" && <ArrowClockwise size={12} weight="bold" />}
+      {status === "erro" && <XCircle size={12} weight="bold" />}
       {label}
     </span>
   );
+}
+
+// A nota de qualidade é da Meta e vale dinheiro: nota baixa reduz o limite
+// diário de conversas iniciadas pela empresa, e chega a suspender o número.
+// Quem precisa saber a tempo de mudar o conteúdo dos disparos é o cliente.
+function QualidadeBadge({ nota }) {
+  const cor = { GREEN: "text-success", YELLOW: "text-warning", RED: "text-danger" }[nota] || "text-ink-3";
+  const rotulo = { GREEN: "qualidade alta", YELLOW: "qualidade média", RED: "qualidade baixa" }[nota] || nota;
+  return <span className={`ml-2 font-bold ${cor}`}>· {rotulo}</span>;
 }

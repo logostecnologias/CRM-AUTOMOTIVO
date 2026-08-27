@@ -1,20 +1,20 @@
 """Real-conversation runtime. Uses the same node-processing logic as the
 simulator in flow_engine.py, but persists sessions in MongoDB and sends
-real messages via WuzAPI.
+real messages through the official Cloud API (see whatsapp_client).
 """
 import asyncio
-import base64
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from db import get_db
 from flow_engine import (
     _find_node, _find_next, _find_start, _interp, _process_node,
     FORMATO_BOTOES, FORMATO_LISTA, FORMATO_TEXTO, resolver_escolha_menu,
 )
+import contatos_csv
 import media_store
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 import ai_agents
 
 logger = logging.getLogger("zappzen.flow_runtime")
@@ -36,38 +36,44 @@ def _campanhas():
     return campaigns
 
 
-async def _fetch_avatar_bg(contact_id: str, token: str, number: str):
-    """Fire-and-forget: fetch the contact's profile picture without
-    delaying message/reply handling (WuzAPI can take a few seconds, or
-    fail outright if the contact hides their picture)."""
-    try:
-        db = get_db()
-        url = await wuzapi.get_avatar(token, number)
-        if url:
-            await db.contacts.update_one({"id": contact_id}, {"$set": {"foto_url": url}})
-    except Exception as e:
-        logger.warning("Failed to fetch avatar for contact %s: %s", contact_id, e)
+# A Cloud API não expõe foto de perfil de quem escreve: a WuzAPI expunha
+# porque falava o protocolo do aparelho. `contacts.foto_url` continua no
+# schema (importação e cadastro manual podem preenchê-lo), mas nada aqui o
+# preenche mais, e a Central mostra as iniciais do contato.
 
 
-async def _ingest_incoming_media(db, tenant_id, session_id, token, media: dict) -> dict | None:
-    """Traz para o nosso armazenamento a mídia que o contato mandou.
+async def _marcar_lida_bg(cred, wamid: str):
+    """Confirmação de leitura, sem atrapalhar a resposta.
 
-    O arquivo fica cifrado nos servidores do WhatsApp e a URL expira, então
-    guardar a URL não serviria de nada: o binário tem que ser baixado agora e
-    virar arquivo nosso, servido por /api/media como qualquer outro.
-
-    Falha aqui não derruba a mensagem — devolve None e o texto/legenda ainda
-    entra no histórico, só sem o anexo.
+    Em tarefa própria de propósito: é uma ida à rede que não muda nada do
+    atendimento, e esperá-la atrasaria a resposta do bot em uma volta inteira.
     """
     try:
-        if media.get("base64"):
-            raw = base64.b64decode(media["base64"])
-        elif token:
-            raw = await wuzapi.download_media(token, media["kind"], media["download"])
-        else:
-            return None
-        doc = await media_store.store_upload(
-            db, tenant_id, session_id, None, media.get("filename"), media.get("mime"), raw,
+        await whatsapp.marcar_lida(cred, wamid)
+    except Exception as e:
+        logger.debug("Não foi possível marcar %s como lida: %s", wamid, e)
+
+
+async def _ingest_incoming_media(db, tenant_id, session_id, cred, media: dict) -> dict | None:
+    """Traz para o nosso armazenamento a mídia que o contato mandou.
+
+    São duas idas à Meta: o `media_id` do webhook vira uma URL temporária (5
+    minutos) e a URL é baixada com o mesmo token. Guardar a URL não serviria
+    de nada, e o id só vale 7 dias, então o binário é buscado agora e vira
+    arquivo nosso, servido por /api/media como qualquer outro.
+
+    O download vai direto para o disco, sem passar inteiro pela memória.
+
+    Falha aqui não derruba a mensagem: devolve None e o texto ou legenda ainda
+    entra no histórico, só sem o anexo.
+    """
+    if not cred or not media.get("media_id"):
+        return None
+    try:
+        info, pedacos = await whatsapp.baixar_midia(cred, media["media_id"])
+        doc = await media_store.store_pedacos(
+            db, tenant_id, session_id,
+            media.get("filename"), media.get("mime") or info.get("mime_type"), pedacos,
             kind=media["kind"], limit=media_store.HARD_MAX_BYTES,
         )
         return media_store.public_payload(doc)
@@ -160,7 +166,24 @@ def _menu_em_texto(o: dict) -> str:
     return "\n".join(linhas)
 
 
-async def _enviar_menu(db, tenant_id, token, number, session_id, o):
+def janela_aberta(session: dict | None) -> bool:
+    """A janela de atendimento de 24h desta conversa ainda está aberta?
+
+    Mensagem livre (texto, mídia, menu) só sai enquanto ela estiver; fora
+    dela, só modelo aprovado. A marca é gravada a cada mensagem **recebida**
+    (`janela_expira_em`), porque é o contato quem abre e renova a janela.
+
+    Conversa sem a marca conta como fechada. É o caso das que já existiam
+    antes desta mudança: presumir aberto faria o primeiro envio de cada uma
+    delas falhar com 131047 depois de já ter aparecido como enviada na tela.
+    """
+    if not session:
+        return False
+    expira = session.get("janela_expira_em")
+    return bool(expira) and expira > _now()
+
+
+async def _enviar_menu(db, tenant_id, cred, number, session_id, o):
     """Manda o Menu no formato escolhido no editor, caindo para texto se não der.
 
     A degradação é o ponto do desenho, não um detalhe. O nó de Menu deixa a
@@ -171,9 +194,10 @@ async def _enviar_menu(db, tenant_id, token, number, session_id, o):
 
     São dois os motivos para degradar, e os dois ficam registrados em `meta`: a
     configuração estourou um teto (`problemas`, calculado no motor) ou o envio
-    falhou de verdade — inclusive um gateway que não conheça a rota
-    /chat/send/buttons, que é o caso em que "os botões pararam de sair" precisa
-    ser respondível sem adivinhação.
+    falhou de verdade. Na Cloud API a mensagem interativa fora dos tetos volta
+    com erro 100 em vez de sumir calada, o que é uma melhora, mas a degradação
+    continua sendo o que evita a conversa travar esperando uma pergunta que
+    nunca chegou.
     """
     formato = o.get("formato") or FORMATO_TEXTO
     itens = _itens_do_menu(o)
@@ -184,21 +208,22 @@ async def _enviar_menu(db, tenant_id, token, number, session_id, o):
     if formato in (FORMATO_BOTOES, FORMATO_LISTA) and itens and not problemas:
         try:
             if formato == FORMATO_BOTOES:
-                await wuzapi.send_buttons(
-                    token, number, o.get("content", ""), itens,
+                wamid = await whatsapp.send_buttons(
+                    cred, number, o.get("content", ""), itens,
                     titulo=o.get("titulo", ""), rodape=o.get("rodape", ""))
             else:
-                await wuzapi.send_list(
-                    token, number, o.get("content", ""),
+                wamid = await whatsapp.send_list(
+                    cred, number, o.get("content", ""),
                     o.get("botao_texto") or "Ver opções", itens,
                     titulo=o.get("titulo", ""), rodape=o.get("rodape", ""),
                     titulo_secao=o.get("titulo_secao", ""))
             await _log_msg(db, session_id, tenant_id, "enviada", texto,
-                           mtype="menu", meta={"menu": {"formato": formato}})
+                           mtype="menu", meta={"menu": {"formato": formato},
+                                               "wamid": wamid})
             return
         except Exception as e:
-            # Qualquer falha, não só WuzapiError: `_request` deixa escapar erro
-            # de httpx que não está na lista de retry (PoolTimeout, por
+            # Qualquer falha, não só WhatsAppError: `_request` deixa escapar
+            # erro de httpx que não está na lista de retry (PoolTimeout, por
             # exemplo), e aí a pergunta se perderia. Logado como exceção porque
             # um erro que não seja de rede é bug e precisa continuar visível.
             motivo = str(e)
@@ -208,44 +233,53 @@ async def _enviar_menu(db, tenant_id, token, number, session_id, o):
     meta = {"formato": FORMATO_TEXTO}
     if formato != FORMATO_TEXTO:
         meta.update({"pedido": formato, "degradado": motivo})
-    await wuzapi.send_text(token, number, texto)
+    wamid = await whatsapp.send_text(cred, number, texto)
     await _log_msg(db, session_id, tenant_id, "enviada", texto,
-                   mtype="menu", meta={"menu": meta})
+                   mtype="menu", meta={"menu": meta, "wamid": wamid})
 
 
-async def _send_outputs(db, tenant_id, token, number, session_id, outputs):
+async def _send_outputs(db, tenant_id, cred, number, session_id, outputs):
     for o in outputs:
         try:
             if o["type"] == "text":
-                await wuzapi.send_text(token, number, o["content"])
-                await _log_msg(db, session_id, tenant_id, "enviada", o["content"])
+                wamid = await whatsapp.send_text(cred, number, o["content"])
+                await _log_msg(db, session_id, tenant_id, "enviada", o["content"],
+                               meta={"wamid": wamid})
             elif o["type"] == "menu":
-                await _enviar_menu(db, tenant_id, token, number, session_id, o)
+                await _enviar_menu(db, tenant_id, cred, number, session_id, o)
             elif o["type"] == "media" and o.get("doc"):
-                # Arquivo nosso, já em disco — é o caso das fotos do catálogo do
-                # agente de IA. Lido aos pedaços durante o envio, nunca inteiro
-                # na memória, e o `public_payload` no meta é o que faz a bolha
-                # renderizar a imagem pelo /api/media em vez de um link cru.
+                # Arquivo nosso, já em disco: é o caso das fotos do catálogo do
+                # agente de IA. Sobe para a Meta uma vez e reaproveita o id nos
+                # envios seguintes, e o `public_payload` no meta é o que faz a
+                # bolha renderizar pelo /api/media em vez de um link cru.
                 doc = o["doc"]
-                await wuzapi.send_media(token, number, doc.get("kind", "image"),
-                                        media_store.DataUriStream(doc),
-                                        o.get("caption", ""), filename=doc.get("filename"))
+                media_id = await media_store.id_na_meta(db, doc, cred)
+                wamid = await whatsapp.send_media(
+                    cred, number, doc.get("kind", "image"), media_id=media_id,
+                    caption=o.get("caption", ""), filename=doc.get("filename"))
                 await _log_msg(db, session_id, tenant_id, "enviada", o.get("caption", ""),
                                mtype=doc.get("kind", "image"),
-                               meta={"media": media_store.public_payload(doc)})
+                               meta={"media": media_store.public_payload(doc),
+                                     "wamid": wamid})
             elif o["type"] == "media":
-                # O nó de Mídia guarda uma URL pública; a WuzAPI só aceita o
-                # arquivo embutido, então ele é baixado e convertido aqui.
+                # O nó de Mídia guarda uma URL pública, e a Cloud API busca a
+                # URL sozinha: passar `link` evita baixar o arquivo aqui só
+                # para subi-lo de novo. Quem tem de alcançar a URL é a Meta,
+                # então endereço interno simplesmente não funciona, e é por
+                # isso que este caminho não passa mais pelo net_guard.
                 url = o.get("url", "")
-                data_uri = await media_store.ensure_data_uri(url)
-                await wuzapi.send_media(token, number, o.get("media_type", "image"),
-                                        data_uri, o.get("caption", ""),
-                                        filename=url.split("/")[-1].split("?")[0] or None)
+                if not url.startswith(("http://", "https://")):
+                    raise media_store.MediaError(f"URL de mídia inválida: {url[:40]}")
+                wamid = await whatsapp.send_media(
+                    cred, number, o.get("media_type", "image"), link=url,
+                    caption=o.get("caption", ""),
+                    filename=url.split("/")[-1].split("?")[0] or None)
                 await _log_msg(db, session_id, tenant_id, "enviada",
                                o.get("caption") or o.get("url", ""),
                                mtype=o.get("media_type", "image"),
                                meta={"media": {"kind": o.get("media_type", "image"),
-                                               "url": o.get("url", "")}})
+                                               "url": o.get("url", "")},
+                                     "wamid": wamid})
             elif o["type"] == "system":
                 await _log_msg(db, session_id, tenant_id, "sistema", o["content"], mtype="system")
         except Exception as e:
@@ -425,8 +459,8 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
     """Called from webhook. Advances the conversation for this contact.
 
     `connection_id` identifies exactly which whatsapp_connection (and thus
-    which WuzAPI instance) the message came in on — required so the
-    right bot/instance is used when a tenant has more than one connection.
+    which Cloud API phone number) the message came in on, required so the
+    right bot and credential are used when a tenant has more than one number.
     `push_name` is the sender's WhatsApp display name (Info.PushName on the
     webhook payload) — free, no extra API call needed.
     `media` descreve o anexo, quando houver (ver _extract_media no webhook);
@@ -455,15 +489,28 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
         conn = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
     if not conn:
         return
-    token = conn.get("wuzapi_token")
+    cred = whatsapp.credencial(conn)
 
     # Contact (needs to exist before session lookup)
-    contact = await db.contacts.find_one({"tenant_id": tenant_id, "numero_whatsapp": from_number})
+    #
+    # A busca cobre as duas grafias do celular brasileiro. O `from` do webhook
+    # é o `wa_id` da Meta, e no Brasil ele nem sempre tem o nono dígito: o
+    # contato importado de planilha como 5585999998888 chega aqui como
+    # 558599998888, e procurar só pela forma exata criaria um segundo contato,
+    # com histórico próprio, para a mesma pessoa.
+    numeros = contatos_csv.variantes_br(from_number)
+    contact = await db.contacts.find_one(
+        {"tenant_id": tenant_id, "numero_whatsapp": {"$in": numeros}}
+    )
     if not contact:
         contact = {
             "id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "numero_whatsapp": from_number,
+            # O identificador que a própria Meta usa para esta pessoa. É ele
+            # que vale no envio: reconstruir o número "certo" é o erro clássico
+            # de integração no Brasil, e manda a mensagem para outra pessoa.
+            "wa_id": from_number,
             "nome": push_name or from_number,
             # Origem preenchida na criação: é campo da ficha, e depois não há
             # como saber se o contato entrou por mensagem ou por cadastro.
@@ -471,17 +518,15 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             "created_at": _now(),
         }
         await db.contacts.insert_one(contact)
-        if token:
-            asyncio.create_task(_fetch_avatar_bg(contact["id"], token, from_number))
     else:
         updates = {}
         if push_name and contact.get("nome") == contact.get("numero_whatsapp"):
             updates["nome"] = push_name
+        if contact.get("wa_id") != from_number:
+            updates["wa_id"] = from_number
         if updates:
             await db.contacts.update_one({"id": contact["id"]}, {"$set": updates})
             contact.update(updates)
-        if token and not contact.get("foto_url"):
-            asyncio.create_task(_fetch_avatar_bg(contact["id"], token, from_number))
 
     # Conversa já em andamento continua no bot dela (mesmo que ele tenha sido
     # pausado depois — trocar de bot no meio confundiria o contato).
@@ -520,14 +565,34 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
     legenda_contato = text
     msg_type, msg_meta = "text", None
     if media:
-        stored = await _ingest_incoming_media(db, tenant_id, session_id, token, media)
+        stored = await _ingest_incoming_media(db, tenant_id, session_id, cred, media)
         msg_type = media["kind"]
         msg_meta = {"media": stored} if stored else None
         if not stored and not text:
             # Sem o arquivo e sem legenda a bolha ficaria vazia; melhor dizer
             # o que chegou do que deixar um buraco no histórico.
             text = f"[{media['kind']} não pôde ser baixado]"
+    msg_meta = {**(msg_meta or {}), "wamid": message_id}
     incoming = await _log_msg(db, session_id, tenant_id, "recebida", text, mtype=msg_type, meta=msg_meta)
+
+    # A janela de atendimento de 24h reabre a cada mensagem do contato, e é ela
+    # que decide se a empresa ainda pode responder livremente ou se precisa de
+    # um modelo aprovado. Gravada antes de qualquer decisão de roteamento
+    # porque vale mesmo quando o resto desta função não roda: conversa com
+    # atendente humano é justamente o caso em que alguém vai responder depois.
+    janela = (datetime.now(timezone.utc) + timedelta(hours=whatsapp.JANELA_HORAS)).isoformat()
+    await db.conversation_sessions.update_one(
+        {"id": session_id, "tenant_id": tenant_id},
+        {"$set": {"janela_expira_em": janela}},
+    )
+    if session is not None:
+        session["janela_expira_em"] = janela
+
+    # Os dois tiques azuis. Sem isto o contato vê a mensagem dele como não
+    # lida mesmo depois de o bot responder, o que na conversa parece empresa
+    # que não leu. Best-effort: falhar aqui não pode atrapalhar a resposta.
+    if cred:
+        asyncio.create_task(_marcar_lida_bg(cred, message_id))
 
     camp = _campanhas()
 
@@ -601,8 +666,8 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
                               "updated_at": _now()},
                      "$inc": {"unread_count": 1}},
                 )
-                if token and outputs:
-                    await _send_outputs(db, tenant_id, token, from_number, session_id, outputs)
+                if cred and outputs:
+                    await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs)
                 return
 
             # Sem bot e sem agente: fila humana, em vez de engolir a mensagem.
@@ -718,6 +783,10 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             # existir, então o update de log_message não teve o que casar — a
             # prévia entra aqui para o card não nascer vazio.
             "last_message": last_message_preview(incoming),
+            # Mesma razão: a janela foi calculada antes de a sessão existir, e
+            # sem ela aqui a primeira resposta do bot seria barrada por uma
+            # janela que na verdade acabou de abrir.
+            "janela_expira_em": janela,
             "created_at": _now(),
             "updated_at": _now(),
         }
@@ -822,14 +891,28 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
         )
         flow = target_flow  # for subsequent iterations if chained transfer
 
-    # send outputs via WuzAPI
-    if token and outputs:
-        await _send_outputs(db, tenant_id, token, from_number, session_id, outputs)
+    # send outputs through the Cloud API
+    if cred and outputs:
+        await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs)
+
+
+def destino(contact: dict | None) -> str | None:
+    """O número para onde a mensagem vai.
+
+    O `wa_id` observado numa mensagem recebida ganha do número cadastrado,
+    sempre. No Brasil os dois divergem no nono dígito com frequência, e o que
+    a Meta aceita é o identificador que ela própria usou. Contato que nunca
+    escreveu não tem `wa_id`, e aí vale o número cadastrado, que é o único que
+    existe.
+    """
+    if not contact:
+        return None
+    return contact.get("wa_id") or contact.get("numero_whatsapp")
 
 
 async def _outgoing_context(db, tenant_id: str, session_id: str):
-    """Peças comuns de todo envio humano: sessão, contato, token da conexão e
-    nome do atendente. Devolve None se a sessão não existir."""
+    """Peças comuns de todo envio humano: sessão, contato, credencial da
+    conexão e nome do atendente. Devolve None se a sessão não existir."""
     session = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": tenant_id})
     if not session:
         return None
@@ -839,7 +922,7 @@ async def _outgoing_context(db, tenant_id: str, session_id: str):
         conn = await db.whatsapp_connections.find_one({"id": conn_id, "tenant_id": tenant_id})
     else:
         conn = await db.whatsapp_connections.find_one({"tenant_id": tenant_id})
-    token = conn and conn.get("wuzapi_token")
+    cred = whatsapp.credencial(conn)
 
     agent = None
     if session.get("atendente_id"):
@@ -848,39 +931,100 @@ async def _outgoing_context(db, tenant_id: str, session_id: str):
         # tenant_id=None (they belong to no tenant) — filtering by tenant_id
         # would silently fail to find them and drop the name.
         agent = await db.users.find_one({"id": session["atendente_id"]})
-    return session, contact, token, (agent.get("name") if agent else None)
+    return session, contact, cred, (agent.get("name") if agent else None)
+
+
+class JanelaFechada(Exception):
+    """A conversa passou de 24h sem mensagem do contato.
+
+    Erro próprio porque a tela precisa distinguir isto de falha de envio: uma
+    pede "peça ao contato para escrever, ou mande um modelo", a outra pede
+    tentar de novo. Sem a distinção, o atendente lê "erro ao enviar" e repete
+    o clique para sempre.
+    """
+
+
+MSG_JANELA_FECHADA = (
+    "A janela de 24 horas desta conversa fechou. O WhatsApp só permite "
+    "mensagem livre até 24h depois da última mensagem do contato; depois "
+    "disso, apenas modelo aprovado."
+)
 
 
 async def send_human_message(tenant_id: str, session_id: str, content: str):
-    """Sends a text from human agent (inbox) via WuzAPI.
+    """Sends a text from human agent (inbox) through the Cloud API.
 
     The agent's name is prepended (WhatsApp bold syntax) to the text that
-    actually goes out over WhatsApp, so the customer sees who's answering —
+    actually goes out over WhatsApp, so the customer sees who's answering,
     not just an internal-only label. The clean `content` (without the
     prefix) is what's stored/shown in our own chat panel, with the agent
     name kept separately in `meta` for the bold label above the bubble.
+
+    A janela é conferida antes de tentar: o WhatsApp recusaria com 131047, e
+    aí a mensagem já teria ido para o histórico como enviada.
     """
     db = get_db()
     ctx = await _outgoing_context(db, tenant_id, session_id)
     if not ctx:
         return None
-    _session, contact, token, agent_name = ctx
+    session, contact, cred, agent_name = ctx
     outgoing_text = f"*{agent_name}:*\n{content}" if agent_name else content
 
-    if token and contact:
+    if cred and contact:
+        if not janela_aberta(session):
+            raise JanelaFechada(MSG_JANELA_FECHADA)
         try:
-            await wuzapi.send_text(token, contact["numero_whatsapp"], outgoing_text)
+            wamid = await whatsapp.send_text(cred, destino(contact), outgoing_text)
         except Exception as e:
             await _log_msg(db, session_id, tenant_id, "erro", f"Falha envio humano: {e}", mtype="error")
             raise
-    await _log_msg(db, session_id, tenant_id, "enviada", content,
-                    meta={"agent_name": agent_name} if agent_name else None)
+    else:
+        wamid = None
+    meta = {"wamid": wamid} if wamid else {}
+    if agent_name:
+        meta["agent_name"] = agent_name
+    await _log_msg(db, session_id, tenant_id, "enviada", content, meta=meta or None)
+    await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"updated_at": _now()}})
+    return True
+
+
+async def send_template_message(tenant_id: str, session_id: str, nome: str,
+                                idioma: str, valores: list[str], texto: str):
+    """Manda um modelo aprovado, o único envio que atravessa a janela de 24h.
+
+    Existe aqui, e não em cada chamador, pela mesma razão de
+    `send_human_message`: é o ponto único que grava a mensagem no histórico
+    com a prévia da conversa junto. O `texto` é o corpo do modelo já
+    preenchido, e é ele que vai para a bolha: guardar "modelo
+    lembrete_consulta" faria o atendente abrir a conversa sem saber o que a
+    empresa disse ao contato.
+    """
+    db = get_db()
+    ctx = await _outgoing_context(db, tenant_id, session_id)
+    if not ctx:
+        return None
+    _session, contact, cred, _agent = ctx
+    if not cred or not contact:
+        raise RuntimeError("Conexão de WhatsApp indisponível para esta conversa")
+
+    componentes = []
+    if valores:
+        componentes.append({"type": "body",
+                            "parameters": [{"type": "text", "text": v} for v in valores]})
+    try:
+        wamid = await whatsapp.send_template(cred, destino(contact), nome, idioma, componentes)
+    except Exception as e:
+        await _log_msg(db, session_id, tenant_id, "erro",
+                       f"Falha no envio do modelo {nome}: {e}", mtype="error")
+        raise
+    await _log_msg(db, session_id, tenant_id, "enviada", texto,
+                   meta={"wamid": wamid, "template": nome})
     await db.conversation_sessions.update_one({"id": session_id}, {"$set": {"updated_at": _now()}})
     return True
 
 
 async def send_human_media(tenant_id: str, session_id: str, media_doc: dict, caption: str = ""):
-    """Sends a stored file from the human agent (inbox) via WuzAPI.
+    """Sends a stored file from the human agent (inbox) through the Cloud API.
 
     Same convention as send_human_message: the agent's name is prepended to
     what actually leaves for WhatsApp (here, to the caption), while the chat
@@ -894,24 +1038,27 @@ async def send_human_media(tenant_id: str, session_id: str, media_doc: dict, cap
     ctx = await _outgoing_context(db, tenant_id, session_id)
     if not ctx:
         return None
-    _session, contact, token, agent_name = ctx
-    if not token or not contact:
+    session, contact, cred, agent_name = ctx
+    if not cred or not contact:
         raise RuntimeError("Conexão de WhatsApp indisponível para esta conversa")
+    if not janela_aberta(session):
+        raise JanelaFechada(MSG_JANELA_FECHADA)
 
     outgoing_caption = f"*{agent_name}:*\n{caption}" if agent_name and caption else (
         f"*{agent_name}:*" if agent_name else caption
     )
     try:
-        # Lido do disco durante o envio: o arquivo pode ter dezenas de MB, e
-        # este é o caminho por onde ele passa inteiro.
-        data_uri = media_store.DataUriStream(media_doc)
-        await wuzapi.send_media(token, contact["numero_whatsapp"], media_doc["kind"],
-                                data_uri, outgoing_caption, filename=media_doc["filename"])
+        # Sobe o arquivo uma vez e guarda o id da Meta no documento: o mesmo
+        # anexo mandado para outra conversa não sobe de novo.
+        media_id = await media_store.id_na_meta(db, media_doc, cred)
+        wamid = await whatsapp.send_media(
+            cred, destino(contact), media_doc["kind"], media_id=media_id,
+            caption=outgoing_caption, filename=media_doc["filename"])
     except Exception as e:
         await _log_msg(db, session_id, tenant_id, "erro", f"Falha envio de mídia: {e}", mtype="error")
         raise
 
-    meta = {"media": media_store.public_payload(media_doc)}
+    meta = {"media": media_store.public_payload(media_doc), "wamid": wamid}
     if agent_name:
         meta["agent_name"] = agent_name
     await _log_msg(db, session_id, tenant_id, "enviada", caption,

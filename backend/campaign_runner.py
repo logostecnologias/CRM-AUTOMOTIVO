@@ -10,11 +10,17 @@ Duas camadas, por motivos diferentes:
     tudo, porque cada campanha tem sua própria cadência: duas rodando juntas
     não podem se atrapalhar no ritmo.
 
-A cadência é o coração disto. Mandar 2.000 mensagens o mais rápido possível
-por uma conexão de WhatsApp é o caminho conhecido para o número ser bloqueado —
-e o bloqueio não é do ZappZen, é do cliente, que perde o número da empresa.
-Daí o intervalo entre envios e o `jitter`: intervalo exato é assinatura de
-robô, então cada pausa varia um pouco.
+A cadência continua sendo o coração disto, com outro motivo desde a mudança
+para a Cloud API oficial. Antes ela existia para o número não ser bloqueado
+pelo WhatsApp, risco real de API não oficial. Agora ela existe para respeitar
+a vazão do número (80 mensagens por segundo por padrão, e menos que isso no
+limite diário de contatos iniciados por empresa) e para o disparo não ocupar a
+conexão inteira: enquanto 2.000 modelos saem, a mesma conexão precisa
+responder quem está conversando. O `jitter` ficou porque continua sendo bom
+não empilhar picos exatamente iguais, mas ele deixou de ser disfarce.
+
+Também mudou a natureza da recusa: quem está fora da janela de 24h só recebe
+modelo aprovado, e isso é decidido em `campaigns.send_one`, não aqui.
 
 Retomada não precisa de nada especial porque o estado não está aqui: ele está
 em `campaign_recipients.status`. Depois de um restart, o supervisor reencontra
@@ -28,6 +34,7 @@ from datetime import datetime, timezone, timedelta
 from pymongo import ReturnDocument
 
 import campaigns
+import whatsapp_client as whatsapp
 from db import get_db
 
 logger = logging.getLogger("zappzen.campaign_runner")
@@ -95,12 +102,13 @@ async def _claim(db, campaign_id: str) -> dict | None:
     )
 
 
-async def _token_da_conexao(db, campaign: dict) -> tuple[str | None, str | None]:
-    """Token de envio da conexão da campanha, ou o motivo de não poder enviar.
+async def _credencial_da_conexao(db, campaign: dict):
+    """Credencial de envio da conexão da campanha, ou o motivo de não enviar.
 
-    Conexão desconectada pausa a campanha em vez de queimar destinatários como
-    falha: o público é o ativo da campanha, e marcar 1.800 contatos como
-    "falha" porque o QR caiu tornaria a campanha inaproveitável.
+    Conexão sem credencial válida pausa a campanha em vez de queimar
+    destinatários como falha: o público é o ativo da campanha, e marcar 1.800
+    contatos como "falha" porque o token expirou tornaria a campanha
+    inaproveitável.
     """
     conn = await db.whatsapp_connections.find_one(
         {"id": campaign.get("whatsapp_connection_id"), "tenant_id": campaign["tenant_id"]},
@@ -110,9 +118,10 @@ async def _token_da_conexao(db, campaign: dict) -> tuple[str | None, str | None]
         return None, "Conexão de WhatsApp não existe mais"
     if conn.get("status") != "conectado":
         return None, f"Conexão '{conn.get('nome') or conn['id']}' está {conn.get('status')}"
-    if not conn.get("wuzapi_token"):
-        return None, "Conexão sem token de envio"
-    return conn["wuzapi_token"], None
+    cred = whatsapp.credencial(conn)
+    if not cred:
+        return None, "Conexão sem credencial da Cloud API cadastrada"
+    return cred, None
 
 
 async def _finalizar(db, campaign_id: str):
@@ -139,8 +148,8 @@ async def _run_campaign(campaign_id: str):
             # não acontece.
             return
 
-        token, motivo = await _token_da_conexao(db, campaign)
-        if not token:
+        cred, motivo = await _credencial_da_conexao(db, campaign)
+        if not cred:
             await _pausar(db, campaign_id, motivo)
             return
 
@@ -149,7 +158,7 @@ async def _run_campaign(campaign_id: str):
             await _finalizar(db, campaign_id)
             return
 
-        status, erro = await campaigns.send_one(db, campaign, recipient, token)
+        status, erro = await campaigns.send_one(db, campaign, recipient, cred)
         await db.campaign_recipients.update_one(
             {"id": recipient["id"]},
             {"$set": {"status": status, "erro": erro, "sent_at": _now(), "claimed_at": None}},

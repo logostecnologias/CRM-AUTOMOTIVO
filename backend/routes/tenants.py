@@ -10,7 +10,7 @@ from db import get_db
 from auth import (require_super_admin, hash_password, create_access_token,
                   create_refresh_token, _set_auth_cookies, _cookie_secure)
 from plan_limits import plan_excess
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 import audit
 
 router = APIRouter(prefix="/api/admin", tags=["super_admin"])
@@ -210,16 +210,18 @@ COLECOES_DA_EMPRESA = (
 async def delete_tenant(tenant_id: str, admin=Depends(require_super_admin)):
     db = get_db()
     alvo = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "name": 1})
-    # Best-effort: derruba as instâncias na WuzAPI antes de apagar as conexões.
-    # Sem isto (ZZ-14), a sessão de WhatsApp continua logada no servidor depois
-    # de a empresa deixar de existir. Falha aqui não impede a exclusão — a
-    # coleção `whatsapp_connections` é apagada logo abaixo de qualquer forma.
+    # Best-effort: cancela a assinatura do nosso app nas contas da Meta antes
+    # de apagar as conexões (ZZ-14). Sem isto a Meta continua entregando o
+    # webhook de números de uma empresa que não existe mais, e cada evento
+    # desses vira uma consulta ao banco que nunca casa com nada. Falha aqui
+    # não impede a exclusão: a coleção é apagada logo abaixo de qualquer jeito.
     async for conn in db.whatsapp_connections.find(
-        {"tenant_id": tenant_id, "wuzapi_token": {"$ne": None}},
-        {"_id": 0, "wuzapi_token": 1},
+        {"tenant_id": tenant_id, "phone_number_id": {"$ne": None}}, {"_id": 0},
     ):
         try:
-            await wuzapi.logout_instance(conn["wuzapi_token"])
+            cred = whatsapp.credencial(conn)
+            if cred:
+                await whatsapp.desassinar_webhook(cred)
         except Exception:
             pass
     await db.tenants.delete_one({"id": tenant_id})

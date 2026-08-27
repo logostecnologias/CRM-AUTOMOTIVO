@@ -4,7 +4,7 @@ Dois pontos do sistema deixam o cliente escolher uma URL que o **servidor**
 busca: o nó de Webhook do editor de fluxos (ZZ-04) e o nó de Mídia, que baixa
 uma URL pública e a converte em data URI (ZZ-05). Sem validação, um
 `tenant_admin` aponta qualquer um dos dois para dentro da rede do backend
-— `http://127.0.0.1:8090` (gateway WuzAPI), `http://169.254.169.254/...`
+(`http://127.0.0.1:8000`, o próprio backend, `http://169.254.169.254/...`
 (metadados de nuvem), `10.x`/`192.168.x` — e lê a resposta (o webhook ecoa o
 corpo de volta ao contato; a mídia vira imagem/documento).
 

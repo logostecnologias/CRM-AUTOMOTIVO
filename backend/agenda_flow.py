@@ -38,7 +38,7 @@ Decisões:
 import logging
 
 import agenda
-import wuzapi_client as wuzapi
+import whatsapp_client as whatsapp
 from db import get_db
 from fastapi import HTTPException
 
@@ -86,7 +86,7 @@ def texto_do_no(data: dict, chave: str) -> str:
 
 def _corta(texto: str, limite: int) -> str:
     """Corta e apara: o corte cai no meio de uma palavra quase sempre, e sobraria
-    um espaço no fim do botão. É o mesmo detalhe do rótulo em `wuzapi_client`."""
+    um espaço no fim do botão. É o mesmo detalhe do rótulo em `whatsapp_client`."""
     return (texto or "")[:limite].rstrip()
 
 
@@ -112,8 +112,8 @@ def _menu(data: dict, session: dict, node_id: str, etapa: str, pergunta: str,
     # mensagem com quarenta linhas numeradas no celular não é uma pergunta, é um
     # muro. Oferecer os primeiros é melhor: o contato que quer outro horário
     # responde e o atendimento humano resolve.
-    itens = itens[:{"lista": wuzapi.MAX_ITENS_LISTA,
-                    "botoes": wuzapi.MAX_BOTOES}.get(formato, MAX_ITENS_TEXTO)]
+    itens = itens[:{"lista": whatsapp.MAX_ITENS_LISTA,
+                    "botoes": whatsapp.MAX_BOTOES}.get(formato, MAX_ITENS_TEXTO)]
 
     session["awaiting"] = {
         "node_id": node_id,
@@ -150,8 +150,8 @@ def _item_servico(s: dict) -> dict:
     descricao = " · ".join(partes)
     if s.get("descricao"):
         descricao = f"{descricao} · {s['descricao']}" if descricao else s["descricao"]
-    return {"id": s["id"], "label": _corta(s["nome"], wuzapi.LIMITE_ROTULO_ITEM),
-            "descricao": _corta(descricao, wuzapi.LIMITE_DESC_ITEM)}
+    return {"id": s["id"], "label": _corta(s["nome"], whatsapp.LIMITE_ROTULO_ITEM),
+            "descricao": _corta(descricao, whatsapp.LIMITE_DESC_ITEM)}
 
 
 # ---------------------------------------------------------------------------
@@ -248,8 +248,8 @@ async def _proxima_pergunta(db, tenant_id, node, session, outputs, data, config,
     if recurso_id:
         recurso = next((r for r in recursos if r["id"] == recurso_id), None)
     if not recurso and modo == "perguntar" and len(recursos) > 1:
-        itens = [{"id": r["id"], "label": _corta(r["nome"], wuzapi.LIMITE_ROTULO_ITEM),
-                  "descricao": _corta(r.get("descricao") or "", wuzapi.LIMITE_DESC_ITEM)}
+        itens = [{"id": r["id"], "label": _corta(r["nome"], whatsapp.LIMITE_ROTULO_ITEM),
+                  "descricao": _corta(r.get("descricao") or "", whatsapp.LIMITE_DESC_ITEM)}
                  for r in recursos]
         outputs.append(_menu(data, session, node_id, "profissional",
                              texto_do_no(data, "texto_profissional"), itens, dados, prefixo))
@@ -267,7 +267,7 @@ async def _proxima_pergunta(db, tenant_id, node, session, outputs, data, config,
     # --- dia -------------------------------------------------------------
     dia = dados.get("dia")
     if not dia:
-        limite = max(1, min(int(data.get("dias_oferecidos") or 5), wuzapi.MAX_ITENS_LISTA))
+        limite = max(1, min(int(data.get("dias_oferecidos") or 5), whatsapp.MAX_ITENS_LISTA))
         dias = await agenda.proximos_dias(db, tenant_id, recursos=candidatos,
                                           servico=servico, config=config,
                                           limite_dias=limite)
@@ -279,7 +279,7 @@ async def _proxima_pergunta(db, tenant_id, node, session, outputs, data, config,
         # contando à empresa o quanto a agenda está vazia. Fora ser ruído, é
         # informação de dentro da casa: numa agenda cheia some, numa vazia
         # denuncia. "A partir das 14:30" ajuda a escolher e não conta nada.
-        itens = [{"id": d["dia"], "label": _corta(d["rotulo"], wuzapi.LIMITE_ROTULO_ITEM),
+        itens = [{"id": d["dia"], "label": _corta(d["rotulo"], whatsapp.LIMITE_ROTULO_ITEM),
                   "descricao": f"a partir das {_hora(d['primeiro'], config)}"}
                  for d in dias]
         outputs.append(_menu(data, session, node_id, "dia",
@@ -317,7 +317,7 @@ async def _proxima_pergunta(db, tenant_id, node, session, outputs, data, config,
     # o vê repetido na mensagem que o WhatsApp devolve por ele.
     varios = len({h.get("resource_id") for h in horarios}) > 1
     itens = [{"id": h["inicio"], "label": h["hora"],
-              "descricao": _corta(h.get("resource_nome") or "", wuzapi.LIMITE_DESC_ITEM)
+              "descricao": _corta(h.get("resource_nome") or "", whatsapp.LIMITE_DESC_ITEM)
                            if varios else ""}
              for h in horarios]
     outputs.append(_menu(data, session, node_id, "hora",
@@ -432,8 +432,8 @@ def validar(data: dict) -> list:
     if modo == "fixo" and not (data.get("resource_id") or "").strip():
         problemas.append("o modo \"profissional fixo\" exige escolher qual profissional")
     dias = data.get("dias_oferecidos")
-    if dias is not None and not (1 <= int(dias or 0) <= wuzapi.MAX_ITENS_LISTA):
-        problemas.append(f"o nó pode oferecer de 1 a {wuzapi.MAX_ITENS_LISTA} dias")
+    if dias is not None and not (1 <= int(dias or 0) <= whatsapp.MAX_ITENS_LISTA):
+        problemas.append(f"o nó pode oferecer de 1 a {whatsapp.MAX_ITENS_LISTA} dias")
     formato = data.get("formato") or "lista"
     if formato not in ("lista", "botoes", "texto"):
         problemas.append(f"formato de apresentação desconhecido: {formato}")

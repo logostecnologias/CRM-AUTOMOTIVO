@@ -1,26 +1,42 @@
-"""WuzAPI (whatsmeow) webhook receiver, reached via the zappzen-gateway.
+"""Receptor de webhook da Cloud API oficial (Meta).
 
-The gateway is the only thing that should call this — it already validated
-the WuzAPI HMAC signature once and forwards the same x-hmac-signature header
-unchanged (payload bytes are identical), so we re-check it here too rather
-than trust the network blindly. It also durably queues + retries delivery
-with backoff, so we don't need our own retry here — just process fast and
-return 200.
+Três coisas mudaram de forma estrutural em relação ao receptor anterior, e as
+três aparecem no desenho deste arquivo:
 
-Routing is normally per-connection by URL (/wuzapi/{tenant_id}/{connection_id}),
-set when the connection is created (see whatsapp.py's _webhook_url()). In
-practice WuzAPI has also been observed delivering real incoming-message
-events to the gateway's plain /webhook route even when the per-connection
-URL is configured, so /wuzapi (no path params) exists as a fallback that
-resolves tenant/connection from the payload's `userID` field instead.
+  - **É um endereço só, para todas as empresas.** A Meta entrega os eventos de
+    todas as contas assinadas ao app num único callback, configurado no painel
+    do app. Não dá para carregar `tenant_id`/`connection_id` no caminho, como
+    a URL por conexão fazia antes. Quem diz de qual número o evento é são os
+    metadados do próprio payload (`value.metadata.phone_number_id`), e é por
+    ele que a conexão é encontrada. Um `phone_number_id` desconhecido é
+    respondido com 200 e ignorado: devolver erro faria a Meta repetir por sete
+    dias um evento que nunca vai casar com nada.
+
+  - **A verificação é em duas etapas e as duas são obrigatórias.** O `GET` com
+    `hub.challenge` acontece uma vez, quando o endereço é cadastrado no painel;
+    sem ele a Meta não aceita a URL. O `POST` de cada evento vem assinado em
+    `X-Hub-Signature-256` com o App Secret sobre os **bytes crus** do corpo.
+    Reserializar o JSON antes de conferir quebraria a assinatura, então o corpo
+    é lido uma vez, conferido e só então interpretado.
+
+  - **Chega status de entrega.** `sent`, `delivered`, `read` e `failed` de cada
+    mensagem que nós mandamos, ligados à bolha pelo `wamid` gravado no envio.
+    É o que a API não oficial nunca deu, e é o que faz "a mensagem saiu mas o
+    contato não recebeu" ser uma pergunta respondível.
+
+A resposta é sempre 200 e rápida: o processamento vai para background. A Meta
+repete qualquer coisa diferente de 200 com frequência decrescente por até sete
+dias, e uma fila de repetição em cima de um processamento lento é como um pico
+de mensagens vira uma avalanche.
 """
 import hmac
 import hashlib
-import json
 import logging
 import os
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
+from fastapi.responses import PlainTextResponse
 
 from db import get_db
 from flow_runtime import handle_incoming_message
@@ -34,271 +50,286 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _validate_hmac(body: bytes, request: Request):
-    key = os.environ.get("WUZAPI_GLOBAL_HMAC_KEY")
-    if not key:
-        # Fail-closed (ZZ-11): sem a chave, o webhook alimenta
-        # `handle_incoming_message` sem nenhuma autenticação — dá para forjar
-        # mensagem em qualquer conversa e mexer no estado das conexões. Antes,
-        # a ausência da chave desligava a verificação **em silêncio**; agora a
-        # recusa é explícita. O boot também avisa (ver server.on_startup).
-        logger.error("WUZAPI_GLOBAL_HMAC_KEY ausente — webhooks recusados até configurá-la")
+def _validar_assinatura(corpo: bytes, request: Request):
+    """Confere `X-Hub-Signature-256` contra o App Secret.
+
+    Fail-closed, como era antes: sem o segredo configurado o webhook
+    alimentaria o motor de conversas sem autenticação nenhuma, e daria para
+    forjar mensagem em qualquer conversa de qualquer empresa. A ausência
+    recusa explicitamente em vez de desligar a checagem em silêncio, e o boot
+    também avisa (ver `server.on_startup`).
+    """
+    segredo = os.environ.get("META_APP_SECRET")
+    if not segredo:
+        logger.error("META_APP_SECRET ausente: webhooks recusados até configurá-lo")
         raise HTTPException(status_code=503, detail="Webhook signing not configured")
-    provided = request.headers.get("x-hmac-signature", "")
-    expected = hmac.new(key.encode(), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(provided, expected):
+    recebida = request.headers.get("x-hub-signature-256", "")
+    if not recebida.startswith("sha256="):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    esperada = hmac.new(segredo.encode(), corpo, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(recebida[7:], esperada):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
 
-# Cada tipo de mídia vira um nó próprio dentro de Message. Figurinha entra
-# como imagem: é webp, o chat exibe igual e o download usa o mesmo endpoint.
-_MEDIA_NODES = [
-    ("imageMessage", "image"),
-    ("videoMessage", "video"),
-    ("audioMessage", "audio"),
-    ("documentMessage", "document"),
-    ("stickerMessage", "image"),
-]
+# Cada tipo de mídia vira um nó próprio da mensagem. Figurinha entra como
+# imagem: é webp, o chat exibe igual e o download é o mesmo.
+_TIPOS_DE_MIDIA = {
+    "image": "image",
+    "video": "video",
+    "audio": "audio",
+    "document": "document",
+    "sticker": "image",
+}
 
 
-def _pick(d: dict, *names):
-    """Primeiro nome presente no dict.
+def _extrair_midia(msg: dict) -> dict | None:
+    """O anexo, reduzido ao que o runtime precisa para buscá-lo depois.
 
-    A serialização do whatsmeow não é estável entre versões quanto à caixa das
-    chaves (`URL` x `url`, `fileSha256` x `fileSHA256`), e errar a chave aqui
-    faria o download falhar silenciosamente — então cada campo é procurado por
-    todas as grafias plausíveis.
+    Bem mais simples que na API anterior: não há metadado de cifra nem URL
+    expirando aqui, só um `media_id`. O binário é buscado na hora pelo
+    runtime, com duas idas à Meta (id para URL, URL para bytes).
     """
-    for n in names:
-        v = d.get(n)
-        if v not in (None, ""):
-            return v
-    return None
-
-
-def _extract_media(payload: dict, msg: dict) -> dict | None:
-    for key, kind in _MEDIA_NODES:
-        node = msg.get(key)
-        # `{}` conta como presente: quando a WuzAPI já baixou a mídia sozinha,
-        # ela pode esvaziar o nó e mandar o binário na raiz do evento — tratar
-        # como "sem mídia" jogaria o anexo fora.
-        if not isinstance(node, dict):
+    for tipo, kind in _TIPOS_DE_MIDIA.items():
+        no = msg.get(tipo)
+        if not isinstance(no, dict) or not no.get("id"):
             continue
-        mime = _pick(node, "mimetype", "mimeType", "Mimetype") or payload.get("mimeType")
-        length = _pick(node, "fileLength", "FileLength") or 0
         return {
             "kind": kind,
-            "mime": mime,
-            "filename": _pick(node, "fileName", "filename", "FileName") or payload.get("fileName"),
-            "caption": node.get("caption") or "",
-            # Sem -skipmedia a WuzAPI já baixa e manda o binário junto do
-            # evento; aí não é preciso pedir de novo.
-            "base64": payload.get("base64") or None,
-            "download": {
-                "Url": _pick(node, "URL", "url", "Url"),
-                "DirectPath": _pick(node, "directPath", "DirectPath"),
-                "MediaKey": _pick(node, "mediaKey", "MediaKey"),
-                "Mimetype": mime,
-                "FileSHA256": _pick(node, "fileSha256", "fileSHA256", "FileSHA256"),
-                "FileEncSHA256": _pick(node, "fileEncSha256", "fileEncSHA256", "FileEncSHA256"),
-                "FileLength": int(length) if str(length).isdigit() else 0,
-            },
+            "media_id": no["id"],
+            "mime": no.get("mime_type"),
+            "filename": no.get("filename"),
+            "caption": no.get("caption") or "",
+            # Áudio gravado na hora chega com `voice: true`. Guardado porque
+            # muda o que a bolha deve dizer: recado de voz não é "um arquivo
+            # de áudio anexado".
+            "voz": bool(no.get("voice")),
         }
     return None
 
 
-# A resposta a botão ou lista não vem como texto: cada tipo de mensagem
-# interativa devolve a escolha num nó próprio do payload. São quatro porque o
-# whatsmeow monta o menu de formas diferentes conforme a versão (botão clássico,
-# template, native flow), e o cliente do contato responde no formato que
-# recebeu — cobrir só um faria a resposta cair como mensagem sem texto e ser
-# descartada logo abaixo, deixando a conversa parada.
-_NOS_DE_ESCOLHA = (
-    # (nó, chaves do id, chaves do rótulo, caminho do id aninhado)
-    ("buttonsResponseMessage", ("selectedButtonId", "selectedButtonID"),
-     ("selectedDisplayText",), None),
-    ("listResponseMessage", ("selectedRowId", "selectedRowID"),
-     ("title", "description"), "singleSelectReply"),
-    ("templateButtonReplyMessage", ("selectedId", "selectedID"),
-     ("selectedDisplayText",), None),
-)
+def _extrair_escolha(msg: dict) -> dict | None:
+    """A opção que o contato tocou.
+
+    Três formatos, e aqui os três trazem id **e** rótulo, ao contrário da API
+    anterior, em que a resposta chegava só com o id e o rótulo tinha de ser
+    recuperado do menu que fez a pergunta:
+
+      - `interactive.button_reply`: botão de resposta rápida.
+      - `interactive.list_reply`: item de lista.
+      - `button`: botão de resposta rápida de um **modelo**, que não é
+        interativo e chega com `payload` (o id) e `text` (o rótulo). É o caso
+        de "Confirmar"/"Cancelar" num lembrete enviado por template, então
+        ignorá-lo faria justamente a resposta ao lembrete se perder.
+    """
+    interativo = msg.get("interactive")
+    if isinstance(interativo, dict):
+        for chave in ("button_reply", "list_reply"):
+            no = interativo.get(chave)
+            if isinstance(no, dict) and no.get("id"):
+                return {"id": no["id"], "titulo": no.get("title") or ""}
+
+    botao = msg.get("button")
+    if isinstance(botao, dict) and (botao.get("payload") or botao.get("text")):
+        return {"id": botao.get("payload") or "", "titulo": botao.get("text") or ""}
+    return None
 
 
-def _escolha_native_flow(no: dict) -> dict | None:
-    """O botão de resposta rápida que a WuzAPI monta é um NativeFlowButton, e a
-    resposta dele chega com o id dentro de um JSON **em string** —
-    `paramsJson: '{"id": "opt_3"}'`. Sem desempacotar isso, a escolha não tem
-    id e o contato que tocou no botão cai no caminho de resposta inválida."""
-    fluxo = no.get("nativeFlowResponseMessage") or {}
-    bruto = _pick(fluxo, "paramsJson", "paramsJSON", "params_json") or ""
-    escolhido, rotulo = None, ""
-    try:
-        params = json.loads(bruto)
-        if isinstance(params, dict):
-            escolhido = _pick(params, "id", "ID")
-            rotulo = _pick(params, "display_text", "displayText", "title") or ""
-    except (ValueError, TypeError):
-        pass
-    rotulo = rotulo or ((no.get("body") or {}).get("text") or "")
-    if not escolhido and not rotulo:
-        return None
-    return {"id": escolhido, "titulo": rotulo}
+def _texto_da_mensagem(msg: dict, midia: dict | None, escolha: dict | None) -> str:
+    """O que vai para o histórico como texto da mensagem.
+
+    Ordem deliberada: o que o contato escreveu vem primeiro; depois a legenda
+    do anexo; depois o rótulo do que ele tocou (nunca o id, que é
+    identificador interno e faria o atendente ler código na bolha). Tipos sem
+    texto ganham uma descrição em vez de bolha vazia, porque "o contato
+    respondeu alguma coisa que não aparece" é pior que uma linha explicando o
+    que chegou.
+    """
+    tipo = msg.get("type")
+    if tipo == "text":
+        return (msg.get("text") or {}).get("body") or ""
+    if escolha:
+        return escolha.get("titulo") or escolha.get("id") or ""
+    if midia and midia.get("caption"):
+        return midia["caption"]
+    if tipo == "location":
+        loc = msg.get("location") or {}
+        nome = loc.get("name") or loc.get("address")
+        coords = f"{loc.get('latitude')}, {loc.get('longitude')}"
+        return f"[localização] {nome or coords}"
+    if tipo == "contacts":
+        nomes = [((c.get("name") or {}).get("formatted_name") or "")
+                 for c in (msg.get("contacts") or [])]
+        return "[contato] " + ", ".join([n for n in nomes if n])
+    if tipo == "reaction":
+        return (msg.get("reaction") or {}).get("emoji") or "[reação]"
+    if tipo == "order":
+        return "[pedido do catálogo]"
+    if tipo == "unsupported":
+        # A Meta manda isto para tipo que a Cloud API não entrega (enquete,
+        # figurinha animada em alguns casos, mensagem apagada). Sem a linha, a
+        # conversa mostraria um vazio no lugar de algo que o contato mandou.
+        return "[mensagem não suportada pelo WhatsApp Business]"
+    return ""
 
 
-def _extract_escolha(msg: dict) -> dict | None:
-    escolha, origem = None, None
-    for chave, ids, rotulos, aninhado in _NOS_DE_ESCOLHA:
-        no = msg.get(chave)
-        if not isinstance(no, dict) or not no:
-            continue
-        fonte = (no.get(aninhado) or {}) if aninhado else no
-        escolha = {"id": _pick(fonte, *ids), "titulo": _pick(no, *rotulos) or ""}
-        origem = chave
-        break
-    if escolha is None:
-        interativo = msg.get("interactiveResponseMessage")
-        if isinstance(interativo, dict) and interativo:
-            escolha = _escolha_native_flow(interativo)
-            origem = "interactiveResponseMessage"
-    if escolha is None:
-        return None
+@router.get("/whatsapp")
+async def verificar_webhook(request: Request):
+    """Handshake de verificação do painel da Meta.
 
-    if escolha.get("id") and not escolha.get("titulo"):
-        # Observado em toque real: a resposta traz o id e nenhum rótulo. O
-        # histórico é salvo por `awaiting.rotulos` (ver flow_runtime), mas o
-        # payload fica registrado aqui porque a forma exata dele é a única
-        # coisa deste módulo que veio de leitura do handler da WuzAPI e não de
-        # observação — e é o que diz se falta procurar o rótulo em outro campo.
-        logger.info("Escolha interativa sem rótulo (%s) id=%s payload=%s",
-                    origem, escolha["id"],
-                    json.dumps(msg.get(origem), ensure_ascii=False)[:1000])
-    return escolha
+    Acontece uma vez, quando a URL é cadastrada (e de novo a cada mudança). A
+    resposta tem de ser o `hub.challenge` **em texto puro**: devolvido como
+    JSON, com aspas em volta, a Meta recusa a URL. É o erro mais comum desta
+    etapa e não dá nenhuma mensagem útil no painel.
+    """
+    params = request.query_params
+    esperado = os.environ.get("META_WEBHOOK_VERIFY_TOKEN")
+    if not esperado:
+        logger.error("META_WEBHOOK_VERIFY_TOKEN ausente: verificação recusada")
+        raise HTTPException(status_code=503, detail="Webhook verification not configured")
+    if params.get("hub.mode") != "subscribe" or params.get("hub.verify_token") != esperado:
+        raise HTTPException(status_code=403, detail="Verificação recusada")
+    return PlainTextResponse(params.get("hub.challenge") or "")
 
 
-@router.post("/wuzapi")
-async def wuzapi_webhook_unrouted(request: Request, bg: BackgroundTasks):
-    """Some WuzAPI events (observed for real incoming 'Message' events, even
-    when a per-connection webhook URL is configured) get delivered to the
-    gateway's plain /webhook route instead of /webhook/{tenant_id}/{connection_id}
-    — so they arrive here with no IDs in the URL. WuzAPI does stamp every
-    payload with `userID`, which is exactly the `wuzapi_user_id` we store per
-    connection at creation time, so we resolve tenant/connection from that
-    instead of trusting the URL."""
-    body = await request.body()
-    _validate_hmac(body, request)
-
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    db = get_db()
-    conn = await db.whatsapp_connections.find_one({"wuzapi_user_id": payload.get("userID")})
-    if not conn:
-        # Unknown/stale instance (e.g. a connection created outside this
-        # backend, or already deleted) — ack anyway so WuzAPI/gateway don't
-        # keep retrying something that will never resolve.
-        return {"ok": True, "ignored": "unknown userID"}
-
-    return await _process_webhook_event(conn["tenant_id"], conn["id"], payload, db, bg)
-
-
-@router.post("/wuzapi/{tenant_id}/{connection_id}")
-async def wuzapi_webhook(tenant_id: str, connection_id: str, request: Request, bg: BackgroundTasks):
-    body = await request.body()
-    _validate_hmac(body, request)
+@router.post("/whatsapp")
+async def receber_webhook(request: Request, bg: BackgroundTasks):
+    corpo = await request.body()
+    _validar_assinatura(corpo, request)
 
     try:
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    if payload.get("object") != "whatsapp_business_account":
+        return {"ok": True, "ignored": payload.get("object")}
+
     db = get_db()
-    conn = await db.whatsapp_connections.find_one({"id": connection_id, "tenant_id": tenant_id})
+    tratados = 0
+    for entry in payload.get("entry") or []:
+        for change in entry.get("changes") or []:
+            if change.get("field") != "messages":
+                # Outros campos (qualidade do número, status de modelo, alerta
+                # de conta) chegam no mesmo endereço. Registrados e ignorados:
+                # tratá-los é trabalho próprio, e recusar faria a Meta repetir.
+                logger.info("Webhook de campo %s ignorado", change.get("field"))
+                continue
+            tratados += await _processar_change(db, change.get("value") or {}, bg)
+    return {"ok": True, "eventos": tratados}
+
+
+async def _processar_change(db, value: dict, bg: BackgroundTasks) -> int:
+    phone_number_id = (value.get("metadata") or {}).get("phone_number_id")
+    if not phone_number_id:
+        return 0
+    conn = await db.whatsapp_connections.find_one({"phone_number_id": str(phone_number_id)})
     if not conn:
-        raise HTTPException(status_code=404, detail="Conexão não encontrada")
+        # Número que não é de nenhuma conexão nossa: pode ser uma conta que o
+        # cliente removeu da plataforma sem tirar a assinatura do app. 200 e
+        # segue, senão a Meta repete por uma semana.
+        logger.info("Webhook de phone_number_id desconhecido: %s", phone_number_id)
+        return 0
 
-    return await _process_webhook_event(tenant_id, connection_id, payload, db, bg)
-
-
-async def _process_webhook_event(tenant_id: str, connection_id: str, payload: dict, db, bg: BackgroundTasks):
+    tenant_id, conn_id = conn["tenant_id"], conn["id"]
     await db.whatsapp_connections.update_one(
-        {"id": connection_id}, {"$set": {"last_webhook_event_at": _now()}}
+        {"id": conn_id}, {"$set": {"last_webhook_event_at": _now()}}
     )
 
-    etype = payload.get("type", "")
-    event = payload.get("event") or {}
+    eventos = 0
 
-    if etype == "QR":
-        b64 = payload.get("qrCodeBase64")
-        if b64:
-            await db.whatsapp_connections.update_one(
-                {"id": connection_id},
-                {"$set": {"qrcode_atual": b64, "status": "pareando", "updated_at": _now()}},
-            )
-        return {"ok": True}
+    # O nome de perfil vem uma vez por evento, fora da mensagem, e casa com a
+    # mensagem pelo `wa_id`. É o único lugar onde ele aparece, e é de graça:
+    # buscar o nome do contato numa chamada à parte custaria uma ida por
+    # conversa nova.
+    perfis = {c.get("wa_id"): ((c.get("profile") or {}).get("name") or None)
+              for c in (value.get("contacts") or []) if c.get("wa_id")}
 
-    if etype == "PairSuccess":
-        raw_id = event.get("ID", "")
-        numero = raw_id.split(":")[0].split("@")[0] if raw_id else None
+    for msg in value.get("messages") or []:
+        numero = msg.get("from")
+        wamid = msg.get("id")
+        if not numero or not wamid:
+            continue
+        midia = _extrair_midia(msg)
+        escolha = _extrair_escolha(msg)
+        texto = _texto_da_mensagem(msg, midia, escolha)
+        if not texto and not midia and not escolha:
+            continue
+        bg.add_task(handle_incoming_message, tenant_id, numero, texto, wamid,
+                    conn_id, perfis.get(numero), midia, escolha)
+        eventos += 1
+
+    for status in value.get("statuses") or []:
+        bg.add_task(_registrar_status, tenant_id, status)
+        eventos += 1
+
+    for erro in value.get("errors") or []:
+        # Erro de conta (token revogado, número suspenso). Não pertence a
+        # nenhuma conversa, então vai para o log e para a conexão, que é onde
+        # a tela mostra "algo está errado com este número".
+        logger.error("Erro de conta na conexão %s: %s", conn_id, erro)
         await db.whatsapp_connections.update_one(
-            {"id": connection_id},
-            {"$set": {"status": "conectado", "qrcode_atual": None, "numero": numero, "updated_at": _now()}},
+            {"id": conn_id},
+            {"$set": {"status": "erro",
+                      "ultimo_erro": (erro.get("error_data") or {}).get("details")
+                      or erro.get("title") or str(erro.get("code")),
+                      "updated_at": _now()}},
         )
-        return {"ok": True}
 
-    if etype == "Connected":
-        await db.whatsapp_connections.update_one(
-            {"id": connection_id}, {"$set": {"status": "conectado", "updated_at": _now()}}
+    return eventos
+
+
+# Ordem dos estados de entrega. Um `delivered` que chega depois de um `read`
+# (a Meta não garante ordem) não pode rebaixar a bolha de "lida" para
+# "entregue": a comparação é por posição, não por chegada.
+_ORDEM_STATUS = {"enviada": 0, "entregue": 1, "lida": 2, "falha": 3}
+_TRADUZ_STATUS = {"sent": "enviada", "delivered": "entregue",
+                  "read": "lida", "failed": "falha"}
+
+
+async def _registrar_status(tenant_id: str, status: dict):
+    """Ata o status de entrega à mensagem que já está no histórico.
+
+    Chave é o `wamid`, gravado em `meta.wamid` no envio. Falha carrega o
+    código de erro da Meta, que é o que distingue "número não tem WhatsApp"
+    (131026) de "a janela de 24h fechou" (131047), duas coisas que o atendente
+    resolve de formas opostas.
+    """
+    wamid = status.get("id")
+    novo = _TRADUZ_STATUS.get(status.get("status") or "")
+    if not wamid or not novo:
+        return
+    db = get_db()
+
+    mudanca: dict = {"meta.entrega": novo, "meta.entrega_em": _now()}
+    if novo == "falha":
+        erros = status.get("errors") or []
+        primeiro = erros[0] if erros else {}
+        mudanca["meta.entrega_erro"] = {
+            "codigo": primeiro.get("code"),
+            "detalhe": (primeiro.get("error_data") or {}).get("details")
+            or primeiro.get("title"),
+        }
+
+    atual = await db.messages_log.find_one(
+        {"tenant_id": tenant_id, "meta.wamid": wamid}, {"_id": 0, "meta": 1}
+    )
+    if not atual:
+        return
+    anterior = (atual.get("meta") or {}).get("entrega")
+    if anterior and _ORDEM_STATUS.get(novo, 0) <= _ORDEM_STATUS.get(anterior, 0):
+        return
+    await db.messages_log.update_one(
+        {"tenant_id": tenant_id, "meta.wamid": wamid}, {"$set": mudanca}
+    )
+
+    if novo == "falha":
+        # O destinatário de campanha guarda o wamid do disparo: sem isto uma
+        # campanha mostraria 1.800 enviados quando 200 nunca chegaram, e a
+        # métrica de campanha é justamente o que ela existe para produzir.
+        await db.campaign_recipients.update_one(
+            {"tenant_id": tenant_id, "wamid": wamid},
+            {"$set": {"status": "falha",
+                      "erro": (mudanca["meta.entrega_erro"] or {}).get("detalhe")
+                      or "falha na entrega",
+                      "atualizado_em": _now()}},
         )
-        return {"ok": True}
-
-    if etype in ("Disconnected", "LoggedOut"):
-        await db.whatsapp_connections.update_one(
-            {"id": connection_id}, {"$set": {"status": "desconectado", "updated_at": _now()}}
-        )
-        return {"ok": True}
-
-    if etype == "Message":
-        info = event.get("Info", {})
-        if info.get("IsFromMe") or info.get("IsGroup"):
-            return {"ok": True}
-        # `Chat` is often a "@lid" (linked ID) — an opaque per-conversation
-        # identifier, not a dialable phone number, seen when the sender has
-        # WhatsApp's privacy/linked-device addressing enabled. `SenderAlt`
-        # carries the real phone-number JID ("55...@s.whatsapp.net") in that
-        # case, which is what we actually need to reply — a LID cannot be
-        # used as the Phone field on send.
-        chat = info.get("Chat", "")
-        sender_alt = info.get("SenderAlt", "")
-        if chat.endswith("@lid") and sender_alt.endswith("@s.whatsapp.net"):
-            number = sender_alt.split("@")[0]
-        else:
-            number = chat.split("@")[0]
-        # JIDs can carry a ":<device_id>" suffix before the "@" (e.g.
-        # "559884800522:23") — strip it, WuzAPI's /chat/send rejects it as
-        # an unregistered phone number.
-        number = number.split(":")[0]
-        message_id = info.get("ID") or f"noid_{_now()}"
-        msg = event.get("Message", {})
-        media = _extract_media(payload, msg)
-        escolha = _extract_escolha(msg)
-        text = (
-            msg.get("conversation")
-            or (msg.get("extendedTextMessage") or {}).get("text")
-            or (media or {}).get("caption")
-            # O rótulo do botão/item é o que o contato viu na tela dele, então é
-            # o que faz sentido no histórico. Sem rótulo, o id — feio, mas uma
-            # bolha vazia esconderia que o contato respondeu.
-            or (escolha or {}).get("titulo")
-            or (escolha or {}).get("id")
-            or ""
-        )
-        if not text and not media and not escolha:
-            return {"ok": True}
-        push_name = info.get("PushName") or None
-        bg.add_task(handle_incoming_message, tenant_id, number, text, message_id,
-                    connection_id, push_name, media, escolha)
-        return {"ok": True, "queued": True}
-
-    return {"ok": True, "ignored": etype}

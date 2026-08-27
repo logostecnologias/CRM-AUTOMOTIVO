@@ -7,44 +7,39 @@ um id vazado daria acesso a arquivo de outra empresa. O nome original do
 usuário também nunca vira nome de arquivo (path traversal); ele fica só nos
 metadados, para exibição e para o campo FileName do WhatsApp.
 
-Para a WuzAPI, mídia vai sempre como data URI base64
-("data:image/png;base64,..."), que é o formato dos campos
-Image/Video/Audio/Document. URLs http(s) — usadas pelo nó de Mídia do editor
-de fluxos — são baixadas aqui e convertidas antes do envio.
+Na Cloud API o arquivo não viaja embutido na mensagem: ele é **subido antes**
+(`POST /{phone_number_id}/media`) e o envio carrega só o `media_id` devolvido.
+Esse id vale 30 dias e serve para quantos envios se quiser, então ele é
+guardado no próprio documento (ver `id_na_meta`): sem isso, uma campanha com
+imagem subiria o mesmo arquivo uma vez por destinatário.
 """
-import asyncio
-import base64
 import mimetypes
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
-import httpx
-
-import net_guard
+from typing import AsyncIterator
 
 DEFAULT_MIME = "application/octet-stream"
 
-# Blocos de leitura para codificar o arquivo aos poucos. Precisa ser múltiplo
-# de 3: base64 consome 3 bytes por vez, e só assim a concatenação dos blocos
-# codificados é idêntica a codificar o arquivo inteiro de uma vez.
+# Bloco de leitura/escrita em disco.
 CHUNK = 3 * 256 * 1024
 
 # O mime vem do upload, ou seja, do cliente. Aceitar só a forma canônica
-# (tipo/subtipo) evita que ele carregue aspas ou barras invertidas — o valor
-# é embutido no data URI, que por sua vez vai dentro de um JSON.
+# (tipo/subtipo) evita que ele carregue aspas ou barras invertidas: o valor vai
+# no campo `type` do multipart de upload e no cabeçalho da parte do arquivo.
 _MIME_OK = re.compile(r"^[A-Za-z0-9!#$&^_.+-]{1,64}/[A-Za-z0-9!#$&^_.+-]{1,64}$")
 
-# Tetos por tipo, espelhando os limites práticos do WhatsApp. Documento fica
-# abaixo dos 100MB que o WhatsApp aceita porque aqui o arquivo ainda vira
-# base64 (+33%) e atravessa o gateway em um único POST.
+# Tetos por tipo, agora os da própria Cloud API. Documento subiu de 20MB para
+# 100MB porque o teto antigo era nosso: o arquivo virava base64 (mais 33%) e
+# atravessava o gateway num POST só. Com upload multipart direto para a Meta,
+# quem manda é o limite dela.
 MAX_BYTES = {
     "image": 5 * 1024 * 1024,
     "video": 16 * 1024 * 1024,
     "audio": 16 * 1024 * 1024,
-    "document": 20 * 1024 * 1024,
+    "document": 100 * 1024 * 1024,
 }
 HARD_MAX_BYTES = max(MAX_BYTES.values())
 
@@ -73,28 +68,31 @@ def media_root() -> Path:
     return Path(root)
 
 
-def classify(mime: str | None, filename: str | None = None) -> str:
-    """Tipo de envio da WuzAPI para este arquivo.
+# Áudio que a Cloud API aceita como áudio. Fora desta lista o arquivo vai como
+# documento: a Meta recusa o envio inteiro por mime não suportado, e um anexo
+# que chega como documento é melhor que uma mensagem que não chega. O mp3, que
+# na API anterior precisava ir como documento (o endpoint de áudio de lá só
+# tocava ogg/opus), agora é aceito de verdade.
+AUDIO_SUPORTADO = {"audio/aac", "audio/mp4", "audio/mpeg", "audio/amr",
+                   "audio/ogg", "audio/opus"}
 
-    Áudio que não seja ogg/opus vai como documento de propósito: o endpoint
-    /chat/send/audio produz mensagem de voz, que o WhatsApp só toca em
-    ogg/opus. Um mp3 mandado por ali chega quebrado — como documento, chega
-    inteiro e o cliente baixa normalmente.
-    """
+
+def classify(mime: str | None, filename: str | None = None) -> str:
+    """Tipo de envio da Cloud API para este arquivo."""
     mime = (mime or "").lower().split(";")[0].strip()
     if (not mime or mime == DEFAULT_MIME) and filename:
         mime = (mimetypes.guess_type(filename)[0] or "").lower()
     # SVG é uma imagem que também é um documento executável (<script>, onload).
     # Tratá-lo como documento faz `/api/media` servi-lo como anexo, nunca
-    # inline na origem da API — é a raiz do ZZ-07. Vale para upload, mídia
-    # recebida de um contato e envio pela WuzAPI.
+    # inline na origem da API. É a raiz do ZZ-07, e vale para upload, mídia
+    # recebida de um contato e envio.
     if mime == "image/svg+xml":
         return "document"
     if mime.startswith("image/"):
         return "image"
     if mime.startswith("video/"):
         return "video"
-    if mime in ("audio/ogg", "audio/opus"):
+    if mime in AUDIO_SUPORTADO:
         return "audio"
     return "document"
 
@@ -238,87 +236,107 @@ def read_bytes(doc: dict) -> bytes:
     return path.read_bytes()
 
 
-def to_data_uri(mime: str | None, data: bytes) -> str:
-    return f"data:{mime or DEFAULT_MIME};base64,{base64.b64encode(data).decode()}"
+async def store_pedacos(
+    db,
+    tenant_id: str,
+    session_id: str | None,
+    filename: str | None,
+    mime: str | None,
+    pedacos: AsyncIterator[bytes],
+    kind: str | None = None,
+    limit: int | None = None,
+) -> dict:
+    """Grava em disco a mídia que está sendo baixada da Meta, conforme ela chega.
 
-
-class DataUriStream:
-    """O arquivo armazenado, como data URI, lido aos pedaços na hora do envio.
-
-    Existe para o arquivo nunca precisar caber inteiro na memória. O caminho
-    antigo (`to_data_uri(mime, read_bytes(doc))`) mantinha vivos ao mesmo
-    tempo o arquivo bruto, o base64 em bytes e mais uma cópia em str — e o
-    httpx ainda serializava tudo de novo para montar o JSON. Um vídeo de 16MB
-    chegava à ordem de dezenas de MB de pico; assim, o pico é um bloco.
-
-    `len()` dá o tamanho exato do data URI sem montá-lo — base64 é
-    determinístico (4 bytes de saída para cada 3 de entrada, arredondando
-    para cima), e é isso que permite mandar Content-Length e evitar
-    `Transfer-Encoding: chunked`, que nem todo servidor aceita.
-
-    Cada `async for` reabre o arquivo do zero, de propósito: o envio tem
-    retry, e um gerador já consumido mandaria corpo vazio na segunda
-    tentativa.
+    É o par de `store_stream` para o outro sentido: lá a origem é o upload de
+    um atendente (uma corrotina `read(n)`), aqui é o corpo da resposta HTTP do
+    download (um iterador assíncrono). Nos dois casos o arquivo nunca existe
+    inteiro na memória, que é a regra do projeto, e o parcial é apagado se
+    algo falhar no meio.
     """
+    kind = kind or classify(mime, filename)
+    limit = limit or MAX_BYTES.get(kind, HARD_MAX_BYTES)
+    mime = sanitize_mime(mime, filename)
 
-    def __init__(self, doc: dict):
-        self.path = file_path(doc)
-        if not self.path.exists():
-            raise MediaError("Arquivo não encontrado no armazenamento")
-        # O tamanho vem do disco, não do documento: é o arquivo que vai ser
-        # lido, e um Content-Length que não bate com o corpo corrompe a
-        # requisição inteira.
-        self.size = self.path.stat().st_size
-        # O prefixo carrega o mime saneado — ele termina dentro de uma string
-        # JSON. O base64 em si só tem caracteres seguros, por construção.
-        self.prefixo = f"data:{sanitize_mime(doc.get('mime'))};base64,".encode()
+    media_id = str(uuid.uuid4())
+    stored_name = f"{uuid.uuid4().hex}{_extension(filename, mime)}"
+    folder = media_root() / tenant_id
+    folder.mkdir(parents=True, exist_ok=True)
+    destino = folder / stored_name
 
-    def __len__(self) -> int:
-        return len(self.prefixo) + 4 * ((self.size + 2) // 3)
-
-    async def __aiter__(self):
-        yield self.prefixo
-        lido = 0
-        with open(self.path, "rb") as entrada:
-            while True:
-                # Em thread para não travar o event loop lendo disco.
-                bloco = await asyncio.to_thread(entrada.read, CHUNK)
-                if not bloco:
-                    break
-                lido += len(bloco)
-                yield base64.b64encode(bloco)
-        if lido != self.size:
-            # O arquivo mudou de tamanho entre o stat e a leitura: o corpo já
-            # foi enviado pela metade e não há como voltar atrás, mas o erro
-            # precisa aparecer no log em vez de virar mídia truncada calada.
-            raise MediaError(
-                f"Arquivo mudou durante o envio ({lido} != {self.size} bytes)"
-            )
-
-
-
-
-async def ensure_data_uri(source: str, mime: str | None = None) -> str:
-    """Aceita data URI (devolve como está) ou URL http(s) (baixa e converte).
-
-    O nó de Mídia do editor guarda uma URL pública, e a WuzAPI não busca URL
-    sozinha — sem esta conversão o nó falharia no envio real.
-    """
-    if not source:
-        raise MediaError("Mídia sem origem")
-    if source.startswith("data:"):
-        return source
-    if not source.startswith(("http://", "https://")):
-        raise MediaError(f"Origem de mídia não suportada: {source[:40]}")
-    # net_guard: a URL vem do nó de Mídia (cliente) e é o servidor que a busca.
-    # Recusa destino interno/privado (ZZ-04/05) e aplica o teto de bytes
-    # **durante** o download, sem materializar a resposta inteira antes de
-    # checar o tamanho — a segunda metade do ZZ-05 e a regra do projeto.
+    total = 0
     try:
-        ctype, content = await net_guard.fetch_bytes(source, max_bytes=HARD_MAX_BYTES)
-    except net_guard.SSRFError as e:
-        raise MediaError(str(e)) from e
-    return to_data_uri(mime or ctype, content)
+        with open(destino, "wb") as saida:
+            async for bloco in pedacos:
+                if not bloco:
+                    continue
+                total += len(bloco)
+                if total > limit:
+                    raise MediaError(
+                        f"{KIND_LABEL.get(kind, 'Arquivo')} acima do limite de "
+                        f"{limit // (1024 * 1024)}MB"
+                    )
+                saida.write(bloco)
+        if not total:
+            raise MediaError("Arquivo vazio")
+    except BaseException:
+        destino.unlink(missing_ok=True)
+        raise
+
+    doc = {
+        "id": media_id,
+        "tenant_id": tenant_id,
+        "session_id": session_id,
+        "uploaded_by": None,
+        "filename": _safe_display_name(filename, mime),
+        "stored_name": stored_name,
+        "mime": mime,
+        "kind": kind,
+        "size": total,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.media_files.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+# O id que a Meta devolve no upload vale 30 dias. Guardamos por menos, para a
+# margem cobrir o caso de a campanha começar hoje e terminar amanhã com o id
+# expirando no meio: subir de novo custa um upload, usar um id vencido custa
+# um erro por destinatário.
+VALIDADE_ID_META = timedelta(days=25)
+
+
+async def id_na_meta(db, doc: dict, cred) -> str:
+    """O `media_id` deste arquivo para este número, subindo-o se preciso.
+
+    O id é **por número** (quem sobe é o `phone_number_id`), então o cache é
+    uma entrada por conexão dentro do próprio documento do arquivo. Isso é o
+    que faz uma campanha com imagem para 1.800 contatos subir o arquivo uma
+    vez, e não 1.800: cada upload é o arquivo inteiro atravessando a rede.
+    """
+    import whatsapp_client as whatsapp  # tardio: evita ciclo no import do módulo
+
+    agora = datetime.now(timezone.utc)
+    guardados = (doc.get("meta_ids") or {})
+    entrada = guardados.get(cred.phone_number_id) or {}
+    if entrada.get("id") and entrada.get("expira_em", "") > agora.isoformat():
+        return entrada["id"]
+
+    caminho = file_path(doc)
+    if not caminho.exists():
+        raise MediaError("Arquivo não encontrado no armazenamento")
+    media_id = await whatsapp.upload_media(
+        cred, caminho, sanitize_mime(doc.get("mime")), doc.get("filename")
+    )
+    await db.media_files.update_one(
+        {"id": doc["id"]},
+        {"$set": {f"meta_ids.{cred.phone_number_id}": {
+            "id": media_id,
+            "expira_em": (agora + VALIDADE_ID_META).isoformat(),
+        }}},
+    )
+    return media_id
 
 
 def public_payload(doc: dict) -> dict:
