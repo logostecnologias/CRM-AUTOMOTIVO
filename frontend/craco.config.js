@@ -1,5 +1,19 @@
 // craco.config.js
 const path = require("path");
+
+// O arquivo do ambiente vem ANTES do `.env` geral, e a ordem é o ponto.
+//
+// Este `dotenv.config()` roda antes de o CRA carregar os arquivos dele, e o
+// dotenv nunca sobrescreve variável já definida. Carregando só o `.env`, o
+// `REACT_APP_BACKEND_URL=http://localhost:8000` do desenvolvimento entrava
+// primeiro e vencia o `.env.production`, invertendo a precedência que o CRA
+// documenta. O build de produção saía com o endereço do localhost cravado
+// dentro do bundle, e o navegador de quem abria o site tentava falar com o
+// localhost dele: erro de CORS em "loopback address space", que não parece o
+// que é. Aconteceu no primeiro deploy.
+require("dotenv").config({
+  path: path.resolve(__dirname, `.env.${process.env.NODE_ENV || "development"}`),
+});
 require("dotenv").config();
 
 function makeDevServerV5Compatible(devServerConfig) {

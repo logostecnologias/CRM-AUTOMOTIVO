@@ -87,6 +87,12 @@ frontend/node_modules/.cache/default-development/4.pack
 .env
 .env.*
 *.env
+# Exceção: este não guarda segredo, guarda o oposto. Ele existe para o build de
+# produção NÃO herdar o `REACT_APP_BACKEND_URL=http://localhost:8000` do `.env`
+# de desenvolvimento, que sai cravado dentro do bundle e faz o navegador de
+# quem abre o site chamar o localhost dele. Fora do versionamento, some na
+# próxima máquina que fizer o build e o erro volta.
+!frontend/.env.production
 credentials.json
 *.key
 .credentials

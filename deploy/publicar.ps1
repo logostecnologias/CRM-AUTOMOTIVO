@@ -23,12 +23,23 @@ function Passo($texto) { Write-Host "==> $texto" -ForegroundColor Cyan }
 Passo "Build do frontend"
 Push-Location (Join-Path $Raiz "frontend")
 try {
-    # O REACT_APP_BACKEND_URL vazio é o que faz o `api.js` montar "/api",
-    # relativo. Com URL absoluta de outro domínio, o cookie de sessão
-    # (httpOnly, SameSite=Lax) deixaria de ser enviado e ninguém loga.
-    $env:REACT_APP_BACKEND_URL = ""
+    # Quem zera o REACT_APP_BACKEND_URL é o `frontend/.env.production`, e não
+    # uma variável de ambiente daqui: no PowerShell, `$env:X = ""` **apaga** a
+    # variável em vez de defini-la como vazia, e o CRA cairia de volta no
+    # `.env` de desenvolvimento, que aponta para http://localhost:8000. Foi
+    # exatamente assim que o primeiro build subiu quebrado.
+    if (-not (Test-Path ".env.production")) {
+        throw "frontend/.env.production nao existe: o build sairia com localhost:8000 cravado"
+    }
     npx craco build
     if ($LASTEXITCODE -ne 0) { throw "build do frontend falhou" }
+
+    # Conferência do que realmente foi para o bundle. É barato e pega a classe
+    # de erro que só aparece no navegador do cliente, depois do deploy.
+    $cravado = Select-String -Path "build\static\js\*.js" -Pattern "localhost:8000" -List -ErrorAction SilentlyContinue
+    if ($cravado) {
+        throw "o bundle saiu com localhost:8000 dentro; confira frontend/.env.production"
+    }
 }
 finally { Pop-Location }
 
