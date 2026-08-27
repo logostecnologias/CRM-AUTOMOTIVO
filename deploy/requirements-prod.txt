@@ -1,0 +1,27 @@
+# O que o servidor precisa para rodar, e só isso.
+#
+# Existe separado de `backend/requirements.txt` porque aquele arquivo é o do
+# desenvolvimento: carrega pytest, black, flake8, mypy e mais oito pacotes que
+# **nenhum módulo do backend importa** (pandas, numpy, jq, boto3, typer,
+# passlib, python-jose, requests-oauthlib). Numa máquina de 1GB de RAM,
+# instalar pandas e numpy custa minutos e ~150MB de disco para nada, e o `jq`
+# compila do fonte quando não acha wheel.
+#
+# Ao acrescentar dependência de runtime, acrescentar nos dois arquivos.
+fastapi==0.110.1
+uvicorn==0.25.0
+httpx>=0.27.0
+motor==3.3.1
+pymongo==4.6.3
+pydantic>=2.6.4
+email-validator>=2.2.0
+python-dotenv>=1.0.1
+python-multipart>=0.0.9
+pyjwt>=2.10.1
+bcrypt==4.1.3
+cryptography>=42.0.8
+tzdata>=2024.2
+# SDKs dos provedores de IA: import preguiçoso no `ai_client`, mas sem eles o
+# agente de IA não responde.
+anthropic>=1.0.0
+openai>=3.0.0

@@ -1,0 +1,29 @@
+[Unit]
+# O backend. Um processo, um worker, e isso não é economia de máquina: é
+# requisito. `migrations`, `health_monitor`, `media_retention`,
+# `campaign_runner` e `agenda_worker` sobem no lifespan da aplicação, e a
+# trava que serializa as mensagens de uma mesma conversa vale dentro do
+# processo. Com dois workers, o lembrete sai duas vezes, a campanha ganha dois
+# runners e a corrida entre mensagens do mesmo contato volta.
+#
+# Escalar horizontalmente exige antes tirar os workers do processo e mover a
+# trava para o Mongo (findAndModify com TTL). Está anotado no CLAUDE.md.
+Description=ZappZen backend (FastAPI)
+After=network-online.target zappzen-db-tunnel.service
+Wants=network-online.target
+Requires=zappzen-db-tunnel.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/zappzen/backend
+EnvironmentFile=/opt/zappzen/backend/.env
+# Escuta só em loopback: quem fala com a internet é o Caddy. Sem isto a API
+# inteira ficaria alcançável pela porta 8000 do IP público, por fora do TLS.
+ExecStart=/opt/zappzen/venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

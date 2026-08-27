@@ -1,0 +1,52 @@
+# Borda da aplicação: TLS, estático do frontend e proxy do /api.
+#
+# Frontend e API no MESMO domínio, e isso não é preferência: o cookie de sessão
+# é httpOnly com SameSite=Lax, e o navegador simplesmente não manda cookie
+# SameSite=Lax numa requisição cross-site. Front num domínio e API noutro não
+# loga, por mais correto que esteja o CORS.
+#
+# O certificado é emitido e renovado pelo próprio Caddy. É por isso que migrar
+# de máquina depois custa uma troca de DNS e nada mais: não há certificado para
+# carregar junto.
+
+zappzen.atendimentoautomatizado.com.br {
+	encode zstd gzip
+
+	# A API vem primeiro: o handle_path do estático abaixo casaria /api também.
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle {
+		root * /opt/zappzen/frontend
+		# SPA: qualquer caminho que não seja arquivo existente cai no index.html,
+		# senão um F5 em /app/atendimento devolveria 404 do próprio Caddy.
+		try_files {path} /index.html
+		file_server
+	}
+
+	# O bundle do CRA leva hash no nome, então pode ser cacheado para sempre;
+	# o index.html não pode, senão o navegador continua carregando a versão
+	# antiga depois de um deploy.
+	@imutavel path /static/*
+	header @imutavel Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+
+	# Cabeçalhos que o Caddy não põe sozinho. HSTS fica de fora de propósito
+	# até o domínio estar estável: ele é difícil de desfazer no navegador de
+	# quem já visitou.
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# O log de acesso vai para o journald, que é o padrão do serviço empacotado
+	# (`journalctl -u caddy`). Escrever em /var/log/caddy foi tentado e o
+	# processo recusa com "permission denied" mesmo com o diretório pertencendo
+	# ao usuário caddy: a unit do pacote roda com `ProtectSystem` e o caminho
+	# fica fora do que ela permite escrever. Abrir exceção com um drop-in de
+	# systemd seria mais uma peça para manter, e o journald já rotaciona e já é
+	# onde estão os logs do backend.
+}

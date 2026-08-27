@@ -1,0 +1,36 @@
+[Unit]
+# Túnel SSH até o MongoDB, que roda noutra máquina da mesma VCN e escuta só em
+# loopback lá. O túnel existe porque é o que dá para fazer sem tocar no console
+# da Oracle: a alternativa (mongod escutando no IP privado, com regra de
+# Security List para a porta 27017 dentro da VCN) é mais limpa e é o passo de
+# endurecimento quando alguém tiver o console aberto.
+#
+# A chave usada aqui é restrita no lado do banco: `restrict` mais
+# `permitopen="127.0.0.1:27017"`, ou seja, ela não abre shell e só encaminha
+# essa porta. Uma chave comum daria à máquina da aplicação acesso completo ao
+# servidor de banco, que é o oposto do que se quer.
+Description=Tunel SSH para o MongoDB (bancos-db)
+After=network-online.target
+Wants=network-online.target
+Before=zappzen.service
+
+[Service]
+User=ubuntu
+# ExitOnForwardFailure: sem isto o ssh sobe "com sucesso" mesmo sem conseguir
+# abrir a porta, e o backend subiria apontando para um túnel que não existe.
+# ServerAlive derruba a conexão pendurada em 45s, e o Restart a reconstrói:
+# é o que faz o túnel voltar sozinho depois de uma queda de rede.
+ExecStart=/usr/bin/ssh -N \
+  -i /home/ubuntu/.ssh/id_zappzen_db \
+  -o BatchMode=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=accept-new \
+  -L 127.0.0.1:27017:127.0.0.1:27017 \
+  ubuntu@10.0.0.162
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
