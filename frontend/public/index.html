@@ -5,6 +5,17 @@
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#000000" />
         <meta name="description" content="ZappZen — plataforma de chatbots para WhatsApp" />
+        <!--
+        Verificação de domínio da Meta. Ela é pré-requisito para publicar o app
+        do WhatsApp e para o App Review, e é conferida buscando o HTML da página
+        inicial: precisa estar aqui, estático, dentro do <head>. Uma tag posta
+        pelo React depois que a página carrega não é encontrada, porque o
+        rastreador não executa JavaScript.
+
+        Não é segredo e não faz nada em runtime: é só uma prova de que quem
+        controla o domínio é quem controla a conta.
+        -->
+        <meta name="facebook-domain-verification" content="1vhdcpie35xzhny7jlw7mla6m6pjbd" />
         <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/favicon.svg" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

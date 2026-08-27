@@ -42,11 +42,16 @@ zappzen.atendimentoautomatizado.com.br {
 		-Server
 	}
 
-	# O log de acesso vai para o journald, que é o padrão do serviço empacotado
-	# (`journalctl -u caddy`). Escrever em /var/log/caddy foi tentado e o
+	# O log de acesso precisa desta diretiva para existir: no Caddy v2 um site
+	# sem `log` não registra requisição nenhuma. Sem ela, "a Meta chegou a
+	# chamar o webhook?" vira adivinhação, que é exatamente a pergunta que se
+	# faz quando mensagem não entra.
+	#
+	# Sem `output`, vai para o log padrão do processo, ou seja, journald
+	# (`journalctl -u caddy`). Arquivo em /var/log/caddy foi tentado e o
 	# processo recusa com "permission denied" mesmo com o diretório pertencendo
-	# ao usuário caddy: a unit do pacote roda com `ProtectSystem` e o caminho
-	# fica fora do que ela permite escrever. Abrir exceção com um drop-in de
-	# systemd seria mais uma peça para manter, e o journald já rotaciona e já é
-	# onde estão os logs do backend.
+	# ao usuário caddy: a unit do pacote roda com `ProtectSystem`. Um drop-in de
+	# systemd resolveria e seria mais uma peça para manter, enquanto o journald
+	# já rotaciona sozinho e já é onde estão os logs do backend.
+	log
 }
