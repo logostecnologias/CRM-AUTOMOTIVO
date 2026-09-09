@@ -13,6 +13,8 @@ Esse id vale 30 dias e serve para quantos envios se quiser, então ele é
 guardado no próprio documento (ver `id_na_meta`): sem isso, uma campanha com
 imagem subiria o mesmo arquivo uma vez por destinatário.
 """
+import asyncio
+import base64
 import mimetypes
 import os
 import re
@@ -20,6 +22,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncIterator
+
+import net_guard
 
 DEFAULT_MIME = "application/octet-stream"
 
@@ -337,6 +341,118 @@ async def id_na_meta(db, doc: dict, cred) -> str:
         }}},
     )
     return media_id
+
+
+# ---------------------------------------------------------------------------
+# Data URI: o caminho de mídia do canal não oficial
+#
+# Estas três saíram no commit da migração para a Cloud API, e voltaram em
+# 09/09/2026 com o canal `wuzapi`. O motivo de existirem é a diferença entre
+# os dois protocolos: a Cloud API sobe o arquivo à parte e manda só um
+# `media_id`, enquanto a WuzAPI quer o arquivo **dentro** do JSON, em base64.
+#
+# Não são um retrocesso de desenho — são o preço do canal não oficial, e a
+# engenharia aqui existe justamente para esse preço não ser pago em memória.
+# ---------------------------------------------------------------------------
+
+def to_data_uri(mime: str | None, data: bytes) -> str:
+    return f"data:{mime or DEFAULT_MIME};base64,{base64.b64encode(data).decode()}"
+
+
+class DataUriStream:
+    """O arquivo armazenado, como data URI, lido aos pedaços na hora do envio.
+
+    Existe para o arquivo nunca precisar caber inteiro na memória. O caminho
+    ingênuo (`to_data_uri(mime, path.read_bytes())`) mantém vivos ao mesmo
+    tempo o arquivo bruto, o base64 em bytes e mais uma cópia em str — e o
+    httpx ainda serializa tudo de novo para montar o JSON. Um vídeo de 16MB
+    chega à ordem de dezenas de MB de pico; assim, o pico é um bloco.
+
+    `len()` dá o tamanho exato do data URI sem montá-lo — base64 é
+    determinístico (4 bytes de saída para cada 3 de entrada, arredondando para
+    cima), e é isso que permite mandar `Content-Length` e evitar
+    `Transfer-Encoding: chunked`, que nem todo servidor aceita.
+
+    Cada `async for` reabre o arquivo do zero, de propósito: o envio tem
+    retry, e um gerador já consumido mandaria corpo vazio na segunda
+    tentativa.
+    """
+
+    def __init__(self, doc: dict):
+        self._preparar(file_path(doc), sanitize_mime(doc.get("mime")))
+
+    @classmethod
+    def de_caminho(cls, caminho: str | Path, mime: str | None = None) -> "DataUriStream":
+        """O mesmo, a partir de um caminho solto, sem o documento do arquivo.
+
+        É o caso do canal `wuzapi`. Lá o "upload" não existe como etapa, então
+        `whatsapp_client.upload_media` devolve um marcador com o caminho e o
+        mime, e é o envio que monta o data URI direto do disco. Nesse ponto
+        quem chama tem o caminho, não o documento de `media_files` — e exigir
+        o documento obrigaria a passar o canal para dentro da Central e do
+        motor de fluxos, que é exatamente o que o despacho evita.
+        """
+        obj = cls.__new__(cls)
+        obj._preparar(Path(caminho), sanitize_mime(mime))
+        return obj
+
+    def _preparar(self, caminho: Path, mime: str) -> None:
+        self.path = caminho
+        if not self.path.exists():
+            raise MediaError("Arquivo não encontrado no armazenamento")
+        # O tamanho vem do disco, não do documento: é o arquivo que vai ser
+        # lido, e um Content-Length que não bate com o corpo corrompe a
+        # requisição inteira.
+        self.size = self.path.stat().st_size
+        # O prefixo carrega o mime saneado — ele termina dentro de uma string
+        # JSON. O base64 em si só tem caracteres seguros, por construção.
+        self.prefixo = f"data:{mime};base64,".encode()
+
+    def __len__(self) -> int:
+        return len(self.prefixo) + 4 * ((self.size + 2) // 3)
+
+    async def __aiter__(self):
+        yield self.prefixo
+        lido = 0
+        with open(self.path, "rb") as entrada:
+            while True:
+                # Em thread para não travar o event loop lendo disco.
+                bloco = await asyncio.to_thread(entrada.read, CHUNK)
+                if not bloco:
+                    break
+                lido += len(bloco)
+                yield base64.b64encode(bloco)
+        if lido != self.size:
+            # O arquivo mudou de tamanho entre o stat e a leitura: o corpo já
+            # foi enviado pela metade e não há como voltar atrás, mas o erro
+            # precisa aparecer no log em vez de virar mídia truncada calada.
+            raise MediaError(
+                f"Arquivo mudou durante o envio ({lido} != {self.size} bytes)"
+            )
+
+
+async def ensure_data_uri(source: str, mime: str | None = None) -> str:
+    """Aceita data URI (devolve como está) ou URL http(s) (baixa e converte).
+
+    O nó de Mídia do editor guarda uma URL pública. Na Cloud API ela vai como
+    `link` e **a Meta** a busca; a WuzAPI não busca URL sozinha, então no canal
+    não oficial somos nós que baixamos — e é por isso que aqui o `net_guard`
+    volta a ser necessário, enquanto no caminho da Cloud API ele não é.
+    """
+    if not source:
+        raise MediaError("Mídia sem origem")
+    if source.startswith("data:"):
+        return source
+    if not source.startswith(("http://", "https://")):
+        raise MediaError(f"Origem de mídia não suportada: {source[:40]}")
+    # A URL vem do nó de Mídia (cliente) e é o servidor que a busca: o
+    # net_guard recusa destino interno/privado e aplica o teto de bytes
+    # **durante** o download, sem materializar a resposta antes de checar.
+    try:
+        ctype, content = await net_guard.fetch_bytes(source, max_bytes=HARD_MAX_BYTES)
+    except net_guard.SSRFError as e:
+        raise MediaError(str(e)) from e
+    return to_data_uri(mime or ctype, content)
 
 
 def public_payload(doc: dict) -> dict:

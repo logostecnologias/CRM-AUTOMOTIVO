@@ -19,6 +19,7 @@ from routes.contacts import router as contacts_router
 from routes.whatsapp import router as whatsapp_router
 from routes.dashboard import router as dashboard_router
 from routes.webhooks import router as webhooks_router
+from routes.webhooks_wuzapi import router as webhooks_wuzapi_router
 from routes.departments import router as departments_router
 from routes.users import router as users_router
 from routes.atendimento import router as atendimento_router
@@ -111,6 +112,12 @@ app.include_router(contacts_router)
 app.include_router(whatsapp_router)
 app.include_router(dashboard_router)
 app.include_router(webhooks_router)
+# Receptor do canal não oficial. Mesmo prefixo (`/api/webhooks`), caminhos
+# diferentes (`/wuzapi/...`), módulo separado: os dois protocolos não têm nada
+# em comum antes de `handle_incoming_message`, e o da Cloud API está verificado
+# contra tráfego real — misturá-los faria cada correção de um passar por cima
+# do outro.
+app.include_router(webhooks_wuzapi_router)
 app.include_router(departments_router)
 app.include_router(users_router)
 app.include_router(atendimento_router)

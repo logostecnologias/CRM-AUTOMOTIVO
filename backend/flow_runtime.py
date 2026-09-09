@@ -166,7 +166,7 @@ def _menu_em_texto(o: dict) -> str:
     return "\n".join(linhas)
 
 
-def janela_aberta(session: dict | None) -> bool:
+def janela_aberta(session: dict | None, canal: str | None = None) -> bool:
     """A janela de atendimento de 24h desta conversa ainda está aberta?
 
     Mensagem livre (texto, mídia, menu) só sai enquanto ela estiver; fora
@@ -176,7 +176,25 @@ def janela_aberta(session: dict | None) -> bool:
     Conversa sem a marca conta como fechada. É o caso das que já existiam
     antes desta mudança: presumir aberto faria o primeiro envio de cada uma
     delas falhar com 131047 depois de já ter aparecido como enviada na tela.
+
+    **No canal `wuzapi` a janela não existe**, e por isso `cred` entra aqui.
+    A janela de 24h é regra da Meta aplicada pela Cloud API, não uma
+    propriedade da conversa: no protocolo não oficial não há nada que recuse
+    texto livre por tempo. Devolver `False` ali faria a Central mostrar
+    "janela fechada" numa conexão em que mandar funciona — e, pior, empurraria
+    campanha e lembrete para `send_template`, que naquele canal não existe.
+
+    O parâmetro é o **canal** e não a credencial porque os pontos de chamada
+    não têm a mesma coisa em mão: no motor de fluxos existe uma `Credencial`
+    (`cred.canal`), na ficha de contato e no lembrete de agenda existe o
+    documento da conexão (`conn["canal"]`). Uma string atende os dois sem
+    obrigar quem só tem o documento a decifrar o token para consultar o canal.
+
+    É opcional para poder ser adotado aos poucos: sem ele, o comportamento é o
+    de sempre, que é o conservador (a janela vale).
     """
+    if canal == whatsapp.CANAL_WUZAPI:
+        return True
     if not session:
         return False
     expira = session.get("janela_expira_em")
@@ -971,7 +989,7 @@ async def send_human_message(tenant_id: str, session_id: str, content: str):
     outgoing_text = f"*{agent_name}:*\n{content}" if agent_name else content
 
     if cred and contact:
-        if not janela_aberta(session):
+        if not janela_aberta(session, getattr(cred, "canal", None)):
             raise JanelaFechada(MSG_JANELA_FECHADA)
         try:
             wamid = await whatsapp.send_text(cred, destino(contact), outgoing_text)
@@ -1041,7 +1059,7 @@ async def send_human_media(tenant_id: str, session_id: str, media_doc: dict, cap
     session, contact, cred, agent_name = ctx
     if not cred or not contact:
         raise RuntimeError("Conexão de WhatsApp indisponível para esta conversa")
-    if not janela_aberta(session):
+    if not janela_aberta(session, getattr(cred, "canal", None)):
         raise JanelaFechada(MSG_JANELA_FECHADA)
 
     outgoing_caption = f"*{agent_name}:*\n{caption}" if agent_name and caption else (

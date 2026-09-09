@@ -356,7 +356,7 @@ async def send_one(db, campaign: dict, recipient: dict, cred) -> tuple[str, str 
     session_id = session["id"]
     marca = {"campanha_id": campaign["id"], "campanha_nome": campaign.get("nome")}
 
-    if tipo != "template" and not janela_aberta(session):
+    if tipo != "template" and not janela_aberta(session, getattr(cred, "canal", None)):
         # Regra da plataforma, não falha nossa: fora da janela de 24h o
         # WhatsApp só aceita modelo. Marcado como `ignorado` para a campanha
         # não contabilizar como erro de entrega algo que nunca teve chance.

@@ -9,7 +9,21 @@
 # `permitopen="127.0.0.1:27017"`, ou seja, ela não abre shell e só encaminha
 # essa porta. Uma chave comum daria à máquina da aplicação acesso completo ao
 # servidor de banco, que é o oposto do que se quer.
-Description=Tunel SSH para o MongoDB (bancos-db)
+#
+# Desde 09/09/2026 o túnel carrega **duas** portas, e a segunda não é banco: a
+# 8080 é a WuzAPI que roda na mesma máquina, usada pelo canal não oficial das
+# conexões de WhatsApp. Ela também escuta só em loopback lá, pelo mesmo motivo,
+# e a chave ganhou `permitopen="127.0.0.1:8080"` ao lado da de 27017 — aditivo,
+# porque perder a de 27017 derruba o banco e com ele o backend inteiro.
+#
+# As duas no mesmo túnel de propósito: é o mesmo destino, a mesma chave e o
+# mesmo ciclo de vida. Uma segunda unit duplicaria o `Restart`, o
+# `ServerAlive` e a ordem de dependência, e criaria o caso de a aplicação subir
+# com um túnel de pé e o outro caído — que é justamente o que
+# `ExitOnForwardFailure` existe para impedir: com as duas no mesmo ssh, se
+# qualquer uma das portas for recusada o serviço não sobe, em vez de subir pela
+# metade.
+Description=Tunel SSH para o MongoDB e a WuzAPI (bancos-db)
 After=network-online.target
 Wants=network-online.target
 Before=zappzen.service
@@ -28,6 +42,7 @@ ExecStart=/usr/bin/ssh -N \
   -o ServerAliveCountMax=3 \
   -o StrictHostKeyChecking=accept-new \
   -L 127.0.0.1:27017:127.0.0.1:27017 \
+  -L 127.0.0.1:8080:127.0.0.1:8080 \
   ubuntu@10.0.0.162
 Restart=always
 RestartSec=5

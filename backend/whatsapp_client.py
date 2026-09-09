@@ -90,15 +90,36 @@ CODIGO_LIMITE = 130429
 CODIGOS_TOKEN = {0, 190, 200, 3, 10}
 
 
+# Os dois canais que uma conexão pode falar. `cloud_api` é a API oficial da
+# Meta; `wuzapi` é a ponte não oficial (whatsmeow), que voltou a existir como
+# opção por decisão do cliente em 09/09/2026, enquanto o número dele está preso
+# fora da Cloud API.
+#
+# O canal mora na credencial, e não num `if` em cada chamador, porque é o que
+# mantém a regra da camada única: `flow_runtime`, `campaigns`, `outbound` e
+# `agenda_worker` continuam chamando `send_text`/`send_media`/`send_buttons`
+# sem saber que existem dois protocolos. Quem despacha é este módulo.
+CANAL_CLOUD = "cloud_api"
+CANAL_WUZAPI = "wuzapi"
+
+
 class Credencial(NamedTuple):
     """O que basta para falar por um número.
 
     `waba_id` só é usado pelas rotas de conta (assinar webhook, listar
     modelos); o envio não precisa dele.
+
+    No canal `wuzapi` a identidade é outra: não há `phone_number_id` nem
+    `waba_id`, e o que identifica a conexão é o **token da instância**. Por
+    isso `phone_number_id` carrega o id da instância ali — é o campo que já
+    atravessa todo o código como "quem é esta conexão", e duplicá-lo com um
+    nome novo obrigaria cada chamador a saber de qual canal está falando, que
+    é exatamente o que este desenho evita.
     """
     phone_number_id: str
     token: str
     waba_id: str | None = None
+    canal: str = CANAL_CLOUD
 
 
 def _versao() -> str:
@@ -119,8 +140,14 @@ def credencial(conn: dict | None) -> Credencial | None:
     enviar nada, e devolver None é o que faz o chamador registrar "conexão
     indisponível" em vez de estourar no meio de um envio.
     """
-    if not conn or not conn.get("phone_number_id"):
+    if not conn:
         return None
+
+    canal = conn.get("canal") or CANAL_CLOUD
+
+    # O token é decifrado igual nos dois canais: a regra de nunca guardar
+    # credencial em claro não muda com o protocolo. No `wuzapi` o que está
+    # cifrado ali é o token da instância, não o da Meta.
     bloco = conn.get("token_cifrado")
     token = None
     if bloco:
@@ -129,10 +156,24 @@ def credencial(conn: dict | None) -> Credencial | None:
         except cripto.CredencialError as e:
             logger.error("Conexão %s com token ilegível: %s", conn.get("id"), e)
             return None
+
+    if canal == CANAL_WUZAPI:
+        # Sem fallback para token de plataforma: `META_PLATFORM_TOKEN` é o
+        # número de demonstração da ZappZen na Cloud API, e usá-lo aqui
+        # mandaria a mensagem por outro canal e outro número sem ninguém pedir.
+        # Instância sem token é conexão que nunca foi pareada.
+        if not token:
+            return None
+        return Credencial(str(conn.get("wuzapi_id") or conn.get("id") or ""),
+                          token, None, CANAL_WUZAPI)
+
+    if not conn.get("phone_number_id"):
+        return None
     token = token or os.environ.get("META_PLATFORM_TOKEN")
     if not token:
         return None
-    return Credencial(str(conn["phone_number_id"]), token, conn.get("waba_id"))
+    return Credencial(str(conn["phone_number_id"]), token,
+                      conn.get("waba_id"), CANAL_CLOUD)
 
 
 _client: httpx.AsyncClient | None = None
@@ -249,9 +290,81 @@ async def _enviar(cred: Credencial, corpo: dict) -> str | None:
     return _wamid(resposta)
 
 
+def _wuz():
+    """Import preguiçoso do canal não oficial.
+
+    No topo do módulo ele faria todo backend carregar a ponte da WuzAPI, que a
+    maioria das instalações não tem e que fala com um serviço que pode não
+    existir. É o mesmo motivo do import preguiçoso dos SDKs de IA.
+    """
+    import wuzapi_client
+    return wuzapi_client
+
+
+def _id_wuzapi(resposta: dict) -> str | None:
+    """O id que a WuzAPI devolve para a mensagem enviada.
+
+    Ele ocupa o mesmo campo que o `wamid` da Meta (`meta.wamid`), porque para
+    quem lê é a mesma coisa: "o identificador que o provedor deu a esta
+    bolha". Mas os dois espaços de id não se misturam, e é bom que não se
+    misturem: **a WuzAPI não manda webhook de status**, então nada vai casar
+    por esse id depois. Guardá-lo serve para deduplicação e para rastrear a
+    mensagem no log da ponte, não para dizer que ela foi entregue.
+    """
+    dados = resposta.get("data") or resposta
+    if not isinstance(dados, dict):
+        return None
+    for chave in ("Id", "id", "ID"):
+        if dados.get(chave):
+            return str(dados[chave])
+    return None
+
+
+# O "media_id" do canal não oficial. Na Cloud API a mídia sobe antes e o envio
+# carrega só um id; na WuzAPI não existe etapa de upload — o arquivo viaja
+# dentro do JSON, em base64.
+#
+# Para os chamadores não precisarem saber disso, `upload_media` no canal
+# `wuzapi` devolve um marcador com o mime e o caminho em vez de um id, e é
+# `send_media` que o desmonta. É feio de propósito: a alternativa era espalhar
+# `if canal == ...` por `flow_runtime`, pela Central, pela ficha de contato e
+# pelas campanhas — todos os lugares que hoje fazem "sobe e manda o id".
+MARCA_ARQUIVO_LOCAL = "wuzfile:"
+
+
+async def _midia_wuzapi(media_id: str | None, link: str | None):
+    """O que vai no campo de mídia de um envio pela WuzAPI.
+
+    Três origens, e as três terminam num data URI:
+
+      - marcador de arquivo nosso: vira `DataUriStream`, lido do disco aos
+        pedaços no momento do envio, para o arquivo não caber inteiro na
+        memória;
+      - `link` (o nó de Mídia do editor): **nós** baixamos, porque a WuzAPI
+        não busca URL sozinha — ao contrário da Meta, que busca. É por isso
+        que aqui o `net_guard` volta a valer;
+      - `media_id` de verdade (id da Meta) não serve neste canal: são espaços
+        de identificador diferentes, e mandá-lo faria a WuzAPI receber uma
+        string sem sentido no lugar do arquivo.
+    """
+    import media_store
+
+    if media_id and media_id.startswith(MARCA_ARQUIVO_LOCAL):
+        mime, _, caminho = media_id[len(MARCA_ARQUIVO_LOCAL):].partition("|")
+        return media_store.DataUriStream.de_caminho(caminho, mime)
+    if link:
+        return await media_store.ensure_data_uri(link)
+    raise WhatsAppError(
+        "Mídia sem origem utilizável no canal wuzapi: um media_id da Cloud API "
+        "não vale aqui"
+    )
+
+
 async def send_text(cred: Credencial, numero: str, texto: str) -> str | None:
     """`preview_url` ligado: link em mensagem de atendimento com prévia é o
     comportamento que o contato espera de uma conversa de WhatsApp."""
+    if cred.canal == CANAL_WUZAPI:
+        return _id_wuzapi(await _wuz().send_text(cred.token, numero, texto))
     return await _enviar(cred, {
         "to": numero, "type": "text",
         "text": {"preview_url": True, "body": texto},
@@ -275,6 +388,11 @@ async def send_media(cred: Credencial, numero: str, kind: str, *,
     """
     if not media_id and not link:
         raise WhatsAppError("Mídia sem id nem link")
+    if cred.canal == CANAL_WUZAPI:
+        return _id_wuzapi(await _wuz().send_media(
+            cred.token, numero, kind, await _midia_wuzapi(media_id, link),
+            caption=caption if kind != "audio" else "", filename=filename,
+        ))
     conteudo: dict = {"id": media_id} if media_id else {"link": link}
     if caption and kind in ("image", "video", "document"):
         conteudo["caption"] = caption
@@ -337,6 +455,12 @@ async def send_buttons(cred: Credencial, numero: str, body: str, itens: list[dic
     """
     if not (body or "").strip():
         raise WhatsAppError("Mensagem de botões sem texto no corpo")
+    if cred.canal == CANAL_WUZAPI:
+        # Os tetos e o corte de rótulo são conferidos no cliente da WuzAPI
+        # também, com os mesmos números: eles são do WhatsApp, não da API que
+        # se usa para falar com ele.
+        return _id_wuzapi(await _wuz().send_buttons(
+            cred.token, numero, body, itens, titulo=titulo, rodape=rodape))
     return await _enviar(cred, _interativo(cred, numero, {
         "type": "button",
         "body": {"text": _corta(body, LIMITE_CORPO_BOTOES)},
@@ -360,6 +484,10 @@ async def send_list(cred: Credencial, numero: str, body: str, texto_botao: str,
     """
     if not (body or "").strip():
         raise WhatsAppError("Mensagem de lista sem texto no corpo")
+    if cred.canal == CANAL_WUZAPI:
+        return _id_wuzapi(await _wuz().send_list(
+            cred.token, numero, body, texto_botao, itens,
+            titulo=titulo, rodape=rodape, titulo_secao=titulo_secao))
     linhas = []
     for it in itens[:MAX_ITENS_LISTA]:
         linha = {"id": _corta(it["id"], LIMITE_ID_ITEM),
@@ -385,6 +513,17 @@ async def send_template(cred: Credencial, numero: str, nome: str, idioma: str,
     É o que sustenta campanha e lembrete de agendamento, porque nos dois casos
     quem escreve primeiro é a plataforma, e quase sempre fora da janela.
     """
+    if cred.canal == CANAL_WUZAPI:
+        # Modelo aprovado é instituto da Meta: não existe no protocolo não
+        # oficial. Recusar aqui, com o motivo, em vez de tentar traduzir para
+        # texto por conta própria — quem decide se manda o corpo do modelo
+        # como texto livre é a campanha e o lembrete, que sabem o que
+        # prometeram ao contato. Traduzir em silêncio faria a variável não
+        # preenchida chegar como "{{1}}" na conversa.
+        raise WhatsAppError(
+            "Modelo aprovado não existe no canal wuzapi; use texto livre "
+            "(a janela de 24h também não vale nesse canal)"
+        )
     modelo: dict = {"name": nome, "language": {"code": idioma}}
     if componentes:
         modelo["components"] = componentes
@@ -401,6 +540,18 @@ async def marcar_lida(cred: Credencial, wamid: str, digitando: bool = False) -> 
 
     Falha aqui nunca derruba o atendimento: quem chama engole o erro.
     """
+    if cred.canal == CANAL_WUZAPI:
+        # A WuzAPI tem um endpoint de marcar lida, mas o cliente nunca o
+        # implementou (na arquitetura antiga isso nem existia) e o formato dele
+        # muda entre versões e forks — a mesma razão que obrigou a redundância
+        # de grafia em send_buttons/send_list. Chamar às cegas daria erro em
+        # **toda** mensagem recebida, e o custo de não chamar é o contato não
+        # ver os dois tiques.
+        #
+        # Sai como não-operação de propósito, e não como exceção: quem chama
+        # engole erro aqui, então levantar só encheria o log sem mudar nada.
+        logger.debug("marcar_lida ignorada: canal wuzapi não expõe leitura")
+        return
     corpo: dict = {"messaging_product": "whatsapp", "status": "read", "message_id": wamid}
     if digitando:
         corpo["typing_indicator"] = {"type": "text"}
@@ -425,6 +576,19 @@ async def upload_media(cred: Credencial, caminho: str | Path, mime: str,
     caminho = Path(caminho)
     if not caminho.exists():
         raise WhatsAppError("Arquivo não encontrado no armazenamento")
+    if cred.canal == CANAL_WUZAPI:
+        # Não há o que subir: a WuzAPI recebe o arquivo dentro do próprio
+        # envio. O marcador leva o mime e o caminho, e `send_media` o
+        # transforma no data URI. A conferência de existência acima vale para
+        # os dois canais de propósito — descobrir arquivo faltando aqui é
+        # melhor que descobrir no meio do envio, com a bolha já no histórico.
+        #
+        # Consequência assumida: o cache de `media_files.meta_ids`, que impede
+        # uma campanha com imagem de subir o mesmo arquivo 1.800 vezes, não
+        # tem efeito neste canal — não há id reaproveitável, o arquivo sobe a
+        # cada destinatário. É uma perda real do protocolo não oficial, e é
+        # também mais um motivo para a cadência com jitter.
+        return f"{MARCA_ARQUIVO_LOCAL}{mime}|{caminho}"
     with open(caminho, "rb") as arquivo:
         resposta = await _request(
             "POST", f"/{cred.phone_number_id}/media", cred.token,

@@ -226,7 +226,10 @@ async def avisar(db, tenant_id: str, agendamento: dict, tipo: str, config: dict 
         # conversa que acabou de acontecer, onde é mais natural e não custa
         # modelo. Sem nenhum dos dois, o aviso não sai e o motivo fica no
         # histórico, em vez de a mensagem sumir sem explicação.
-        if flow_runtime.janela_aberta(session):
+        # No canal wuzapi a janela conta como aberta e o aviso sai como texto
+        # livre, sem depender de modelo aprovado — que é o que torna o
+        # lembrete possível numa conexão não oficial, onde modelo não existe.
+        if flow_runtime.janela_aberta(session, conn.get("canal")):
             await flow_runtime.send_human_message(tenant_id, session["id"], texto)
         elif modelo:
             await flow_runtime.send_template_message(

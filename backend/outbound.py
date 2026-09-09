@@ -149,7 +149,7 @@ async def send_direct(db, tenant_id: str, contact: dict, conn: dict, texto: str,
     # que ninguém disse nada: o atendente abriria um card sem mensagem
     # nenhuma e sem entender de onde ele veio.
     atual = await sessao_aberta(db, tenant_id, conn["id"], contact["id"])
-    if not template and not flow_runtime.janela_aberta(atual):
+    if not template and not flow_runtime.janela_aberta(atual, conn.get("canal")):
         raise flow_runtime.JanelaFechada(flow_runtime.MSG_JANELA_FECHADA)
 
     session, criada = await ensure_session(
@@ -159,7 +159,10 @@ async def send_direct(db, tenant_id: str, contact: dict, conn: dict, texto: str,
         atendente_id=autor_id,
         aguardar_primeira_resposta=False,
     )
-    if template and not flow_runtime.janela_aberta(session):
+    # No canal wuzapi a janela conta como aberta, então esta condição é falsa
+    # e o envio cai no texto livre — que é o certo: `send_template` recusa
+    # naquele canal, e o corpo do modelo já vem preenchido em `texto`.
+    if template and not flow_runtime.janela_aberta(session, conn.get("canal")):
         await flow_runtime.send_template_message(
             tenant_id, session["id"], template["nome"],
             template.get("idioma") or "pt_BR", template.get("valores") or [], texto)
