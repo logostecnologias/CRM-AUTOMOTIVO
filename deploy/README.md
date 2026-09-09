@@ -108,6 +108,21 @@ Sintomas e causa provável:
 - **Webhook devolvendo 503**: `META_APP_SECRET` vazio no `.env`.
 - **Backend não sobe**: quase sempre o túnel do banco. `systemctl status
   zappzen-db-tunnel`.
+- **`bash: line 1: set: command not found` no meio do deploy**: o BOM voltou a
+  entrar na frente do script remoto. Era o defeito mais sério do `publicar.ps1`
+  e foi consertado em 02/09/2026, mas vale reconhecer o sintoma: com essa linha
+  quebrada o `set -e` não vale, **todo erro seguinte é engolido** e o script
+  segue reiniciando o serviço como se tivesse dado certo. Quem codifica o stdin
+  de um programa nativo no PowerShell 5.1 é `[Console]::OutputEncoding`, não
+  `$OutputEncoding`, e não dá para trocá-la de dentro do script — daí o `sed`
+  que tira o BOM no lado remoto.
+- **`Permission denied` ou `Cannot open: File exists` extraindo o backend**: as
+  pastas do projeto estão marcadas como somente-leitura no Windows (OneDrive), o
+  `tar` de lá grava `dr-xr-xr-x` no pacote e o `tar` daqui aplica esse modo ao
+  criar a pasta, antes de escrever o conteúdo dela. Por isso os `.py` da raiz
+  entram e os de `routes/`/`tests/` falham. Resolvido com
+  `--delay-directory-restore` na extração e um `chmod -R u+w` depois; o `rm` da
+  árvore anterior precisa do mesmo cuidado, e é o que a função `apagar` faz.
 
 ## Backup
 
