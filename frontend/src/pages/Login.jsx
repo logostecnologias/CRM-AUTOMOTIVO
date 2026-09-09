@@ -107,6 +107,17 @@ export default function LoginPage() {
           <div className="mt-8 text-xs text-ink-3 border-t border-line pt-4 font-mono">
             <div>Super Admin de teste: <span className="text-ink">admin@zappzen.com</span> / <span className="text-ink">admin@123</span></div>
           </div>
+
+          {/* Âncora comum, não Link do React Router: as páginas legais são
+              arquivos estáticos servidos pelo Caddy, fora do SPA. Um Link
+              tentaria resolvê-las como rota e cairia no fallback do index.html.
+
+              Ficam aqui porque é a única tela pública do produto, e a revisão
+              da Meta espera alcançar a política de privacidade a partir dela. */}
+          <div className="mt-4 text-xs text-ink-3 flex gap-4">
+            <a href="/privacidade.html" className="hover:text-ink">Privacidade</a>
+            <a href="/termos.html" className="hover:text-ink">Termos de Uso</a>
+          </div>
         </div>
       </div>
     </div>
