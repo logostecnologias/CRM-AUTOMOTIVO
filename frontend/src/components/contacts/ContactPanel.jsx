@@ -5,6 +5,7 @@ import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import { useAcao } from "@/hooks/useAcao";
 import Atividades from "@/components/activities/Atividades";
+import { fotoDoContato } from "@/components/atendimento/shared";
 import {
   X, PaperPlaneRight, Trash, Prohibit, Check, ChatCircleDots, Megaphone,
   NotePencil, Warning, ArrowSquareOut, Funnel, Plus, Trash as TrashIcon, ShieldCheck,
@@ -216,8 +217,8 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     <aside className="fixed right-0 top-0 h-screen w-[520px] bg-surface border-l border-line shadow-pop z-40 flex flex-col"
       data-testid="contact-panel">
       <div className="px-5 py-4 border-b border-line-strong flex items-start gap-3">
-        {c.foto_url
-          ? <img src={c.foto_url} alt="" className="w-11 h-11 border border-line-strong object-cover rounded-full" />
+        {fotoDoContato(c)
+          ? <img src={fotoDoContato(c)} alt="" className="w-11 h-11 border border-line-strong object-cover rounded-full" />
           : <div className="w-11 h-11 bg-brand text-brand-fg flex items-center justify-center font-heading font-black">
               {(c.nome || "?").charAt(0).toUpperCase()}
             </div>}

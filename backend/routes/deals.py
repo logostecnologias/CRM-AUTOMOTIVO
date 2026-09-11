@@ -270,7 +270,11 @@ async def board(pipeline_id: str, responsavel_id: str | None = None, q: str | No
         c["id"]: c
         async for c in db.contacts.find(
             {"id": {"$in": [i for i in ids_contato if i]}, "tenant_id": tenant_id},
-            {"_id": 0, "id": 1, "nome": 1, "numero_whatsapp": 1, "empresa": 1, "foto_url": 1},
+            {"_id": 0, "id": 1, "nome": 1, "numero_whatsapp": 1, "empresa": 1,
+             # As duas origens de foto: a nossa (arquivo servido por
+             # /api/media) e a externa. Projetar só uma deixaria o cartão
+             # do funil com iniciais enquanto a Central mostra a foto.
+             "foto_url": 1, "foto_media_id": 1},
         )
     }
     # Cartão sem atividade pendente é venda parada sem ninguém ter decidido

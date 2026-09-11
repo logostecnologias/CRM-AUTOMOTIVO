@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useActiveSession } from "@/hooks/useActiveSession";
 import { Hand, CheckCircle, X, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
-import { STATUS, SessionListItem, MessageBubble, Avatar, ChatComposer } from "@/components/atendimento/shared";
+import { STATUS, SessionListItem, MessageBubble, Avatar, ChatComposer, fotoDoContato } from "@/components/atendimento/shared";
 
 export default function InboxPage() {
   const { user } = useAuth();
@@ -122,7 +122,7 @@ export default function InboxPage() {
           <div className="flex-1 bg-surface flex flex-col" data-testid="chat-panel">
             <div className="p-3 border-b border-line-strong flex items-start justify-between gap-3">
               <div className="flex items-start gap-3 min-w-0">
-                <Avatar name={active.contact?.nome || active.contact?.numero_whatsapp || "—"} photoUrl={active.contact?.foto_url} size={40} />
+                <Avatar name={active.contact?.nome || active.contact?.numero_whatsapp || "—"} photoUrl={fotoDoContato(active.contact)} size={40} />
                 <div className="min-w-0">
                   <div className="font-heading text-lg font-black tracking-tight truncate">{active.contact?.nome || "—"}</div>
                   <div className="text-xs font-mono text-ink-3 truncate">{active.contact?.numero_whatsapp}</div>

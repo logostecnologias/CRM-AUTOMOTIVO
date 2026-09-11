@@ -95,6 +95,22 @@ function formatListTime(iso) {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
+// De onde sai a foto de um contato, nesta ordem.
+//
+// São duas origens, e elas não se montam igual: `foto_media_id` é um arquivo
+// nosso e precisa do prefixo da API (o mesmo `${API}/media/...` que o anexo da
+// bolha usa, e pelo mesmo motivo — o cookie httpOnly vai junto no `<img>`);
+// `foto_url` é um endereço externo que veio de planilha ou do cadastro e já
+// está pronto. Guardá-las num campo só obrigaria a tela a adivinhar qual é
+// qual, e a montada errada vira imagem quebrada.
+//
+// A nossa vem primeiro porque é a que o sistema mantém em dia.
+export function fotoDoContato(contato) {
+  if (!contato) return null;
+  if (contato.foto_media_id) return `${API}/media/${contato.foto_media_id}`;
+  return contato.foto_url || null;
+}
+
 export function Avatar({ name, photoUrl, size = 44 }) {
   const [failed, setFailed] = useState(false);
   const initial = (name.trim()[0] || "?").toUpperCase();
@@ -132,7 +148,7 @@ export function SessionListItem({ session, active, onClick }) {
       className={`w-full text-left px-3 py-2.5 flex items-center gap-3 border-b border-line transition-colors ${active ? "bg-surface-2" : "hover:bg-surface-2"}`}
       style={waiting ? { borderLeft: `4px solid ${waiting.color}`, paddingLeft: "calc(0.75rem - 4px)" } : undefined}
     >
-      <Avatar name={name} photoUrl={session.contact?.foto_url} />
+      <Avatar name={name} photoUrl={fotoDoContato(session.contact)} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-semibold truncate">{name}</div>

@@ -40,11 +40,41 @@ TEXTO_REDIGIDO = "[conteúdo removido a pedido do titular]"
 # da pessoa. Sai substituído por um marcador, e não apagado, porque é ele que
 # mantém a unicidade do documento e impede que uma importação futura recrie a
 # ficha achando que o número está livre.
-CAMPOS_PESSOAIS = ("email", "empresa", "cargo", "origem", "foto_url")
+# `foto_media_id` é a foto que nós guardamos (canal não oficial);
+# `foto_url` é um endereço externo vindo de planilha ou do cadastro. Os
+# dois são a cara de uma pessoa e saem juntos — e o arquivo do primeiro é
+# apagado do disco por `_apaga_avatar`, senão ficaria servível por
+# /api/media depois de a ficha ter sido anonimizada.
+CAMPOS_PESSOAIS = ("email", "empresa", "cargo", "origem", "foto_url",
+                   "foto_media_id")
 
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+async def _apaga_avatar(db, contact_id: str) -> int:
+    """Tira do disco a foto de perfil guardada para este contato.
+
+    Existe separada de `_apaga_midia` porque aquela varre por `session_id`, e
+    avatar não pertence a conversa nenhuma — ficaria em disco, servível por
+    /api/media, depois de a ficha ter sido anonimizada. É foto de uma pessoa:
+    é exatamente o dado que a anonimização existe para remover.
+    """
+    total = 0
+    agora = _now()
+    docs = await db.media_files.find(
+        {"contact_id": contact_id, "purged_at": None}, {"_id": 0}
+    ).to_list(100)
+    for doc in docs:
+        try:
+            media_store.file_path(doc).unlink(missing_ok=True)
+        except OSError as e:
+            logger.warning("Não consegui apagar o avatar %s: %s", doc.get("stored_name"), e)
+            continue
+        await db.media_files.update_one({"id": doc["id"]}, {"$set": {"purged_at": agora}})
+        total += 1
+    return total
 
 
 async def _apaga_midia(db, session_ids: list[str]) -> int:
@@ -86,6 +116,7 @@ async def anonimizar(db, tenant_id: str, contact: dict) -> dict:
     session_ids = [s["id"] for s in sessoes]
 
     midias = await _apaga_midia(db, session_ids)
+    midias += await _apaga_avatar(db, contact_id)
 
     mensagens = 0
     if session_ids:
@@ -149,9 +180,14 @@ async def apagar(db, tenant_id: str, contact: dict) -> dict:
     session_ids = [s["id"] for s in sessoes]
 
     midias = await _apaga_midia(db, session_ids)
+    midias += await _apaga_avatar(db, contact_id)
     if session_ids:
         await db.media_files.delete_many({"session_id": {"$in": session_ids}})
         await db.messages_log.delete_many({"session_id": {"$in": session_ids}})
+    # Em `apagar` o documento do avatar sai também. Na anonimização ele fica
+    # com `purged_at`, porque o registro da conversa continua existindo; aqui
+    # não sobra conversa nenhuma para ele explicar.
+    await db.media_files.delete_many({"contact_id": contact_id})
     await db.conversation_sessions.delete_many(
         {"tenant_id": tenant_id, "contact_id": contact_id}
     )

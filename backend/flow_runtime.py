@@ -13,6 +13,7 @@ from flow_engine import (
     FORMATO_BOTOES, FORMATO_LISTA, FORMATO_TEXTO, resolver_escolha_menu,
 )
 import contatos_csv
+import avatares
 import media_store
 import whatsapp_client as whatsapp
 import ai_agents
@@ -545,6 +546,14 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
         if updates:
             await db.contacts.update_one({"id": contact["id"]}, {"$set": updates})
             contact.update(updates)
+
+    # A foto de perfil, no canal não oficial, em tarefa própria — como a
+    # confirmação de leitura, e pelo mesmo motivo: é uma ida à ponte e mais um
+    # download, e nada disso pode ficar entre a mensagem do contato e a
+    # resposta do bot. `avatares.atualizar` decide sozinho se há o que fazer
+    # (canal certo, contato ainda sem foto, tentativa não repetida) e nunca
+    # levanta.
+    asyncio.create_task(avatares.atualizar(db, tenant_id, conn, contact))
 
     # Conversa já em andamento continua no bot dela (mesmo que ele tenha sido
     # pausado depois — trocar de bot no meio confundiria o contato).

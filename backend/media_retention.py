@@ -101,7 +101,16 @@ async def _purge_window(db, tenant_ids: list[str], days: int) -> int:
 
     while True:
         batch = await db.media_files.find(
-            {"tenant_id": {"$in": tenant_ids}, "created_at": {"$lt": cutoff}, "purged_at": None},
+            {"tenant_id": {"$in": tenant_ids}, "created_at": {"$lt": cutoff},
+             "purged_at": None,
+             # Avatar fica fora da janela. A retenção existe para o acervo de
+             # conversa, que cresce sem parar; avatar é atributo **corrente**
+             # da ficha, um arquivo pequeno por contato, substituído e não
+             # acumulado. Expirá-lo não libera espaço que importe e troca a
+             # foto da ficha por iniciais sem ninguém ter pedido. Quem o apaga
+             # é a anonimização (`contatos._apaga_avatar`), que é onde foto de
+             # pessoa tem de sair mesmo.
+             "uso": {"$ne": "avatar"}},
             {"_id": 0},
         ).limit(BATCH).to_list(BATCH)
         if not batch:
