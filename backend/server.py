@@ -283,6 +283,11 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # o que diz de quem ele é são os metadados do payload. Este índice está no
     # caminho de TODA mensagem recebida do sistema inteiro.
     ("whatsapp_connections", [("phone_number_id", 1)], {"sparse": True}),
+    # O mesmo papel, no canal não oficial: a ponte nao assina o webhook, entao
+    # quem prova a origem do evento e um segredo na propria URL, e e por ele
+    # que a conexao e encontrada. Caminho de TODA mensagem recebida por esse
+    # canal, e a consulta acontece antes de qualquer decisao.
+    ("whatsapp_connections", [("wuzapi_webhook_token", 1)], {"sparse": True}),
     # Varredura do health_monitor.
     ("whatsapp_connections", [("status", 1), ("last_webhook_event_at", 1)], {}),
 

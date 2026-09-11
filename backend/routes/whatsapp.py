@@ -55,7 +55,10 @@ def _now():
 # que o webhook do canal não oficial é assinado. Quem a tem forja mensagem em
 # qualquer conversa desta conexão, porque o receptor a aceita como prova de
 # origem.
-_CAMPOS_OCULTOS = ("_id", "token_cifrado", "wuzapi_hmac")
+# `wuzapi_webhook_token` é o segredo que autentica o webhook do canal não
+# oficial: quem o tem posta evento em qualquer conversa desta conexão, porque é
+# só com ele que o receptor distingue a ponte de um POST qualquer da internet.
+_CAMPOS_OCULTOS = ("_id", "token_cifrado", "wuzapi_hmac", "wuzapi_webhook_token")
 
 
 def _is_admin(user: dict) -> bool:
@@ -165,7 +168,10 @@ async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admi
     # a desfazer um documento que nunca precisou nascer — e o cliente lia o
     # erro de configuração embrulhado num "não foi possível criar a
     # instância", que aponta para a ponte em vez de para o .env.
-    url_webhook = _url_webhook_wuzapi() if canal == whatsapp.CANAL_WUZAPI else None
+    # O segredo do webhook nasce aqui, antes de tudo: ele entra na URL que vai
+    # para a ponte e no documento da conexão, e os dois têm de ser o mesmo.
+    token_webhook = secrets.token_urlsafe(32) if canal == whatsapp.CANAL_WUZAPI else None
+    url_webhook = _url_webhook_wuzapi(token_webhook) if token_webhook else None
 
     conn = {
         "id": str(uuid.uuid4()),
@@ -180,6 +186,7 @@ async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admi
         "wuzapi_id": None,
         "wuzapi_nome": None,
         "wuzapi_hmac": None,
+        "wuzapi_webhook_token": token_webhook,
         "qrcode_atual": None,
         "token_cifrado": None,
         "token_mascara": None,
@@ -235,11 +242,11 @@ async def _provisionar_wuzapi(db, conn: dict, url_webhook: str) -> tuple[dict, s
     """
     token = wuzapi.generate_token()
     nome = wuzapi.nome_da_instancia(conn["id"])
-    # A chave de assinatura nasce aqui e vai para a ponte no mesmo passo. Ela
-    # já era gerada e guardada antes, mas nunca chegava a ser configurada lá —
-    # e a ponte, sem chave, manda o webhook **sem assinar**. Como o receptor é
-    # fail-closed, a conexão pareava, enviava e recusava toda mensagem
-    # recebida com 401: o caminho de volta fechado sem um erro sequer.
+    # A chave de assinatura continua sendo mandada, e continua não valendo de
+    # nada sozinha: a ponte guarda (`hmac_key: true`) e **não assina** — POST
+    # real capturado em 11/09/2026 chegou sem cabeçalho algum. Ela vai porque
+    # não custa e porque é o que passa a valer se um dia a chave global for
+    # configurada; quem autentica de fato é o segredo na URL.
     hmac_key = secrets.token_hex(32)
     instancia = await wuzapi.create_instance(nome, token, url_webhook,
                                              hmac_key=hmac_key)
@@ -266,16 +273,11 @@ async def _provisionar_wuzapi(db, conn: dict, url_webhook: str) -> tuple[dict, s
                  "Sem ele o número envia e as respostas dos contatos não chegam.")
         logger.warning("Webhook da instância %s não configurado: %s", nome, e)
 
-    # A URL certa não basta: sem assinatura o receptor recusa tudo com 401, e o
-    # sintoma na tela é idêntico ao do webhook não configurado. A ponte diz se
-    # aceitou a chave, então isso é conferido em vez de presumido — é a mesma
-    # razão de o webhook ser relido logo acima.
-    if aviso is None and not instancia.get("hmac_ativo"):
-        aviso = ("Instância criada, mas a ponte não aceitou a chave de "
-                 "assinatura do webhook. Ela vai mandar os eventos sem assinar "
-                 "e o ZappZen recusa evento sem assinatura, então as respostas "
-                 "dos contatos não chegam.")
-        logger.warning("Instância %s ficou sem chave de assinatura", nome)
+    if not instancia.get("hmac_ativo"):
+        # Não vira aviso de tela: a ponte não assina de qualquer forma, e quem
+        # autentica é o segredo da URL. Fica no log porque, no dia em que a
+        # assinatura passar a existir, é a primeira linha que se procura.
+        logger.info("Instância %s sem chave de assinatura na ponte", nome)
 
     bloco = cripto.cifrar(token)
     mudanca = {
@@ -470,14 +472,26 @@ def _exigir_wuzapi(conn: dict) -> None:
         )
 
 
-def _url_webhook_wuzapi() -> str:
-    """A URL que a instância chama quando chega mensagem.
+def _url_webhook_wuzapi(segredo: str) -> str:
+    """A URL que a instância chama quando chega mensagem, com o segredo dentro.
 
-    Vai sem os ids na rota de propósito. A WuzAPI já foi observada entregando
-    evento de mensagem real na rota simples mesmo com URL por conexão
-    configurada, e o receptor sem rota resolve a conexão pelo `userID` do
-    payload — que é justamente o id da instância. Uma URL só, portanto, e o
-    roteamento sai do corpo, como no receptor da Cloud API.
+    **O segredo na URL é a autenticação deste canal, e não foi escolha de
+    gosto.** O desenho anterior contava com a assinatura HMAC da ponte, e ela
+    não existe: verificado em 11/09/2026 capturando um POST real da instância,
+    que chegou sem cabeçalho de assinatura nenhum, mesmo com a chave gravada e
+    a ponte reportando `hmac_key: true`. O binário tem um
+    `WUZAPI_GLOBAL_HMAC_KEY`, global e não configurado — e global é justamente
+    o que não serve aqui, porque a ponte é compartilhada com outro sistema.
+
+    Um segredo por conexão na URL dá a mesma propriedade que a assinatura
+    daria: só quem o conhece consegue postar, e o receptor continua
+    fail-closed. Ele viaja em HTTPS e fica guardado na ponte junto da URL —
+    é o preço, e é o mesmo que qualquer webhook sem assinatura paga.
+
+    Também deixou de ser uma URL só. Resolver a conexão pelo `userID` do corpo
+    era aceitável quando a assinatura provava a origem; sem ela, o corpo é
+    escolhido por quem chama, e um `userID` copiado bastaria para injetar
+    mensagem na conversa de qualquer empresa.
     """
     base = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
     if not base:
@@ -486,7 +500,7 @@ def _url_webhook_wuzapi() -> str:
             detail="PUBLIC_BASE_URL não configurada: sem ela não há como dizer "
                    "à WuzAPI para onde mandar as mensagens recebidas",
         )
-    return f"{base}/api/webhooks/wuzapi"
+    return f"{base}/api/webhooks/wuzapi/{segredo}"
 
 
 @router.post("/connections/{conn_id}/wuzapi")
@@ -498,9 +512,10 @@ async def salvar_wuzapi(conn_id: str, body: WuzapiIn, user=Depends(require_tenan
     mesmo passo — sem ele o número envia e não recebe nada, que é o sintoma
     que manda o suporte procurar no lugar errado.
 
-    A chave de assinatura é gerada aqui, uma por conexão. Ela nunca volta para
-    a tela (ver `_CAMPOS_OCULTOS`): é com ela que o receptor distingue um
-    evento da WuzAPI de um POST de qualquer um na internet.
+    O segredo do webhook é gerado aqui, um por conexão, e reaproveitado quando
+    já existe. Ele nunca volta para a tela (ver `_CAMPOS_OCULTOS`): é com ele
+    que o receptor distingue um evento da ponte de um POST de qualquer um na
+    internet, já que a ponte não assina o que envia.
     """
     db = get_db()
     conn = await _buscar(db, conn_id, user["tenant_id"])
@@ -525,10 +540,14 @@ async def salvar_wuzapi(conn_id: str, body: WuzapiIn, user=Depends(require_tenan
     # invalidaria os eventos em vôo, que a WuzAPI reentrega — eles chegariam
     # assinados com a chave anterior e seriam recusados como forjados.
     hmac_key = (body.hmac_key or "").strip() or conn.get("wuzapi_hmac") or secrets.token_hex(32)
+    # Reaproveitado quando já existe, pelo mesmo motivo da chave: trocá-lo
+    # invalidaria o que a ponte tem gravado até o `set_webhook` abaixo passar,
+    # e um evento em vôo nesse intervalo cairia como forjado.
+    token_webhook = conn.get("wuzapi_webhook_token") or secrets.token_urlsafe(32)
 
     aviso = None
     try:
-        await wuzapi.set_webhook(token, _url_webhook_wuzapi())
+        await wuzapi.set_webhook(token, _url_webhook_wuzapi(token_webhook))
     except wuzapi.WuzapiError as e:
         aviso = (f"Instância validada, mas o webhook não foi configurado: {e} "
                  "Sem isso as mensagens recebidas não chegam.")
@@ -537,6 +556,7 @@ async def salvar_wuzapi(conn_id: str, body: WuzapiIn, user=Depends(require_tenan
     await db.whatsapp_connections.update_one({"id": conn_id}, {"$set": {
         "wuzapi_id": body.wuzapi_id.strip(),
         "wuzapi_hmac": hmac_key,
+        "wuzapi_webhook_token": token_webhook,
         "token_cifrado": bloco,
         "token_mascara": bloco["mascara"],
         "webhook_assinado": aviso is None,
@@ -566,13 +586,34 @@ async def conectar_wuzapi(conn_id: str, user=Depends(require_tenant_admin)):
     cred = whatsapp.credencial(conn)
     if not cred:
         raise HTTPException(status_code=400, detail="Cadastre a instância antes de conectar")
+
+    # Conectar reafirma o webhook, não só inicia a sessão. É de graça (uma
+    # chamada) e conserta sozinho os dois casos que existem de verdade: a
+    # conexão criada antes de o segredo passar a viver na URL, que ficou
+    # apontando para o endereço velho, e a instância que teve o webhook mexido
+    # por fora. Sem isso o cliente pareia, vê "conectado" e continua sem
+    # receber nada — e não há nada na tela que explique.
+    token_webhook = conn.get("wuzapi_webhook_token") or secrets.token_urlsafe(32)
+    aviso = None
+    try:
+        await wuzapi.set_webhook(cred.token, _url_webhook_wuzapi(token_webhook))
+    except wuzapi.WuzapiError as e:
+        aviso = (f"A sessão vai iniciar, mas o webhook não foi configurado: {e} "
+                 "Sem ele o número envia e as respostas dos contatos não chegam.")
+        logger.warning("Webhook da conexão %s não reafirmado: %s", conn_id, e)
+
     try:
         await wuzapi.connect(cred.token)
     except wuzapi.WuzapiError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await db.whatsapp_connections.update_one(
-        {"id": conn_id}, {"$set": {"status": "pareando", "updated_at": _now()}})
-    return {"ok": True, "status": "pareando"}
+        {"id": conn_id},
+        {"$set": {"status": "pareando", "wuzapi_webhook_token": token_webhook,
+                  "webhook_assinado": aviso is None, "updated_at": _now()}})
+    saida = {"ok": True, "status": "pareando"}
+    if aviso:
+        saida["aviso"] = aviso
+    return saida
 
 
 @router.get("/connections/{conn_id}/wuzapi/qr")

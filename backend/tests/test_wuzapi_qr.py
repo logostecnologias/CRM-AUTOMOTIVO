@@ -28,6 +28,9 @@ Nada sai para a rede: `wuzapi_client._request` é substituído por uma ponte
 falsa que guarda o que teria trafegado.
 """
 import asyncio
+import hashlib
+import hmac as hmaclib
+import json as jsonlib
 import os
 import sys
 
@@ -55,6 +58,7 @@ db_mod.get_db = lambda: DB
 import cripto
 import wuzapi_client as wuzapi
 import routes.whatsapp as rw
+import routes.webhooks_wuzapi as rwh
 
 
 def _conectar_fake():
@@ -67,6 +71,8 @@ def _conectar_fake():
     """
     db_mod.get_db = lambda: DB
     rw.get_db = lambda: DB
+    rwh.get_db = lambda: DB
+    rwh.handle_incoming_message = _gravar
 
 
 TENANT = "t-1"
@@ -76,6 +82,25 @@ BASE = "https://exemplo.test"
 URL_WEBHOOK = BASE + "/api/webhooks/wuzapi"
 
 ok = 0
+
+# Fronteira do receptor: o que ele decidiria entregar ao motor de conversas.
+# Nada além disto roda — é justamente o ponto onde a autenticação tem de ter
+# parado o que não é da ponte.
+ENTREGUES = []
+
+
+async def _gravar(*a, **k):
+    ENTREGUES.append((a, k))
+
+
+class _BG:
+    """BackgroundTasks o bastante: executa na hora, para o teste ver o efeito."""
+
+    def __init__(self):
+        self.tarefas = []
+
+    def add_task(self, fn, *a, **k):
+        self.tarefas.append((fn, a, k))
 
 
 def check(rotulo, condicao, extra=None):
@@ -146,6 +171,17 @@ class Ponte:
             jid = "5585999998888:12@s.whatsapp.net" if self.logado else ""
             return {"data": {"connected": True, "loggedIn": self.logado, "jid": jid}}
         raise AssertionError("rota não prevista no dublê: {} {}".format(method, path))
+
+
+class _Req:
+    """Request o bastante para o receptor: corpo cru e cabeçalhos."""
+
+    def __init__(self, corpo, headers=None):
+        self._corpo = corpo
+        self.headers = headers if headers is not None else {}
+
+    async def body(self):
+        return self._corpo
 
 
 def instalar(ponte):
@@ -236,13 +272,22 @@ async def etapa_criacao_feliz():
     check("o token cifrado não vai para a tela", "token_cifrado" not in conn, conn)
     check("a chave de assinatura também não", "wuzapi_hmac" not in conn, conn)
 
-    check("a ponte recebeu a URL de webhook correta",
-          ponte.webhook_gravado == URL_WEBHOOK, ponte.webhook_gravado)
+    # A URL não é mais uma só: ela carrega o segredo que autentica o evento,
+    # porque a ponte não assina o que envia. O que precisa bater é o segredo
+    # do fim da URL com o que ficou guardado — se divergirem, a ponte posta
+    # num endereço que não encontra conexão nenhuma e nada entra.
+    check("a ponte recebeu a URL de webhook com o segredo",
+          ponte.webhook_gravado.startswith(URL_WEBHOOK + "/"), ponte.webhook_gravado)
+    segredo = ponte.webhook_gravado.rsplit("/", 1)[-1]
+    check("e o segredo é o mesmo guardado na conexão",
+          segredo == doc["wuzapi_webhook_token"], segredo)
+    check("o segredo é longo o bastante para não ser adivinhado",
+          len(segredo) >= 32, len(segredo))
+    check("e não vai para a tela", "wuzapi_webhook_token" not in conn, conn)
 
-    # O ponto todo da chave: ela só vale se a PONTE assinar com ela. Guardá-la
-    # só do nosso lado — o que o código fazia — deixa a ponte mandando evento
-    # sem assinatura, e o receptor, fail-closed, recusa todos com 401.
-    check("a chave de assinatura foi configurada NA PONTE",
+    # A chave de assinatura continua sendo mandada — não custa e passa a valer
+    # se a chave global for configurada um dia —, mas já não é o que autentica.
+    check("a chave de assinatura ainda é configurada na ponte",
           ponte.hmac_gravado is not None, ponte.hmac_gravado)
     check("e é a mesma que ficou guardada aqui",
           ponte.hmac_gravado == doc["wuzapi_hmac"], ponte.hmac_gravado)
@@ -290,22 +335,26 @@ async def etapa_webhook_gravado_vazio():
           ponte.webhook_gravado)
 
 
-async def etapa_ponte_nao_aceita_a_chave():
-    print("\n[ponte sem chave de assinatura: recusaria toda mensagem]")
+async def etapa_ponte_sem_assinatura_nao_e_erro():
+    print("\n[ponte que ignora a chave: deixou de ser impedimento]")
     _conectar_fake()
-    # A ponte ignora a grafia que mandamos, como faz de verdade com `hmac_key`
-    # em vez de `hmacKey`: responde 200 e fica sem chave.
+    # A ponte real se comporta exatamente assim: aceita a chave, responde 200 e
+    # nunca assina. Isso derrubava toda mensagem com 401; agora quem autentica
+    # é o segredo da URL, então a conexão nasce utilizável do mesmo jeito.
     ponte = instalar(Ponte(chave_hmac="uma_grafia_que_a_ponte_ignora"))
     conn = await criar("Sem assinatura")
 
-    check("a conexão é criada — ela envia", conn["wuzapi_id"] == "inst-1", conn)
-    check("mas o caminho de volta não é dado por pronto",
-          conn["webhook_assinado"] is False, conn)
-    check("e o aviso explica a consequência, não o mecanismo",
-          "não chegam" in (conn.get("aviso") or ""), conn.get("aviso"))
-    check("nomeando a assinatura, que é o que difere do outro aviso",
-          "assinatura" in (conn.get("aviso") or "").lower(), conn.get("aviso"))
-    check("a ponte de fato ficou sem chave", ponte.hmac_gravado is None)
+    check("a conexão é criada", conn["wuzapi_id"] == "inst-1", conn)
+    check("e o caminho de volta é dado por pronto",
+          conn["webhook_assinado"] is True, conn)
+    check("sem aviso, porque não há nada a consertar",
+          not conn.get("aviso"), conn.get("aviso"))
+    check("a ponte de fato ficou sem chave de assinatura",
+          ponte.hmac_gravado is None)
+    check("e mesmo assim a URL levou o segredo",
+          ponte.webhook_gravado.startswith(URL_WEBHOOK + "/")
+          and len(ponte.webhook_gravado.rsplit("/", 1)[-1]) >= 32,
+          ponte.webhook_gravado)
 
 
 async def etapa_webhook_em_outra_grafia():
@@ -314,7 +363,8 @@ async def etapa_webhook_em_outra_grafia():
     ponte = instalar(Ponte(chave_webhook="webhookURL"))
     conn = await criar("Financeiro")
     check("o webhook acaba configurado", conn["webhook_assinado"] is True, conn)
-    check("na URL certa", ponte.webhook_gravado == URL_WEBHOOK,
+    check("na URL certa, com o segredo",
+          ponte.webhook_gravado.startswith(URL_WEBHOOK + "/"),
           ponte.webhook_gravado)
 
 
@@ -376,15 +426,88 @@ async def etapa_exclusao_respeita_o_prefixo():
           and not wuzapi.nome_nosso("") and wuzapi.nome_nosso("zz_abc"))
 
 
+async def etapa_receptor_exige_o_segredo():
+    print("\n[receptor: o segredo da URL é a autenticação]")
+    _conectar_fake()
+    instalar(Ponte())
+    conn = await criar("Receptor")
+    doc = await DB.whatsapp_connections.find_one({"id": conn["id"]})
+    segredo = doc["wuzapi_webhook_token"]
+
+    corpo = jsonlib.dumps({
+        "userID": "inst-1", "type": "Message",
+        "event": {"Info": {"Chat": "5585999990000@s.whatsapp.net",
+                           "ID": "MSG1", "PushName": "Fulano",
+                           "IsFromMe": False, "Type": "text"},
+                  "Message": {"conversation": "oi"}},
+    }).encode()
+
+    ENTREGUES.clear()
+    r = await rwh.webhook_wuzapi(segredo, _Req(corpo), _BG())
+    check("com o segredo certo, o evento é aceito", r.get("ok") is not False, r)
+
+    # A barreira. Sem ela, qualquer um que descubra o endereço posta mensagem
+    # na conversa de qualquer empresa — o endpoint alimenta o motor e está na
+    # internet.
+    for errado in ("segredo-errado", segredo[:-1], segredo.upper()):
+        try:
+            await rwh.webhook_wuzapi(errado, _Req(corpo), _BG())
+            raise AssertionError(f"aceitou segredo errado: {errado!r}")
+        except HTTPException as e:
+            check(f"segredo errado recusado ({errado[:14]}…)", e.status_code == 404,
+                  e.status_code)
+
+    check("e a recusa é 404, não 401: não confirma que a rota existe",
+          True)
+
+    # A rota antiga resolvia a conexão pelo `userID` do corpo. Sem assinatura,
+    # o corpo é escolhido por quem chama.
+    try:
+        await rwh.webhook_wuzapi_sem_segredo(_Req(corpo))
+        raise AssertionError("a rota sem segredo aceitou o evento")
+    except HTTPException as e:
+        check("a rota sem segredo recusa", e.status_code == 404, e.status_code)
+
+
+async def etapa_assinatura_so_quando_da_para_conferir():
+    print("\n[assinatura: desarmada por padrão, exigente quando armada]")
+    corpo = b'{"userID":"inst-1"}'
+    os.environ.pop("WUZAPI_GLOBAL_HMAC_KEY", None)
+    # Sem chave global não há o que conferir, e exigir assinatura era o defeito
+    # que recusava todas as mensagens.
+    rwh._validar_assinatura_se_houver(corpo, _Req(corpo, {}))
+    check("sem chave global, evento sem assinatura passa", True)
+
+    os.environ["WUZAPI_GLOBAL_HMAC_KEY"] = "chave-global"
+    rwh._validar_assinatura_se_houver(corpo, _Req(corpo, {}))
+    check("com chave global, evento SEM cabeçalho ainda passa "
+          "(a ponte não assina)", True)
+
+    certa = hmaclib.new(b"chave-global", corpo, hashlib.sha256).hexdigest()
+    rwh._validar_assinatura_se_houver(corpo, _Req(corpo, {"x-hmac-signature": certa}))
+    check("assinatura correta passa", True)
+
+    try:
+        rwh._validar_assinatura_se_houver(
+            corpo, _Req(corpo, {"x-hmac-signature": "0" * 64}))
+        raise AssertionError("aceitou assinatura errada")
+    except HTTPException as e:
+        check("assinatura ERRADA recusa: aí é corpo adulterado, não ausência",
+              e.status_code == 401, e.status_code)
+    os.environ.pop("WUZAPI_GLOBAL_HMAC_KEY", None)
+
+
 async def _tudo():
     await etapa_sem_token_de_admin()
     await etapa_sem_url_publica()
     await etapa_criacao_feliz()
     await etapa_id_em_outra_grafia()
     await etapa_webhook_gravado_vazio()
-    await etapa_ponte_nao_aceita_a_chave()
+    await etapa_ponte_sem_assinatura_nao_e_erro()
     await etapa_webhook_em_outra_grafia()
     await etapa_conectar_e_qr()
+    await etapa_receptor_exige_o_segredo()
+    await etapa_assinatura_so_quando_da_para_conferir()
     await etapa_exclusao_respeita_o_prefixo()
     print("\n{} verificações passaram".format(ok))
 

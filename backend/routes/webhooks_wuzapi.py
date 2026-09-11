@@ -11,21 +11,32 @@ delas passar por cima do raciocínio da outra.
 
 Três diferenças que moldam este arquivo:
 
-  - **A URL carrega o roteamento.** Ao contrário da Cloud API, aqui cada
-    conexão tem a própria URL de webhook (`/wuzapi/{tenant_id}/{connection_id}`),
-    gravada na instância quando a conexão é criada. Existe também a rota sem
-    parâmetros, como reserva: a WuzAPI já foi observada entregando evento de
-    mensagem real na rota simples mesmo com a URL por conexão configurada, e
-    ali o que identifica a instância é o `userID` do próprio payload.
+  - **A URL carrega o roteamento E a autenticação**, e as duas coisas são o
+    mesmo segredo: `/wuzapi/{segredo}`, 32 bytes aleatórios por conexão,
+    gravados na instância quando ela é criada. Achar a conexão pelo segredo
+    **é** autenticar: segredo desconhecido não encontra nada e para ali.
 
-  - **A assinatura é nossa e é por conexão.** Antes quem assinava era o
-    `zappzen-gateway`, com uma chave global; ele não existe mais. A chave
-    passou a viver no documento da conexão (`wuzapi_hmac`), gerada por nós e
-    configurada na instância. Fail-closed como a HMAC anterior e como a
-    assinatura da Meta: **sem chave, o webhook recusa**. A alternativa é grave
-    e não teórica — este endpoint alimenta `handle_incoming_message` e está
-    exposto na internet, então sem autenticação dá para forjar mensagem em
-    qualquer conversa de qualquer empresa.
+  - **Isso é assim porque a ponte não assina o que envia.** O desenho anterior
+    exigia HMAC e era fail-closed, o que estava certo em princípio e errado no
+    fato: em 11/09/2026 um POST real da instância foi capturado num coletor e
+    chegou **sem cabeçalho de assinatura nenhum** — com a chave gravada e a
+    ponte reportando `hmac_key: true`. O cabeçalho existe no binário
+    (`x-hmac-signature`), mas só sai com um `WUZAPI_GLOBAL_HMAC_KEY`, que é
+    global; e global não serve aqui, porque a ponte é compartilhada com outro
+    sistema, que passaria a receber a mesma chave. O sintoma até então era o
+    pior possível: a conexão pareava, enviava, e **toda** mensagem recebida
+    voltava 401 sem nada na tela explicando.
+
+    A conferência de HMAC continua no módulo, desarmada: só age se
+    `WUZAPI_GLOBAL_HMAC_KEY` for configurada deste lado também. Nunca é
+    exigida — exigir o que a ponte não manda foi o defeito.
+
+  - **A rota sem segredo virou 404.** Ela existia como reserva, resolvendo a
+    conexão pelo `userID` do corpo, o que era aceitável enquanto a assinatura
+    provava a origem. Sem assinatura, o corpo é escolhido por quem chama: um
+    `userID` copiado bastaria para injetar mensagem na conversa de qualquer
+    empresa. Este endpoint alimenta `handle_incoming_message` e está exposto
+    na internet.
 
   - **O estado da conexão chega por evento.** QR, pareamento, conexão e
     desconexão são eventos do webhook, não consulta. É o oposto da Cloud API,
@@ -35,6 +46,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
@@ -64,35 +76,37 @@ CABECALHOS_ASSINATURA = (
 )
 
 
-def _validar_assinatura(corpo: bytes, request: Request, conn: dict) -> None:
-    """HMAC-SHA256 do corpo cru com a chave da conexão.
+def _validar_assinatura_se_houver(corpo: bytes, request: Request) -> None:
+    """Confere a assinatura da ponte **se** houver como conferir.
 
-    Sobre os **bytes crus**, nunca sobre o JSON reserializado: a ordem das
-    chaves e o espaçamento mudariam o hash. É a mesma regra da assinatura da
-    Meta, e o motivo pelo qual o corpo é lido com `await request.body()` antes
-    de qualquer `request.json()`.
+    Isto era fail-closed e exigia a assinatura sempre. Estava certo em
+    princípio e errado no fato: a ponte não assina. Em 11/09/2026 um POST real
+    dela foi capturado num coletor e chegou sem nenhum dos cabeçalhos abaixo —
+    com a chave gravada na instância e a ponte dizendo `hmac_key: true`. O
+    resultado era toda mensagem recusada com 401, sem nada na tela explicando.
 
-    Aceita o dígito hexadecimal com ou sem o prefixo `sha256=`, porque as duas
-    formas circulam.
+    Quem autentica agora é o segredo da URL (ver a rota). Esta função vira uma
+    conferência **adicional**, ativa só quando `WUZAPI_GLOBAL_HMAC_KEY` está
+    configurada aqui — que é a chave com que a ponte assinaria, se assinasse.
+    A chave é global lá; por isso ela vem do ambiente e não do documento da
+    conexão, ao contrário do que a versão anterior supunha.
+
+    Quando a chave existe e o cabeçalho vem, uma assinatura errada **recusa**:
+    aí já não é ausência de recurso, é sinal de corpo adulterado.
     """
-    chave = (conn or {}).get("wuzapi_hmac")
+    chave = os.environ.get("WUZAPI_GLOBAL_HMAC_KEY")
     if not chave:
-        # Fail-closed. Sem chave não há como distinguir um evento da WuzAPI de
-        # um POST de qualquer um na internet, e o que está do outro lado deste
-        # endpoint é o motor de conversas de todas as empresas.
-        logger.error("Conexão %s sem wuzapi_hmac — webhook recusado",
-                     (conn or {}).get("id"))
-        raise HTTPException(status_code=503, detail="Webhook sem assinatura configurada")
-
+        return
+    recebido = next((v for n in CABECALHOS_ASSINATURA
+                     if (v := (request.headers.get(n) or "").strip())), None)
+    if not recebido:
+        return
+    if recebido.startswith("sha256="):
+        recebido = recebido.split("=", 1)[1]
     esperado = hmac.new(chave.encode(), corpo, hashlib.sha256).hexdigest()
-    for nome in CABECALHOS_ASSINATURA:
-        recebido = (request.headers.get(nome) or "").strip()
-        if not recebido:
-            continue
-        recebido = recebido.split("=", 1)[1] if recebido.startswith("sha256=") else recebido
-        if hmac.compare_digest(recebido.lower(), esperado):
-            return
-    raise HTTPException(status_code=401, detail="Assinatura inválida")
+    if not hmac.compare_digest(recebido.lower(), esperado):
+        logger.error("Assinatura da ponte não confere — evento recusado")
+        raise HTTPException(status_code=401, detail="Assinatura inválida")
 
 
 # Cada tipo de mídia vira um nó próprio dentro de Message. Figurinha entra como
@@ -246,64 +260,67 @@ def _numero_do_evento(info: dict) -> str:
     return numero.split(":")[0]
 
 
-@router.post("/wuzapi/{tenant_id}/{connection_id}")
-async def webhook_wuzapi(tenant_id: str, connection_id: str, request: Request,
-                         bg: BackgroundTasks):
+@router.post("/wuzapi/{segredo}")
+async def webhook_wuzapi(segredo: str, request: Request, bg: BackgroundTasks):
+    """O evento de uma conexão, autenticado pelo segredo da própria URL.
+
+    **A ponte não assina o que envia.** Verificado em 11/09/2026 capturando um
+    POST real: chegou sem cabeçalho de assinatura, com a chave gravada na
+    instância e a ponte reportando `hmac_key: true`. O cabeçalho existe no
+    binário (`x-hmac-signature`), mas só sai com um `WUZAPI_GLOBAL_HMAC_KEY`
+    que é global — e global não serve aqui, porque a ponte é compartilhada com
+    outro sistema, que passaria a receber a mesma chave.
+
+    Então quem prova a origem é o segredo: 32 bytes aleatórios por conexão,
+    gerados na criação e guardados junto dela. Achar a conexão **é** a
+    autenticação — segredo desconhecido não encontra nada e para aqui.
+
+    O 404 é deliberado, e não 401: para quem sonda, um endereço com segredo
+    errado é indistinguível de um endereço que não existe. Dizer "não
+    autorizado" confirmaria que a rota existe e que só falta o segredo certo.
+    """
     corpo = await request.body()
     db = get_db()
-    # A conexão é buscada **antes** da conferência de assinatura porque a chave
-    # é dela. Buscar não é agir: nada é processado antes de a assinatura passar.
     conn = await db.whatsapp_connections.find_one(
-        {"id": connection_id, "tenant_id": tenant_id})
+        {"wuzapi_webhook_token": segredo, "canal": CANAL_WUZAPI})
     if not conn:
-        raise HTTPException(status_code=404, detail="Conexão não encontrada")
-    _validar_assinatura(corpo, request, conn)
+        logger.warning("Webhook da ponte com segredo desconhecido, recusado")
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    # A assinatura continua sendo conferida **quando existe e quando temos com
+    # o que conferir** — isto é, se a chave global for configurada dos dois
+    # lados um dia. Nunca é exigida: exigir o que a ponte não manda foi
+    # exatamente o que recusou todas as mensagens até aqui.
+    _validar_assinatura_se_houver(corpo, request)
 
     try:
         payload = json.loads(corpo)
     except ValueError:
         raise HTTPException(status_code=400, detail="JSON inválido")
-    return await _processar_evento(tenant_id, connection_id, payload, db, bg)
+    return await _processar_evento(conn["tenant_id"], conn["id"], payload, db, bg)
 
 
 @router.post("/wuzapi")
-async def webhook_wuzapi_sem_rota(request: Request, bg: BackgroundTasks):
-    """Reserva para o evento que chega sem os ids na URL.
+async def webhook_wuzapi_sem_segredo(request: Request):
+    """A URL antiga, sem segredo. Não processa nada, e isso é o ponto.
 
-    A WuzAPI já foi observada entregando evento de mensagem real na rota
-    simples mesmo com a URL por conexão configurada. Ela estampa `userID` em
-    todo payload, que é o id da instância que guardamos na conexão, então a
-    identificação sai dali em vez da URL.
+    Ela existia como reserva: a ponte estampa `userID` em todo payload, então
+    dava para descobrir a conexão pelo corpo em vez da URL. Isso era aceitável
+    **enquanto a assinatura provava a origem do evento**. Não prova — a ponte
+    não assina (ver `_validar_assinatura_se_houver`), e sem assinatura o corpo
+    é escolhido por quem chama: um `userID` copiado bastaria para injetar
+    mensagem na conversa de qualquer empresa deste servidor.
+
+    Fica de pé, em vez de sumir, para dizer o que está acontecendo: instância
+    apontada para o endereço antigo cai aqui, e o log manda para o conserto —
+    "Conectar" na tela reescreve a URL com o segredo.
     """
-    corpo = await request.body()
-    try:
-        payload = json.loads(corpo)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="JSON inválido")
-
-    # `userID` vazio **não** vira consulta. No Mongo, `{"wuzapi_id": None}`
-    # casa com documento em que o campo é nulo **e** com documento em que ele
-    # não existe — então um corpo sem `userID` encontraria a primeira conexão
-    # da Cloud API da base. Ela não tem chave de assinatura, o fail-closed
-    # recusaria com 503, e o sintoma seria "o webhook não funciona" apontando
-    # para o lugar errado. Observado logo depois de publicar, com um POST de
-    # corpo vazio.
-    user_id = payload.get("userID")
-    if not user_id:
-        return {"ok": True, "ignorado": "payload sem userID"}
-
-    db = get_db()
-    # O canal entra no filtro pelo mesmo motivo: garante que só conexão não
-    # oficial é resolvida por esta rota.
-    conn = await db.whatsapp_connections.find_one(
-        {"wuzapi_id": user_id, "canal": CANAL_WUZAPI})
-    if not conn:
-        # Instância desconhecida ou já apagada: responde 200 para a WuzAPI
-        # parar de reentregar algo que nunca vai resolver. Mesma decisão do
-        # `phone_number_id` desconhecido no receptor da Cloud API.
-        return {"ok": True, "ignorado": "userID desconhecido"}
-    _validar_assinatura(corpo, request, conn)
-    return await _processar_evento(conn["tenant_id"], conn["id"], payload, db, bg)
+    logger.error(
+        "POST em /api/webhooks/wuzapi sem segredo na URL: recusado. Instância "
+        "apontando para o endereço antigo — abra a conexão na tela e clique em "
+        "Conectar, que a URL é reescrita com o segredo."
+    )
+    raise HTTPException(status_code=404, detail="Not Found")
 
 
 async def _processar_evento(tenant_id: str, connection_id: str, payload: dict,
