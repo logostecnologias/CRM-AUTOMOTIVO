@@ -271,9 +271,58 @@ async def etapa_apagar_leva_o_documento(tmp):
           await DB.media_files.find_one({"id": mid}) is None)
 
 
+async def etapa_extracao_do_endereco(tmp):
+    print("\n[a resposta da ponte: onde mora o endereco da foto]")
+    _conectar_fake(tmp)
+
+    # Esta etapa dubla `_request`, não `get_avatar`. A diferença é o defeito
+    # que ela existe para pegar: a primeira versão do teste dublava
+    # `get_avatar` e por isso NUNCA exercitou a extração — o código lia `URL`
+    # em caixa alta, a instância real devolve `url`, e o resultado era
+    # "contato sem foto" para todo mundo, indistinguível do caso legítimo de
+    # quem esconde a foto. Payload abaixo é o observado em 11/09/2026.
+    real = {"data": {
+        "id": 2101513792, "type": "image", "hash": "zdpF...",
+        "direct_path": "/v/t61.24694-24/680434955_n.jpg?ccb=11-4",
+        "url": "https://pps.whatsapp.net/v/t61.24694-24/680434955_n.jpg?ccb=11-4",
+    }}
+
+    async def _resp(method, path, headers, json=None, body=None):
+        return _resp.devolve
+
+    wuzapi._request = _resp
+
+    _resp.devolve = real
+    url = await wuzapi.get_avatar("tok", "5585999998888")
+    check("acha o endereco na chave real (`url`, minuscula)",
+          url == real["data"]["url"], url)
+
+    _resp.devolve = {"data": {"URL": "https://x/y.jpg"}}
+    check("e continua achando em caixa alta, que e a grafia antiga",
+          await wuzapi.get_avatar("tok", "x") == "https://x/y.jpg")
+
+    # Sem URL pronta, remonta do caminho: o host e fixo e o caminho ja vem
+    # assinado. Melhor que devolver vazio numa versao que pare de mandar a URL.
+    _resp.devolve = {"data": {"direct_path": "/v/abc.jpg?ccb=1"}}
+    check("sem URL pronta, remonta a partir de direct_path",
+          await wuzapi.get_avatar("tok", "x") == wuzapi.HOST_AVATAR + "/v/abc.jpg?ccb=1",
+          await wuzapi.get_avatar("tok", "x"))
+
+    _resp.devolve = {"data": {"type": "image"}}
+    check("resposta sem endereco nenhum vira None",
+          await wuzapi.get_avatar("tok", "x") is None)
+
+    async def _erro(*a, **k):
+        raise wuzapi.WuzapiError("500: foto escondida")
+    wuzapi._request = _erro
+    check("foto escondida (500 da ponte) e None, nao excecao",
+          await wuzapi.get_avatar("tok", "x") is None)
+
+
 async def _tudo():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
+        await etapa_extracao_do_endereco(tmp)
         await etapa_busca_e_guarda(tmp)
         await etapa_uma_tentativa_por_contato(tmp)
         await etapa_nao_sobrescreve(tmp)

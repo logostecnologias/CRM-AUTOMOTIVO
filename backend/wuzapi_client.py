@@ -411,15 +411,43 @@ async def logout_instance(token: str) -> dict:
     return await _request("POST", "/session/logout", _token_headers(token))
 
 
+# Onde mora o endereço da foto na resposta de `/user/avatar`, nesta ordem.
+#
+# Era lido só como `URL`, em caixa alta, e a instância real devolve **`url`**:
+# conferido em 11/09/2026 contra um número com foto, que voltava `200` com o
+# endereço presente e virava "contato sem foto" aqui. É a mesma armadilha do
+# `_pick` das chaves de mídia e do laço de grafias de `set_webhook` — errar a
+# caixa não dá erro nenhum, só devolve vazio, e vazio aqui é indistinguível do
+# caso legítimo de quem esconde a foto. Foi por isso que passou despercebido.
+_CHAVES_AVATAR = ("url", "URL", "Url")
+
+# Último recurso: a resposta sempre traz `direct_path`, que é o caminho da
+# mesma imagem sem o host. Reconstruir é seguro porque o host é fixo e o
+# caminho já vem assinado (o `oh=`/`oe=` da query) — e é melhor que devolver
+# vazio numa versão que deixe de mandar a URL pronta.
+HOST_AVATAR = "https://pps.whatsapp.net"
+
+
 async def get_avatar(token: str, phone: str) -> str | None:
-    """Profile picture URL for a contact, or None if they hide it (WuzAPI
-    returns a 500 for that case — a normal, expected outcome here, not a
-    real server error)."""
+    """O endereço da foto de perfil do contato, ou None.
+
+    None é resultado normal e frequente: quem restringe a foto nas opções de
+    privacidade faz a ponte responder 500, que é o caso esperado aqui e não um
+    defeito de servidor.
+    """
     try:
         resp = await _request("POST", "/user/avatar", _token_headers(token), {"Phone": phone})
     except WuzapiError:
         return None
-    return (resp.get("data") or {}).get("URL") or None
+    dados = resp.get("data") or {}
+    for chave in _CHAVES_AVATAR:
+        if (valor := dados.get(chave)):
+            return str(valor)
+    caminho = dados.get("direct_path") or dados.get("directPath")
+    if caminho:
+        logger.info("Avatar sem URL pronta; remontado a partir de direct_path")
+        return f"{HOST_AVATAR}{caminho}"
+    return None
 
 
 async def send_text(token: str, number: str, text: str) -> dict:
