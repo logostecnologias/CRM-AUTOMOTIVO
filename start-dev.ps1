@@ -116,8 +116,20 @@ function Start-WebhookTunnel {
     # troca-lo. Por isso aqui so imprimimos o endereco, em vez de reconfigurar
     # nada sozinho. Para trabalhar sem colar a URL a cada dia, use um tunel
     # nomeado do Cloudflare (dominio fixo) e cadastre-o uma vez.
+    # O canal nao oficial NAO tem esse problema, e por isso aqui ha uma acao
+    # alem de imprimir: o webhook da WuzAPI e configurado por nos, por chamada,
+    # quando a conexao e criada. Basta o backend saber o endereco publico da
+    # vez, e e isso que PUBLIC_BASE_URL carrega. O `load_dotenv` do server.py
+    # nao usa override, entao a variavel posta aqui ganha do valor do .env — que
+    # em dev e o localhost, um endereco que a ponte (noutra maquina) nunca
+    # alcancaria. Sem isto a conexao pareia por QR e nao recebe mensagem
+    # nenhuma, que e o sintoma mais caro desse canal.
+    $env:PUBLIC_BASE_URL = $tunnelUrl
+
     Write-Host ""
     Write-Host "Tunel Cloudflare pronto." -ForegroundColor Green
+    Write-Host "Canal nao oficial (WuzAPI): nada a fazer, o webhook e apontado sozinho para" -ForegroundColor Cyan
+    Write-Host "    $tunnelUrl/api/webhooks/wuzapi" -ForegroundColor Yellow
     Write-Host "Cadastre esta URL no painel do app da Meta, em WhatsApp > Configuracao > Webhook:" -ForegroundColor Cyan
     Write-Host "    $tunnelUrl/api/webhooks/whatsapp" -ForegroundColor Yellow
     Write-Host "O campo 'Verificar token' e o valor de META_WEBHOOK_VERIFY_TOKEN do backend/.env." -ForegroundColor Cyan
@@ -129,17 +141,32 @@ function Start-WebhookTunnel {
 
 Stop-StaleProcesses
 
-Write-Host "Abrindo tunel SSH para o banco de dados (bancos-db)..." -ForegroundColor Cyan
-$dbTunnel = Start-Process -FilePath "ssh" -ArgumentList "-N", "-L", "27017:127.0.0.1:27017", "bancos-db" -WindowStyle Hidden -PassThru
+Write-Host "Abrindo tunel SSH para o banco de dados e a ponte WuzAPI (bancos-db)..." -ForegroundColor Cyan
+$dbTunnel = Start-Process -FilePath "ssh" `
+    -ArgumentList "-N", "-L", "27017:127.0.0.1:27017", "-L", "8080:127.0.0.1:8080", "bancos-db" `
+    -WindowStyle Hidden -PassThru
 
-# So o banco precisa de tunel. A Cloud API e um endereco publico da Meta
-# (graph.facebook.com), entao o envio sai direto da maquina; o que precisa de
-# tunel e o caminho de VOLTA, o webhook, e disso cuida o cloudflared abaixo.
+# Duas portas, e so a primeira e obrigatoria.
+#
+# A Cloud API e um endereco publico da Meta (graph.facebook.com), entao o envio
+# por ela sai direto da maquina; o que precisa de tunel ali e o caminho de
+# VOLTA, o webhook, e disso cuida o cloudflared abaixo.
+#
+# A 8080 e a ponte WuzAPI do canal nao oficial, que roda na MESMA maquina do
+# banco e escuta so em loopback la. Producao ja a carrega no
+# `zappzen-db-tunnel`; aqui ela faltava, e sem ela criar uma conexao nao
+# oficial falhava no ato: a instancia e criada por chamada a ponte, e a ponte
+# nao existia deste lado. Nao e fatal de proposito — quem so trabalha com a
+# Cloud API nao deve ficar sem ambiente porque a ponte esta fora do ar.
 $dbOk = Wait-Port 27017 "banco de dados"
 
 if (-not $dbOk) {
     Stop-Process -Id $dbTunnel.Id -Force -ErrorAction SilentlyContinue
     exit 1
+}
+
+if (-not (Test-NetConnection -ComputerName 127.0.0.1 -Port 8080 -WarningAction SilentlyContinue -InformationLevel Quiet)) {
+    Write-Host "Ponte WuzAPI (porta 8080) nao respondeu - o canal nao oficial (QR) nao vai funcionar nesta sessao." -ForegroundColor Yellow
 }
 
 Write-Host "Tunel aberto. Subindo backend + frontend..." -ForegroundColor Green

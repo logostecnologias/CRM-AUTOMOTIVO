@@ -118,6 +118,12 @@ class WuzapiIn(BaseModel):
     """
     wuzapi_id: str
     token: str | None = None  # ausente = manter o que já está gravado
+    # A chave com que a ponte assina os eventos desta instância. Ela só pode
+    # ser definida na criação da instância (`hmacKey`), e instância apontada
+    # aqui foi criada por fora — então quem a criou é quem sabe a chave, e é
+    # por isso que ela é um campo em vez de ser gerada. Sem a chave certa o
+    # receptor recusa todo evento com 401.
+    hmac_key: str | None = None
 
 
 class ConnectionPatch(BaseModel):
@@ -151,18 +157,28 @@ async def list_connections(user: dict = Depends(get_current_user)):
 async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admin)):
     db = get_db()
     await enforce_plan_limit(db, user["tenant_id"], "whatsapp_connections", "max_conexoes", "conexões WhatsApp")
+    canal = (body.canal if body.canal in (whatsapp.CANAL_CLOUD, whatsapp.CANAL_WUZAPI)
+             else whatsapp.CANAL_CLOUD)
+
+    # A URL do webhook é resolvida **antes** de a conexão existir. Ela depende
+    # só de configuração do servidor, então falhar depois do insert obrigaria
+    # a desfazer um documento que nunca precisou nascer — e o cliente lia o
+    # erro de configuração embrulhado num "não foi possível criar a
+    # instância", que aponta para a ponte em vez de para o .env.
+    url_webhook = _url_webhook_wuzapi() if canal == whatsapp.CANAL_WUZAPI else None
+
     conn = {
         "id": str(uuid.uuid4()),
         "tenant_id": user["tenant_id"],
         "nome": body.nome,
         "departamento_padrao_id": body.departamento_padrao_id,
-        "canal": (body.canal if body.canal in (whatsapp.CANAL_CLOUD, whatsapp.CANAL_WUZAPI)
-                  else whatsapp.CANAL_CLOUD),
+        "canal": canal,
         "phone_number_id": None,
         "waba_id": None,
         # Canal não oficial: a instância na WuzAPI, a chave com que assinamos
         # o webhook dela, e o QR corrente durante o pareamento.
         "wuzapi_id": None,
+        "wuzapi_nome": None,
         "wuzapi_hmac": None,
         "qrcode_atual": None,
         "token_cifrado": None,
@@ -178,7 +194,104 @@ async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admi
         "updated_at": _now(),
     }
     await db.whatsapp_connections.insert_one(conn)
+
+    # No canal não oficial a instância é criada agora, pelo produto. O cliente
+    # não cola id nem token: ele cria a conexão e o próximo passo já é o QR.
+    #
+    # Falha aqui **desfaz a conexão**. Sem isso sobraria uma conexão que a tela
+    # mostra, que não conecta e que não diz por quê — é o mesmo caso da empresa
+    # criada sem usuário administrador, que aparecia na lista e ninguém
+    # conseguia entrar nela.
+    if conn["canal"] == whatsapp.CANAL_WUZAPI:
+        try:
+            conn, aviso = await _provisionar_wuzapi(db, conn, url_webhook)
+        except Exception as e:
+            await db.whatsapp_connections.delete_one({"id": conn["id"]})
+            detalhe = str(e)
+            logger.error("Provisionamento da instância falhou, conexão desfeita: %s", detalhe)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Não foi possível criar a instância na ponte: {detalhe}",
+            )
+        saida = _serialize(conn, True)
+        if aviso:
+            saida["aviso"] = aviso
+        return saida
     return _serialize(conn, True)
+
+
+async def _provisionar_wuzapi(db, conn: dict, url_webhook: str) -> tuple[dict, str | None]:
+    """Cria a instância na ponte e guarda o que ela devolveu.
+
+    O token da instância é gerado aqui e nunca sai em claro: vai cifrado, como
+    o da Cloud API. A chave de assinatura do webhook também nasce aqui, uma por
+    conexão, porque é ela que o receptor usa para distinguir um evento da ponte
+    de um POST de qualquer um na internet.
+
+    Devolve `(conexão, aviso)`. O aviso é do webhook, e só dele: falhar em
+    criar a instância levanta, porque sem instância não há o que parear;
+    falhar em apontar o webhook não, porque a instância existe, envia e pode
+    ser consertada pela tela.
+    """
+    token = wuzapi.generate_token()
+    nome = wuzapi.nome_da_instancia(conn["id"])
+    # A chave de assinatura nasce aqui e vai para a ponte no mesmo passo. Ela
+    # já era gerada e guardada antes, mas nunca chegava a ser configurada lá —
+    # e a ponte, sem chave, manda o webhook **sem assinar**. Como o receptor é
+    # fail-closed, a conexão pareava, enviava e recusava toda mensagem
+    # recebida com 401: o caminho de volta fechado sem um erro sequer.
+    hmac_key = secrets.token_hex(32)
+    instancia = await wuzapi.create_instance(nome, token, url_webhook,
+                                             hmac_key=hmac_key)
+
+    # A instância nasce com o webhook já apontado, no próprio create — uma
+    # chamada em vez de duas, e sem janela em que ela exista sem saber para
+    # onde mandar mensagem. Mas **não se acredita nisso**: a WuzAPI já foi
+    # observada aceitando a configuração de webhook e gravando vazio quando a
+    # chave não é a que ela espera (ver `set_webhook`), respondendo `200
+    # success` do mesmo jeito. É o sintoma mais caro deste módulo, porque não
+    # deixa erro em lugar nenhum: a conexão pareia, envia normalmente e nunca
+    # recebe nada.
+    #
+    # Então confere-se o que ficou gravado, e `set_webhook` — que percorre as
+    # grafias e confere cada uma — é a segunda tentativa.
+    aviso = None
+    try:
+        atual = (await wuzapi.get_webhook(token)).get("webhook") or ""
+        if atual.rstrip("/") != url_webhook.rstrip("/"):
+            logger.info("Instância %s nasceu sem webhook (%r); reconfigurando", nome, atual)
+            await wuzapi.set_webhook(token, url_webhook)
+    except wuzapi.WuzapiError as e:
+        aviso = (f"Instância criada, mas o webhook não foi configurado: {e} "
+                 "Sem ele o número envia e as respostas dos contatos não chegam.")
+        logger.warning("Webhook da instância %s não configurado: %s", nome, e)
+
+    # A URL certa não basta: sem assinatura o receptor recusa tudo com 401, e o
+    # sintoma na tela é idêntico ao do webhook não configurado. A ponte diz se
+    # aceitou a chave, então isso é conferido em vez de presumido — é a mesma
+    # razão de o webhook ser relido logo acima.
+    if aviso is None and not instancia.get("hmac_ativo"):
+        aviso = ("Instância criada, mas a ponte não aceitou a chave de "
+                 "assinatura do webhook. Ela vai mandar os eventos sem assinar "
+                 "e o ZappZen recusa evento sem assinatura, então as respostas "
+                 "dos contatos não chegam.")
+        logger.warning("Instância %s ficou sem chave de assinatura", nome)
+
+    bloco = cripto.cifrar(token)
+    mudanca = {
+        # `create_instance` normaliza o id e levanta se não achar nenhum:
+        # instância sem id é instância órfã na ponte e cartão que nunca
+        # oferece o QR.
+        "wuzapi_id": instancia["id"],
+        "wuzapi_nome": nome,
+        "wuzapi_hmac": hmac_key,
+        "token_cifrado": bloco,
+        "token_mascara": bloco["mascara"],
+        "webhook_assinado": aviso is None,
+        "updated_at": _now(),
+    }
+    await db.whatsapp_connections.update_one({"id": conn["id"]}, {"$set": mudanca})
+    return {**conn, **mudanca}, aviso
 
 
 @router.get("/connections/{conn_id}")
@@ -217,7 +330,24 @@ async def update_connection(conn_id: str, body: ConnectionPatch, user=Depends(re
 @router.delete("/connections/{conn_id}")
 async def delete_connection(conn_id: str, user=Depends(require_tenant_admin)):
     db = get_db()
-    await _buscar(db, conn_id, user["tenant_id"])
+    conn = await _buscar(db, conn_id, user["tenant_id"])
+
+    # Instância criada pelo produto é apagada junto: sem isso o servidor da
+    # ponte acumularia sessão de WhatsApp abandonada a cada conexão excluída.
+    #
+    # Só a nossa, e é `nome_nosso` quem decide — a mesma ponte pode servir
+    # outros sistemas, e o token de administração apaga qualquer instância
+    # dela. Instância cadastrada à mão (sem o prefixo) é apenas desvinculada:
+    # quem a criou por fora é quem decide o destino dela.
+    if conn.get("wuzapi_id") and wuzapi.nome_nosso(conn.get("wuzapi_nome")):
+        try:
+            await wuzapi.delete_instance(conn["wuzapi_id"], conn.get("wuzapi_nome"))
+        except wuzapi.WuzapiError as e:
+            # Não impede a exclusão: a conexão é do cliente e ele pediu para
+            # remover. A instância órfã fica no log, para limpeza manual.
+            logger.warning("Instância %s (%s) não foi apagada: %s",
+                           conn.get("wuzapi_nome"), conn["wuzapi_id"], e)
+
     await db.whatsapp_connections.delete_one({"id": conn_id, "tenant_id": user["tenant_id"]})
     await db.user_connection_access.delete_many({"whatsapp_connection_id": conn_id})
     return {"ok": True}
@@ -394,7 +524,7 @@ async def salvar_wuzapi(conn_id: str, body: WuzapiIn, user=Depends(require_tenan
     # A chave é reaproveitada quando já existe: trocá-la a cada gravação
     # invalidaria os eventos em vôo, que a WuzAPI reentrega — eles chegariam
     # assinados com a chave anterior e seriam recusados como forjados.
-    hmac_key = conn.get("wuzapi_hmac") or secrets.token_hex(32)
+    hmac_key = (body.hmac_key or "").strip() or conn.get("wuzapi_hmac") or secrets.token_hex(32)
 
     aviso = None
     try:

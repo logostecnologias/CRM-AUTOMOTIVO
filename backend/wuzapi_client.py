@@ -89,10 +89,25 @@ def _base() -> str:
 
 
 def _admin_headers() -> dict:
-    return {
-        "Authorization": os.environ["WUZAPI_ADMIN_TOKEN"],
-        "Content-Type": "application/json",
-    }
+    """O token de administração da ponte, exigido em voz alta.
+
+    Era `os.environ[...]` cru, e o KeyError que ele levantava chegava ao
+    cliente pelo caminho mais infeliz possível: quem chama isto é o
+    provisionamento de uma conexão nova, que embrulha toda exceção na mensagem
+    da tela. O alerta dizia **`'WUZAPI_ADMIN_TOKEN'`** e mais nada — um nome de
+    variável entre aspas, sem dizer que é configuração faltando, onde ela mora
+    nem que a conexão foi desfeita por causa disso.
+    """
+    token = os.environ.get("WUZAPI_ADMIN_TOKEN")
+    if not token:
+        raise WuzapiError(
+            "WUZAPI_ADMIN_TOKEN não está no .env do backend. É o token de "
+            "administração da ponte, e é com ele que a instância de uma "
+            "conexão nova é criada — sem ele o canal não oficial não sai do "
+            "lugar. O valor é o da própria WuzAPI (em /etc/wuzapi/env na "
+            "máquina dela)."
+        )
+    return {"Authorization": token, "Content-Type": "application/json"}
 
 
 def _token_headers(token: str) -> dict:
@@ -165,7 +180,15 @@ async def _request(method: str, path: str, headers: dict, json: Any = None,
                 except Exception:
                     return {"raw": r.text}
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.RemoteProtocolError) as e:
-            last_err = WuzapiError(f"WuzAPI {method} {path} network error: {e}")
+            # O endereço entra na mensagem de propósito. A ponte escuta só em
+            # loopback na máquina dela e chega aqui por túnel SSH, então o modo
+            # normal de falhar é o túnel fora do ar — e "network error" sem
+            # dizer para onde se tentou ir manda procurar no lugar errado.
+            last_err = WuzapiError(
+                f"WuzAPI {method} {_base()}{path} network error: {e} "
+                "(a ponte escuta em loopback e chega por túnel: confira se a "
+                "porta de WUZAPI_URL está aberta nesta máquina)"
+            )
             logger.warning("WuzAPI network error on attempt %d/%d: %s", attempt, MAX_ATTEMPTS, e)
 
         if attempt < MAX_ATTEMPTS:
@@ -174,13 +197,116 @@ async def _request(method: str, path: str, headers: dict, json: Any = None,
     raise last_err or WuzapiError(f"WuzAPI {method} {path} failed after {MAX_ATTEMPTS} attempts")
 
 
-async def create_instance(name: str, token: str, webhook_url: str, events: str = "Message,ReadReceipt") -> dict:
+# Toda instância criada pelo produto nasce com este prefixo no nome, e é ele
+# que sustenta a única barreira que existe do lado da ponte.
+#
+# O motivo é concreto: a mesma WuzAPI pode servir outros sistemas — no caso
+# real, ela é a ponte de WhatsApp de um sistema financeiro — e o token de
+# administração apaga **qualquer** instância do servidor. Guardar esse token
+# aqui é necessário para o cliente conectar com um clique em vez de colar id e
+# token à mão, então o risco é contido em código: `nome_nosso` recusa operação
+# destrutiva em nome fora do prefixo, e é por ele que passa toda exclusão.
+PREFIXO_INSTANCIA = "zz_"
+
+
+def nome_da_instancia(conn_id: str) -> str:
+    return f"{PREFIXO_INSTANCIA}{conn_id}"
+
+
+def nome_nosso(nome: str | None) -> bool:
+    """O produto pode apagar esta instância?
+
+    Falso para instância criada à mão, para a de outro sistema e para nome
+    vazio. Na dúvida, não é nossa — errar para o lado de não apagar custa uma
+    instância órfã; errar para o outro derruba a ponte de WhatsApp de alguém.
+    """
+    return bool(nome) and nome.startswith(PREFIXO_INSTANCIA)
+
+
+# A chave com que a ponte assina cada webhook entra por `hmacKey` — e **só**
+# por essa grafia. Observado contra a instância real em 11/09/2026: `hmacKey`,
+# `hmackey` e `HmacKey` funcionam (o Go casa nome de campo sem olhar caixa),
+# `hmac_key` e `hmacSecret` são ignorados em silêncio.
+#
+# A confusão é que `hmac_key` existe na resposta, mas ali é **booleano**: diz
+# se a instância tem chave configurada, não qual é. Mandar a chave nesse nome
+# volta `hmac_key: false` com `200 success`, do mesmo jeito que a URL de
+# webhook na grafia errada volta vazia — a mesma armadilha, no mesmo endpoint.
+#
+# E o efeito é o pior possível: sem chave a ponte manda o webhook **sem
+# assinatura**, e o nosso receptor é fail-closed. A conexão pareia, envia
+# normalmente e recusa toda mensagem recebida com 401. Nada no caminho dá erro.
+CAMPO_HMAC = "hmacKey"
+
+
+async def create_instance(name: str, token: str, webhook_url: str,
+                          events: str = "Message,ReadReceipt",
+                          hmac_key: str | None = None) -> dict:
+    """Cria a instância. `name` deve vir de `nome_da_instancia`.
+
+    Recusa nome sem o prefixo: uma instância criada por nós que não pudesse ser
+    reconhecida depois seria uma que nunca poderia ser apagada, e o servidor
+    acumularia sessão de WhatsApp abandonada a cada conexão excluída.
+
+    Devolve o registro da ponte com dois campos normalizados: `id` (string, na
+    grafia que ela tiver usado) e `hmac_ativo` (a ponte confirmou que vai
+    assinar?). Quem chama precisa olhar o segundo: ele não é detalhe de
+    protocolo, é a diferença entre receber mensagem e descartar todas.
+    """
+    if not nome_nosso(name):
+        raise WuzapiError(
+            f"Nome de instância sem o prefixo {PREFIXO_INSTANCIA!r}: ela não "
+            "poderia ser reconhecida como nossa depois"
+        )
     body = {"name": name, "token": token, "webhook": webhook_url, "events": events}
+    if hmac_key:
+        body[CAMPO_HMAC] = hmac_key
     resp = await _request("POST", "/admin/users", _admin_headers(), body)
-    return resp.get("data", resp)  # {"id":..., "name":..., "token":..., ...}
+    dados = resp.get("data", resp)
+    if not isinstance(dados, dict):
+        raise WuzapiError(f"WuzAPI /admin/users: resposta inesperada ({dados!r})")
+    return {**dados, "id": _id_da_resposta(dados),
+            "hmac_ativo": bool(dados.get("hmac_key")) if hmac_key else False}
 
 
-async def delete_instance(wuzapi_id: str) -> dict:
+# O id da instância recém-criada, nas grafias em que ele já foi visto.
+#
+# Mesmo raciocínio do `_pick` das chaves de mídia e do laço de grafias de
+# `set_webhook`: a WuzAPI muda a caixa e o nome dos campos entre versões e
+# forks, e aqui o campo errado não dá erro — `.get("id")` volta `None`, vira
+# string vazia no documento, e a conexão fica com a instância criada de
+# verdade na ponte e **nenhuma referência a ela** do nosso lado. O efeito é o
+# pior dos dois: o cartão na tela diz "sem instância" e nunca oferece o QR, e
+# a instância órfã nunca é apagada porque ninguém sabe o id dela.
+_CHAVES_ID_INSTANCIA = ("id", "Id", "ID", "userID", "userId", "user_id")
+
+
+def _id_da_resposta(dados: dict) -> str:
+    for chave in _CHAVES_ID_INSTANCIA:
+        valor = dados.get(chave)
+        # `0` não conta: id vazio e id zero dão o mesmo estrago, e nenhuma
+        # versão da ponte numera instância a partir de zero.
+        if valor not in (None, "", 0):
+            return str(valor)
+    raise WuzapiError(
+        "WuzAPI criou a instância e não devolveu id reconhecível "
+        f"(chaves recebidas: {', '.join(sorted(dados)) or 'nenhuma'}). Sem ele "
+        "a conexão ficaria apontando para o nada e a instância, órfã na ponte."
+    )
+
+
+async def delete_instance(wuzapi_id: str, nome: str | None) -> dict:
+    """Apaga a instância, **se** ela for nossa.
+
+    O nome é exigido como argumento, e não buscado aqui, de propósito: quem
+    chama tem o documento da conexão em mão, e uma consulta a mais seria uma
+    chance a mais de a resposta vir de outra instância que não a que se quer
+    apagar.
+    """
+    if not nome_nosso(nome):
+        raise WuzapiError(
+            f"Instância {nome!r} não foi criada pelo ZappZen e não será apagada"
+        )
     return await _request("DELETE", f"/admin/users/{wuzapi_id}", _admin_headers())
 
 

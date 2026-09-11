@@ -53,9 +53,18 @@ export default function WhatsAppPage() {
       setConnections((cs) => [...cs, data]);
       setNewForm({ nome: "", departamento_padrao_id: "", canal: CANAL_CLOUD });
       setCreating(false);
-      setEditandoId(data.id);
-      toast.success(newForm.canal === CANAL_WUZAPI
-        ? "Conexão criada. Agora informe a instância e leia o QR."
+      // No canal não oficial a instância já foi criada pelo backend, então não
+      // há formulário a abrir: o próximo passo é o QR. Abrir o de credencial
+      // aqui faria o cliente encarar campos técnicos que ele não precisa
+      // preencher — foi o que essa tela fazia de errado.
+      setEditandoId(newForm.canal === CANAL_WUZAPI ? null : data.id);
+      // O aviso vem do webhook da instância, que é criada aqui junto com a
+      // conexão: ela existe e envia, mas não recebe. Some no toast de sucesso
+      // seria o pior desfecho — é exatamente a falha que não aparece em
+      // lugar nenhum depois (o cartão pareia, envia, e nada entra).
+      if (data.aviso) toast.warning(data.aviso, { duration: 12000 });
+      else toast.success(newForm.canal === CANAL_WUZAPI
+        ? "Conexão criada. Agora clique em Conectar e leia o QR no celular."
         : "Conexão criada. Agora cadastre o número da Cloud API.");
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail) || "Erro ao criar conexão");
@@ -291,12 +300,22 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
               <ArrowClockwise size={14} weight="bold" /> {busy ? "Verificando…" : "Verificar"}
             </button>
           )}
-          <button onClick={onEditar} disabled={busy} className="zz-btn" data-testid={`creds-btn-${conn.id}`}>
-            <Key size={14} weight="bold" />{" "}
-            {naoOficial
-              ? (cadastrado ? "Instância" : "Cadastrar instância")
-              : (cadastrado ? "Credenciais" : "Cadastrar número")}
-          </button>
+          {/* No canal não oficial este botão é escotilha, não caminho: a
+              instância é criada junto com a conexão, então ele só aparece para
+              conexão que ficou sem instância — a criada antes desta versão, ou
+              uma cujo provisionamento falhou. O cliente do fluxo normal nunca
+              o vê, e é o ponto: id e token de instância são operação de
+              infraestrutura, não passo de quem só quer ligar o WhatsApp. */}
+          {(!naoOficial || !cadastrado) && (
+            <button onClick={onEditar} disabled={busy}
+              className={naoOficial ? "zz-btn zz-btn-secondary" : "zz-btn"}
+              data-testid={`creds-btn-${conn.id}`}>
+              <Key size={14} weight="bold" />{" "}
+              {naoOficial
+                ? "Apontar instância existente"
+                : (cadastrado ? "Credenciais" : "Cadastrar número")}
+            </button>
+          )}
           <button onClick={onRemove} disabled={busy} className="p-3 border border-line hover:bg-danger-soft text-danger rounded-lg" title="Excluir conexão" data-testid={`delete-btn-${conn.id}`}>
             <Trash size={14} weight="bold" />
           </button>
@@ -371,7 +390,7 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
 // preenchê-lo troca a credencial. Devolver o token para "preencher o campo de
 // edição" o faria trafegar a cada abertura de tela.
 function FormWuzapi({ conn, busy, onSalvar }) {
-  const [form, setForm] = useState({ wuzapi_id: conn.wuzapi_id || "", token: "" });
+  const [form, setForm] = useState({ wuzapi_id: conn.wuzapi_id || "", token: "", hmac_key: "" });
   const [vendoToken, setVendoToken] = useState(false);
 
   const [enviar, enviando] = useAcao(async (e) => {
@@ -379,6 +398,7 @@ function FormWuzapi({ conn, busy, onSalvar }) {
     await onSalvar({
       wuzapi_id: form.wuzapi_id.trim(),
       token: form.token.trim() || null,
+      hmac_key: form.hmac_key.trim() || null,
     });
   });
 
@@ -386,18 +406,36 @@ function FormWuzapi({ conn, busy, onSalvar }) {
     <form onSubmit={enviar} className="mt-4 pt-4 border-t border-line"
       data-testid={`wuzapi-form-${conn.id}`}>
       <div className="text-xs text-ink-2 mb-3 max-w-3xl">
-        A instância é criada no servidor da ponte, fora do ZappZen — de propósito: criá-la
-        por aqui exigiria que o sistema guardasse o token de <strong>administração</strong> da
-        ponte, que apaga qualquer instância do servidor, inclusive de outros sistemas que a
-        compartilham. A instância é validada agora: se o token não responder, nada é gravado.
+        Esta conexão está sem instância. Conexão nova cria a instância sozinha — este
+        formulário existe para <strong>apontar uma que já existe</strong> no servidor da
+        ponte, criada à mão ou sobrando de um provisionamento que falhou. A instância é
+        validada agora: se o token não responder, nada é gravado.
+      </div>
+      {/* O aviso da chave de assinatura fica aqui, antes dos campos, porque é a
+          única coisa deste formulário que não dá para consertar depois: a ponte
+          só aceita a chave no momento em que a instância é criada, e a
+          listagem dela não diz se tem uma. Ou seja, ninguém — nem o ZappZen —
+          consegue conferir isto olhando; só se descobre quando a mensagem do
+          contato não chega. Daí dizer de antemão, e apontar o caminho que
+          funciona sozinho. */}
+      <div className="text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg mb-3 max-w-3xl">
+        <strong>A chave de assinatura precisa ser a mesma com que a instância foi criada.</strong>{" "}
+        A ponte só a aceita na criação, e não há como consultá-la depois — se ela não
+        bater, o número pareia, envia e as respostas dos contatos são recusadas sem
+        aparecer em lugar nenhum. Se você não tem essa chave, exclua esta conexão e crie
+        outra: aí o ZappZen provisiona a instância e a chave sozinho.
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
             ID da instância
           </label>
+          {/* O exemplo e generico de proposito. Um placeholder com a cara de um
+              id real faz o campo vazio parecer preenchido, e a pessoa clica em
+              salvar sem digitar nada. Aconteceu na primeira vez que esta tela
+              foi usada. */}
           <input required className="zz-input" value={form.wuzapi_id}
-            placeholder="ac672a0fe2c8cc04782e95ea859b7f56"
+            placeholder="id da instancia na ponte"
             onChange={(e) => setForm({ ...form, wuzapi_id: e.target.value })}
             data-testid={`wuzid-${conn.id}`} />
         </div>
@@ -417,6 +455,16 @@ function FormWuzapi({ conn, busy, onSalvar }) {
               {vendoToken ? <EyeSlash size={16} /> : <Eye size={16} />}
             </button>
           </div>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
+            Chave de assinatura do webhook
+          </label>
+          <input className="zz-input" type="password" autoComplete="new-password"
+            value={form.hmac_key}
+            placeholder={conn.wuzapi_id ? "deixe vazio para manter a atual" : "a chave usada ao criar a instância"}
+            onChange={(e) => setForm({ ...form, hmac_key: e.target.value })}
+            data-testid={`wuzhmac-${conn.id}`} />
         </div>
       </div>
       <div className="flex justify-end mt-4">
