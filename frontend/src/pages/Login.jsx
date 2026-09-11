@@ -104,9 +104,12 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-8 text-xs text-ink-3 border-t border-line pt-4 font-mono">
-            <div>Super Admin de teste: <span className="text-ink">admin@zappzen.com</span> / <span className="text-ink">admin@123</span></div>
-          </div>
+          {/* Nada de credencial de exemplo aqui. Esta é a única tela pública do
+              produto: o que aparece nela está na internet, indexável, e ia no
+              bundle de produção. O e-mail do super admin é real e continua
+              sendo — publicá-lo entrega metade do login de quem pode entrar em
+              qualquer empresa, e deixa o resto por conta da força bruta. Havia
+              uma linha igual com o usuário comum, tirada em 222679c. */}
 
           {/* Âncora comum, não Link do React Router: as páginas legais são
               arquivos estáticos servidos pelo Caddy, fora do SPA. Um Link
