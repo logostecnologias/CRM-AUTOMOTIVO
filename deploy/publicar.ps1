@@ -94,8 +94,22 @@ cd /opt/zappzen
 # falhava calado e ela ficava para trás ocupando disco.
 apagar() {
     [ -e "$1" ] || return 0
-    chmod -R u+w "$1"
-    rm -rf "$1"
+    # O `|| true` e o sudo de reserva vem de um caso real: em 11/09/2026 um
+    # script rodado com `sudo python` dentro de /opt/zappzen/backend deixou sete
+    # .pyc de root em `__pycache__`. Aquela arvore virou `backend.antigo`, o
+    # chmod passou a falhar nela, e como `apagar` roda ANTES da troca das
+    # arvores o `set -e` matava todo deploy ali — por doze dias, sem ninguem
+    # notar, porque o erro se perdia no ruido do tar.
+    #
+    # O sudo e limitado a /opt/zappzen de proposito: `rm -rf` com sudo sobre
+    # caminho arbitrario e a linha que ninguem quer escrever.
+    chmod -R u+w "$1" 2>/dev/null || true
+    if ! rm -rf "$1" 2>/dev/null; then
+        case "$1" in
+            /opt/zappzen/*) sudo -n rm -rf "$1" ;;
+            *) echo "recusando apagar fora de /opt/zappzen: $1" >&2; return 1 ;;
+        esac
+    fi
 }
 
 # O backend vai para uma pasta nova e é trocado por `mv`, igual ao frontend, e
@@ -154,6 +168,11 @@ for i in $(seq 1 20); do
     if curl -sf --max-time 5 http://127.0.0.1:8000/api/health; then
         echo
         apagar /opt/zappzen/backend.antigo
+        # Sentinela. Sem ela, um ssh morto no meio do script — o que o
+        # PowerShell fazia ao ver a primeira linha de stderr do tar — fica
+        # indistinguivel de um deploy que deu certo: a saida parcial tem a
+        # mesma cara. Quem publica confere ESTA linha, nao a ausencia de erro.
+        echo "DEPLOY-OK"
         exit 0
     fi
     sleep 2
@@ -169,8 +188,43 @@ exit 1
 # UTF-8 **com** BOM — e trocá-la de dentro do script não surte efeito, porque o
 # 5.1 já a leu na abertura do processo. Então o conserto é no lado remoto, onde
 # funciona independente do que o PowerShell faça.
-$remoto | ssh -o BatchMode=yes $Alvo "sed '1s/^\xef\xbb\xbf//' | bash -s"
-if ($LASTEXITCODE -ne 0) { throw "deploy remoto falhou (veja: ssh $Alvo journalctl -u zappzen -n 50)" }
+#
+# O `$ErrorActionPreference = 'Continue'` vale SO neste bloco, e nao e
+# preferencia de estilo: com `Stop`, a primeira linha que o `tar` remoto
+# escreve em stderr (os avisos `SCHILY.fflags`, inofensivos) vira erro
+# terminante, e o PowerShell derruba o pipeline no MEIO — matando o ssh e,
+# com ele, o bash remoto, entre extrair a arvore nova e troca-la pela antiga.
+# Producao ficava intacta e o deploy nao acontecia, com a mesma cara de
+# sucesso. Aconteceu em 23/09/2026, duas vezes seguidas.
+$saidaRemota = & {
+    $ErrorActionPreference = 'Continue'
+    $remoto | ssh -o BatchMode=yes $Alvo "sed '1s/^\xef\xbb\xbf//' | tr -d '\r' | bash -s"
+}
+$codigoRemoto = $LASTEXITCODE
+$saidaRemota | ForEach-Object { Write-Host "    $_" }
+
+# Duas condicoes, e as duas precisam valer. O codigo de saida sozinho nao
+# basta: um ssh morto pelo lado de ca termina sem o script remoto ter chegado
+# ao fim. A sentinela e o que prova que ele chegou.
+if ($codigoRemoto -ne 0 -or ($saidaRemota -notcontains "DEPLOY-OK")) {
+    throw "deploy remoto nao confirmou (veja: ssh $Alvo journalctl -u zappzen -n 50)"
+}
+
+# E a pergunta que ninguem fazia: o que esta publicado e o que acabou de ser
+# compilado? E a unica conferencia que teria pego o deploy silencioso — o
+# servico respondia, o health check passava, e o bundle no ar era o de duas
+# versoes atras.
+Passo "Conferindo o que ficou publicado"
+$bundleLocal = (Get-ChildItem (Join-Path $Raiz "frontend/build/static/js") -Filter "main.*.js" |
+    Where-Object { $_.Name -notlike "*.map" } | Select-Object -First 1).Name
+$bundlePublicado = & {
+    $ErrorActionPreference = 'Continue'
+    ssh -o BatchMode=yes $Alvo "ls /opt/zappzen/frontend/static/js/"
+}
+if ($bundlePublicado -notcontains $bundleLocal) {
+    throw "o servidor nao serve o build desta execucao ($bundleLocal); a publicacao nao valeu"
+}
+Write-Host "    $bundleLocal no ar" -ForegroundColor DarkGray
 
 Write-Host ""
 Write-Host "Publicado: https://zappzen.atendimentoautomatizado.com.br" -ForegroundColor Green
