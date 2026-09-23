@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
-import { Plus, Trash, X, ArrowUp, ArrowDown } from "@phosphor-icons/react";
+import { Plus, Trash, ArrowUp, ArrowDown } from "@phosphor-icons/react";
+import Modal from "@/components/ui/Modal";
 
 const CORES = ["#64748B", "#2563EB", "#F97316", "#8B5CF6", "#10B981", "#EF4444", "#0F172A", "#F59E0B"];
 const TIPOS = [["aberta", "Em aberto"], ["ganho", "Ganho"], ["perdido", "Perdido"]];
@@ -36,8 +36,8 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
 
   const remover = (i) => setEtapas(etapas.filter((_, j) => j !== i));
 
-  const [salvar, salvando] = useAcao(async (e) => {
-    e?.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const salvar = async () => {
     try {
       await api.patch(`/pipelines/${pipeline.id}`,
         { nome, etapas: etapas.map(({ id, nome: n, cor, tipo }) => ({ id, nome: n, cor, tipo })) },
@@ -53,94 +53,76 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
       if (ex.response?.status === 409) setConflito(detalhe);
       else toast.error(detalhe);
     }
-  });
+  };
 
   const restantes = etapas.filter((e) => e.id);
 
   return (
-    <div className="border border-line-strong bg-surface p-6 mb-4 zz-panel-hard rounded-lg" data-testid="funil-config">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="font-heading text-xl font-black tracking-tighter">Etapas do funil</div>
-          <p className="text-xs text-ink-2 mt-1">
-            A etapa marcada como <strong>Ganho</strong> ou <strong>Perdido</strong> é a que fecha o
-            negócio e alimenta os relatórios de conversão.
-          </p>
-        </div>
-        <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
+    <Modal titulo="Etapas do funil" largo
+      descricao="A etapa marcada como Ganho ou Perdido é a que fecha o negócio e alimenta os relatórios de conversão."
+      onFechar={onClose} onSalvar={salvar} testId="funil-config"
+      rodape={(
+        <button type="button" onClick={adicionar} className="zz-btn zz-btn-secondary mr-auto"
+          data-testid="add-etapa">
+          <Plus size={13} weight="bold" /> Adicionar etapa
+        </button>
+      )}>
+      <div className="max-w-sm">
+        <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">
+          Nome do funil
+        </label>
+        <input required className="zz-input" data-testid="funil-nome"
+          value={nome} onChange={(e) => setNome(e.target.value)} />
       </div>
 
-      <form onSubmit={salvar}>
-        <div className="mb-4 max-w-sm">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">
-            Nome do funil
-          </label>
-          <input required className="zz-input h-8 py-1 text-sm" data-testid="funil-nome"
-            value={nome} onChange={(e) => setNome(e.target.value)} />
-        </div>
-
-        <div className="border border-line mb-3 rounded-lg">
-          {etapas.map((etapa, i) => (
-            <div key={etapa.id || `nova-${i}`}
-              className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-b-0"
-              data-testid={`etapa-row-${i}`}>
-              <div className="flex gap-0.5">
-                <button type="button" onClick={() => mover(i, -1)} disabled={i === 0}
-                  className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowUp size={11} weight="bold" /></button>
-                <button type="button" onClick={() => mover(i, 1)} disabled={i === etapas.length - 1}
-                  className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowDown size={11} weight="bold" /></button>
-              </div>
-              <input required className="zz-input h-7 py-0 text-sm flex-1" value={etapa.nome}
-                onChange={(ev) => alterar(i, { nome: ev.target.value })} />
-              <select className="zz-input h-7 py-0 text-xs w-28" value={etapa.tipo}
-                onChange={(ev) => alterar(i, { tipo: ev.target.value })}>
-                {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
-              </select>
-              <div className="flex gap-0.5">
-                {CORES.map((c) => (
-                  <button key={c} type="button" onClick={() => alterar(i, { cor: c })}
-                    className={`w-5 h-5 rounded-md border-2 ${etapa.cor === c ? "border-ink" : "border-transparent"}`}
-                    style={{ background: c }} />
-                ))}
-              </div>
-              <button type="button" onClick={() => remover(i)} disabled={etapas.length === 1}
-                className="p-1 hover:bg-danger-soft text-danger disabled:opacity-20">
-                <Trash size={13} weight="bold" />
-              </button>
+      <div className="border border-line mb-3 rounded-lg">
+        {etapas.map((etapa, i) => (
+          <div key={etapa.id || `nova-${i}`}
+            className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-b-0"
+            data-testid={`etapa-row-${i}`}>
+            <div className="flex gap-0.5">
+              <button type="button" onClick={() => mover(i, -1)} disabled={i === 0}
+                className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowUp size={11} weight="bold" /></button>
+              <button type="button" onClick={() => mover(i, 1)} disabled={i === etapas.length - 1}
+                className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowDown size={11} weight="bold" /></button>
             </div>
-          ))}
-        </div>
-
-        {conflito && (
-          <div className="border border-warning bg-warning-soft p-3 mb-3 rounded-lg">
-            <div className="text-sm text-ink mb-2">{conflito}</div>
-            <div className="flex gap-2 items-center">
-              <select className="zz-input h-8 py-1 text-sm max-w-xs" data-testid="mover-para"
-                value={moverPara} onChange={(e) => setMoverPara(e.target.value)}>
-                <option value="">Mover os negócios para…</option>
-                {restantes.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
-              </select>
-              <button type="submit" disabled={!moverPara} className="zz-btn text-xs py-1 disabled:opacity-40">
-                Mover e salvar
-              </button>
+            <input required className="zz-input h-7 py-0 text-sm flex-1" value={etapa.nome}
+              onChange={(ev) => alterar(i, { nome: ev.target.value })} />
+            <select className="zz-input h-7 py-0 text-xs w-28" value={etapa.tipo}
+              onChange={(ev) => alterar(i, { tipo: ev.target.value })}>
+              {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+            </select>
+            <div className="flex gap-0.5">
+              {CORES.map((c) => (
+                <button key={c} type="button" onClick={() => alterar(i, { cor: c })}
+                  className={`w-5 h-5 rounded-md border-2 ${etapa.cor === c ? "border-ink" : "border-transparent"}`}
+                  style={{ background: c }} />
+              ))}
             </div>
-          </div>
-        )}
-
-        <div className="flex gap-2 justify-between">
-          <button type="button" onClick={adicionar} className="zz-btn zz-btn-secondary text-xs py-1"
-            data-testid="add-etapa">
-            <Plus size={13} weight="bold" /> Adicionar etapa
-          </button>
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="zz-btn zz-btn-secondary text-xs py-1">
-              Cancelar
+            <button type="button" onClick={() => remover(i)} disabled={etapas.length === 1}
+              className="p-1 hover:bg-danger-soft text-danger disabled:opacity-20">
+              <Trash size={13} weight="bold" />
             </button>
-            <button type="submit" className="zz-btn text-xs py-1" data-testid="funil-submit"
-              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
+          </div>
+        ))}
+      </div>
+
+      {conflito && (
+        <div className="border border-warning bg-warning-soft p-3 mb-3 rounded-lg">
+          <div className="text-sm text-ink mb-2">{conflito}</div>
+          <div className="flex gap-2 items-center">
+            <select className="zz-input h-8 py-1 text-sm max-w-xs" data-testid="mover-para"
+              value={moverPara} onChange={(e) => setMoverPara(e.target.value)}>
+              <option value="">Mover os negócios para…</option>
+              {restantes.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
+            </select>
+            <button type="submit" disabled={!moverPara} className="zz-btn text-xs py-1 disabled:opacity-40">
+              Mover e salvar
+            </button>
           </div>
         </div>
-      </form>
-    </div>
+      )}
+
+    </Modal>
   );
 }

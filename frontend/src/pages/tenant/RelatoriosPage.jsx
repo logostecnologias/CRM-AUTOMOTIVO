@@ -516,7 +516,7 @@ function FunilAba() {
           {funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
         </select>
       )}
-      <FunilMetricas pipelineId={funilId} onClose={() => {}} />
+      <FunilMetricas pipelineId={funilId} />
     </div>
   );
 }

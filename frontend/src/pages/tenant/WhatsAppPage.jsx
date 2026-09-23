@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import {
   WhatsappLogo, CheckCircle, XCircle, ArrowClockwise, Plus, Trash, Key,
   WarningCircle, Eye, EyeSlash,
@@ -41,7 +41,8 @@ export default function WhatsAppPage() {
     api.get("/bots").then((r) => setBots(r.data)).catch(() => {});
   }, []);
 
-  const [createConnection, criando] = useAcao(async (e) => {
+  // A trava de clique repetido vem do Modal, que embrulha o submit.
+  const createConnection = async (e) => {
     e.preventDefault();
     if (!newForm.nome.trim()) return;
     try {
@@ -69,7 +70,7 @@ export default function WhatsAppPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail) || "Erro ao criar conexão");
     }
-  });
+  };
 
   const salvarCredenciais = async (id, corpo) => {
     setBusyId(id);
@@ -155,7 +156,12 @@ export default function WhatsAppPage() {
       </div>
 
       {creating && (
-        <form onSubmit={createConnection} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 zz-panel-hard rounded-lg">
+        <Modal titulo="Nova conexão"
+          descricao="Um número de WhatsApp com seu próprio departamento padrão."
+          onFechar={() => setCreating(false)} onSalvar={createConnection}
+          salvarLabel="Criar conexão" salvandoLabel="Criando…"
+          testId="new-connection-modal"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome da conexão</label>
             <input autoFocus required data-testid="new-connection-name" className="zz-input"
@@ -183,7 +189,7 @@ export default function WhatsAppPage() {
               documentação: é o único momento em que alguém decide entre um
               número protegido e um número sob risco de bloqueio. */}
           {newForm.canal === CANAL_WUZAPI && (
-            <div className="sm:col-span-2 lg:col-span-3 flex gap-3 items-start border border-warning bg-warning-soft rounded-lg p-3.5">
+            <div className="sm:col-span-2 flex gap-3 items-start border border-warning bg-warning-soft rounded-lg p-3.5">
               <WarningCircle size={18} weight="bold" className="text-warning shrink-0 mt-0.5" />
               <div className="text-xs text-ink-2 space-y-1.5">
                 <div>
@@ -200,13 +206,7 @@ export default function WhatsAppPage() {
               </div>
             </div>
           )}
-
-          <div className="sm:col-span-2 lg:col-span-3 flex gap-2 justify-end">
-            <button type="button" onClick={() => setCreating(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" className="zz-btn" data-testid="new-connection-submit"
-              disabled={criando}>{criando ? "Criando…" : "Criar conexão"}</button>
-          </div>
-        </form>
+        </Modal>
       )}
 
       {connections.length === 0 && !creating && (
@@ -353,8 +353,8 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
       )}
 
       {editando && (naoOficial
-        ? <FormWuzapi conn={conn} busy={busy} onSalvar={onSalvarWuzapi} />
-        : <FormCredenciais conn={conn} busy={busy} onSalvar={onSalvarCredenciais} />
+        ? <FormWuzapi conn={conn} onSalvar={onSalvarWuzapi} onFechar={onEditar} />
+        : <FormCredenciais conn={conn} onSalvar={onSalvarCredenciais} onFechar={onEditar} />
       )}
 
       {naoOficial && cadastrado && !editando && (
@@ -389,23 +389,23 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
 // numa conexão já cadastrada: deixá-lo em branco mantém o que está guardado, e
 // preenchê-lo troca a credencial. Devolver o token para "preencher o campo de
 // edição" o faria trafegar a cada abertura de tela.
-function FormWuzapi({ conn, busy, onSalvar }) {
+function FormWuzapi({ conn, onSalvar, onFechar }) {
   const [form, setForm] = useState({ wuzapi_id: conn.wuzapi_id || "", token: "", hmac_key: "" });
   const [vendoToken, setVendoToken] = useState(false);
 
-  const [enviar, enviando] = useAcao(async (e) => {
-    e.preventDefault();
+  const enviar = async () => {
     await onSalvar({
       wuzapi_id: form.wuzapi_id.trim(),
       token: form.token.trim() || null,
       hmac_key: form.hmac_key.trim() || null,
     });
-  });
+  };
 
   return (
-    <form onSubmit={enviar} className="mt-4 pt-4 border-t border-line"
-      data-testid={`wuzapi-form-${conn.id}`}>
-      <div className="text-xs text-ink-2 mb-3 max-w-3xl">
+    <Modal titulo="Apontar instância existente" onFechar={onFechar} onSalvar={enviar}
+      salvarLabel="Salvar instância" salvandoLabel="Validando…"
+      testId={`wuzapi-form-${conn.id}`}>
+      <div className="text-xs text-ink-2">
         Esta conexão está sem instância. Conexão nova cria a instância sozinha — este
         formulário existe para <strong>apontar uma que já existe</strong> no servidor da
         ponte, criada à mão ou sobrando de um provisionamento que falhou. A instância é
@@ -418,7 +418,7 @@ function FormWuzapi({ conn, busy, onSalvar }) {
           consegue conferir isto olhando; só se descobre quando a mensagem do
           contato não chega. Daí dizer de antemão, e apontar o caminho que
           funciona sozinho. */}
-      <div className="text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg mb-3 max-w-3xl">
+      <div className="text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg">
         <strong>A chave de assinatura precisa ser a mesma com que a instância foi criada.</strong>{" "}
         A ponte só a aceita na criação, e não há como consultá-la depois — se ela não
         bater, o número pareia, envia e as respostas dos contatos são recusadas sem
@@ -467,13 +467,7 @@ function FormWuzapi({ conn, busy, onSalvar }) {
             data-testid={`wuzhmac-${conn.id}`} />
         </div>
       </div>
-      <div className="flex justify-end mt-4">
-        <button type="submit" className="zz-btn" disabled={busy || enviando}
-          data-testid={`wuzapi-submit-${conn.id}`}>
-          <Key size={16} weight="bold" /> {enviando ? "Validando…" : "Salvar instância"}
-        </button>
-      </div>
-    </form>
+    </Modal>
   );
 }
 
@@ -572,7 +566,7 @@ function PainelPareamento({ conn, busy, onConectar, onDesconectar, onSair, onRec
 }
 
 
-function FormCredenciais({ conn, busy, onSalvar }) {
+function FormCredenciais({ conn, onSalvar, onFechar }) {
   const [form, setForm] = useState({
     phone_number_id: conn.phone_number_id || "",
     waba_id: conn.waba_id || "",
@@ -580,23 +574,24 @@ function FormCredenciais({ conn, busy, onSalvar }) {
   });
   const [vendoToken, setVendoToken] = useState(false);
 
-  const [enviar, enviando] = useAcao(async (e) => {
-    e.preventDefault();
+  const enviar = async () => {
     await onSalvar({
       phone_number_id: form.phone_number_id.trim(),
       waba_id: form.waba_id.trim(),
       token: form.token.trim() || null,
     });
-  });
+  };
 
   return (
-    <form onSubmit={enviar} className="mt-4 pt-4 border-t border-line"
-      data-testid={`creds-form-${conn.id}`}>
-      <div className="text-xs text-ink-2 mb-3 max-w-3xl">
+    <Modal titulo={conn.phone_number_id ? "Credenciais da conexão" : "Cadastrar número"}
+      onFechar={onFechar} onSalvar={enviar}
+      salvarLabel="Validar e salvar" salvandoLabel="Validando com a Meta…"
+      testId={`creds-form-${conn.id}`}>
+      <div className="text-xs text-ink-2">
         Os três valores estão no painel da Meta, em <strong>WhatsApp &gt; Configuração da API</strong>.
         O número é validado agora: se algo estiver errado, nada é gravado.
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
             ID do número (phone number ID)
@@ -615,7 +610,7 @@ function FormCredenciais({ conn, busy, onSalvar }) {
             onChange={(e) => setForm({ ...form, waba_id: e.target.value })}
             data-testid={`waba-${conn.id}`} />
         </div>
-        <div>
+        <div className="sm:col-span-2">
           <label className="text-[10px] font-bold uppercase tracking-wider text-ink-3 block mb-1.5">
             Token de acesso {conn.token_mascara && <span className="font-mono normal-case text-ink-2">({conn.token_mascara})</span>}
           </label>
@@ -634,13 +629,7 @@ function FormCredenciais({ conn, busy, onSalvar }) {
           </div>
         </div>
       </div>
-      <div className="flex justify-end mt-4">
-        <button type="submit" className="zz-btn" disabled={busy || enviando}
-          data-testid={`save-creds-${conn.id}`}>
-          {busy || enviando ? "Validando com a Meta…" : "Validar e salvar"}
-        </button>
-      </div>
-    </form>
+    </Modal>
   );
 }
 

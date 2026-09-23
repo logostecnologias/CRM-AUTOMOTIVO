@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -34,8 +34,8 @@ export default function UsersPage() {
     }));
   };
 
-  const [save, salvando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const save = async () => {
     try {
       if (editing?.id) {
         const payload = { name: form.name, connection_ids: form.connection_ids };
@@ -50,7 +50,7 @@ export default function UsersPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao salvar");
     }
-  });
+  };
 
   const remove = async (id) => {
     if (!(await confirmToast("Excluir usuário?", { confirmLabel: "Excluir" }))) return;
@@ -70,7 +70,10 @@ export default function UsersPage() {
       </div>
 
       {editing && (
-        <form onSubmit={save} className="mb-6 border border-line-strong bg-surface p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 zz-panel-hard rounded-lg">
+        <Modal titulo={editing?.id ? "Editar usuário" : "Novo usuário"}
+          descricao="Atendente só vê as conversas das conexões liberadas para ele."
+          onFechar={() => setEditing(null)} onSalvar={save} testId="user-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Nome"><input required className="zz-input" data-testid="user-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label="Email"><input required type="email" disabled={!!editing?.id} className="zz-input" data-testid="user-email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
           <Field label={editing?.id ? "Nova senha (opcional)" : "Senha"}>
@@ -82,7 +85,7 @@ export default function UsersPage() {
               <option value="tenant_admin">Admin</option>
             </select>
           </Field>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Conexões liberadas</label>
             {connections.length === 0 ? (
               <div className="text-xs text-ink-3 italic">Nenhuma conexão de WhatsApp criada ainda.</div>
@@ -100,12 +103,7 @@ export default function UsersPage() {
               <div className="text-xs text-ink-3 mt-1">Admins ignoram esta restrição (acesso total).</div>
             )}
           </div>
-          <div className="col-span-2 flex gap-2 justify-end">
-            <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" className="zz-btn" data-testid="user-submit"
-              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
-          </div>
-        </form>
+        </Modal>
       )}
 
       <div className="border border-line bg-surface rounded-lg">

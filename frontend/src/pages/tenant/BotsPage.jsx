@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { Plus, PencilSimple, Copy, Trash, Pause, Play } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -21,8 +22,8 @@ export default function BotsPage() {
     api.get("/whatsapp/connections").then((r) => setConnections(r.data)).catch(() => {});
   }, []);
 
-  const [create, criando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const create = async () => {
     if (!name.trim()) return;
     try {
       const { data } = await api.post("/bots", { name, connection_id: connectionId || null });
@@ -32,7 +33,7 @@ export default function BotsPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao criar robô");
     }
-  });
+  };
 
   const [duplicate, duplicando] = useAcao(async (id) => {
     try {
@@ -69,23 +70,26 @@ export default function BotsPage() {
       </div>
 
       {creating && (
-        <form onSubmit={create} className="mb-6 border border-line-strong bg-surface p-5 flex gap-3 items-end zz-panel-hard rounded-lg">
-          <div className="flex-1">
-            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome do Robô</label>
-            <input autoFocus data-testid="new-bot-name" className="zz-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Robô de Vendas" />
+        <Modal titulo="Criar robô"
+          descricao="O robô é criado já com um fluxo em branco, e o editor abre em seguida."
+          onFechar={() => setCreating(false)} onSalvar={create}
+          salvarLabel="Criar" salvandoLabel="Criando…" testId="new-bot-modal">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome do Robô</label>
+              <input autoFocus required data-testid="new-bot-name" className="zz-input" value={name}
+                onChange={(e) => setName(e.target.value)} placeholder="Ex: Robô de Vendas" />
+            </div>
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Conexão</label>
+              <select className="zz-input" data-testid="new-bot-connection" value={connectionId}
+                onChange={(e) => setConnectionId(e.target.value)}>
+                <option value="">— nenhuma —</option>
+                {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="w-56">
-            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Conexão</label>
-            <select className="zz-input" data-testid="new-bot-connection" value={connectionId}
-              onChange={(e) => setConnectionId(e.target.value)}>
-              <option value="">— nenhuma —</option>
-              {connections.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
-          </div>
-          <button type="submit" className="zz-btn" data-testid="new-bot-submit"
-            disabled={criando}>{criando ? "Criando…" : "Criar"}</button>
-          <button type="button" onClick={() => setCreating(false)} className="zz-btn zz-btn-secondary">Cancelar</button>
-        </form>
+        </Modal>
       )}
 
       {bots.length === 0 ? (

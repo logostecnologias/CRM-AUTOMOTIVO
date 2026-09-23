@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash, PencilSimple, X } from "@phosphor-icons/react";
+import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { confirmToast } from "@/lib/confirm-toast";
 import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { DIAS_GRADE, moeda } from "./comum";
 import { CampoHora } from "./CampoHora";
 
@@ -487,31 +488,5 @@ function Ativo({ valor, onChange, nota }) {
         onChange={(e) => onChange(e.target.checked)} />
       <span>Ativo<span className="block text-[11px] text-ink-3">{nota}</span></span>
     </label>
-  );
-}
-
-function Modal({ titulo, children, onFechar, onSalvar, largo }) {
-  // A trava de clique repetido vive aqui dentro, e não em cada tela que abre um
-  // Modal. Foi confiar na lembrança de quem escreve a tela que produziu dois
-  // profissionais com um duplo clique em "Salvar".
-  const [salvar, salvando] = useAcao(onSalvar);
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className={`bg-surface border border-line rounded-2xl w-full ${
-        largo ? "max-w-4xl" : "max-w-2xl"} max-h-[90vh] flex flex-col`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-line">
-          <h2 className="font-heading text-xl font-black tracking-tighter">{titulo}</h2>
-          <button onClick={onFechar} className="zz-btn-icon"><X size={18} weight="bold" /></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">{children}</div>
-        <div className="border-t border-line px-6 py-4 flex justify-end gap-2">
-          <button className="zz-btn zz-btn-secondary" onClick={onFechar}>Cancelar</button>
-          <button className="zz-btn" onClick={salvar} disabled={salvando}
-            data-testid="modal-salvar">
-            {salvando ? "Salvando…" : "Salvar"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

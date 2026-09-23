@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { formatBRL } from "@/lib/currency";
-import { X, TrendUp } from "@phosphor-icons/react";
+import { TrendUp } from "@phosphor-icons/react";
 
 const JANELAS = [
   ["30", "Últimos 30 dias"],
@@ -27,7 +27,7 @@ function Caixa({ rotulo, valor, hint }) {
   );
 }
 
-export default function FunilMetricas({ pipelineId, onClose }) {
+export default function FunilMetricas({ pipelineId, semMoldura }) {
   const [dados, setDados] = useState(null);
   const [janela, setJanela] = useState("90");
 
@@ -38,23 +38,19 @@ export default function FunilMetricas({ pipelineId, onClose }) {
   }, [pipelineId, janela]);
 
   return (
-    <div className="border border-line-strong bg-surface-2 p-6 mb-4 zz-panel-hard rounded-lg" data-testid="funil-metricas">
+    <div className={semMoldura ? "" : "border border-line-strong bg-surface-2 p-6 mb-4 zz-panel-hard rounded-lg"}
+      data-testid="funil-metricas">
       <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <TrendUp size={18} weight="bold" />
-          <div className="font-heading text-xl font-black tracking-tighter">Desempenho do funil</div>
-        </div>
-        <div className="flex gap-2 items-center">
-          <select className="zz-input h-8 py-1 text-xs" data-testid="metricas-janela"
-            value={janela} onChange={(e) => setJanela(e.target.value)}>
-            {JANELAS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
-          </select>
-          {onClose && (
-            <button onClick={onClose} className="p-1.5 hover:bg-surface-3">
-              <X size={15} weight="bold" />
-            </button>
-          )}
-        </div>
+        {semMoldura ? <div /> : (
+          <div className="flex items-center gap-2">
+            <TrendUp size={18} weight="bold" />
+            <div className="font-heading text-xl font-black tracking-tighter">Desempenho do funil</div>
+          </div>
+        )}
+        <select className="zz-input h-8 py-1 text-xs" data-testid="metricas-janela"
+          value={janela} onChange={(e) => setJanela(e.target.value)}>
+          {JANELAS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+        </select>
       </div>
 
       {!dados ? (

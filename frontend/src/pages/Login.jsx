@@ -54,7 +54,7 @@ export default function LoginPage() {
             Todo o WhatsApp da sua<br/>empresa em <span className="text-info">um só painel.</span>
           </h1>
           <p className="text-ink-2 text-base leading-relaxed max-w-md mb-8">
-            Atendimento em equipe, agentes de IA, CRM com funil, agenda e campanhas — sobre a API oficial da Meta, com várias empresas no mesmo lugar.
+            Atendimento em equipe, agentes de IA, CRM com funil, agenda e campanhas. Várias empresas no mesmo lugar.
           </p>
 
           {/* O que a tela mostra e o que o produto faz, nao uma funcionalidade

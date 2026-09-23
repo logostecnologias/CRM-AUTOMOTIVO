@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import {
@@ -371,8 +371,8 @@ export default function CampanhasPage() {
     if (arquivoRef.current) arquivoRef.current.value = "";
   };
 
-  const [salvar, salvando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const salvar = async () => {
     const payload = { ...form, agendada_para: paraIso(form.agendada_para) };
     try {
       if (editando?.id) await api.patch(`/campaigns/${editando.id}`, payload);
@@ -383,7 +383,7 @@ export default function CampanhasPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  });
+  };
 
   const acao = async (c, rota, mensagem, confirmar) => {
     if (confirmar && !(await confirmToast(confirmar, { confirmLabel: "Confirmar" }))) return;
@@ -451,8 +451,11 @@ export default function CampanhasPage() {
       )}
 
       {editando && (
-        <form onSubmit={salvar} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 zz-panel-hard rounded-lg" data-testid="campaign-form">
-          <Campo label="Nome da campanha" className="col-span-2">
+        <Modal titulo={editando?.id ? "Editar campanha" : "Nova campanha"} largo
+          descricao="Fora da janela de 24 horas só sai modelo aprovado — é por isso que ele é o padrão do conteúdo."
+          onFechar={() => setEditando(null)} onSalvar={salvar} testId="campaign-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <Campo label="Nome da campanha" className="sm:col-span-2">
             <input required autoFocus className="zz-input" data-testid="campaign-name" value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })} />
           </Campo>
@@ -515,7 +518,7 @@ export default function CampanhasPage() {
             )}
           </div>
 
-          <Campo label="Público" className="col-span-3">
+          <Campo label="Público" className="sm:col-span-2 lg:col-span-3">
             <div className="flex gap-2 mb-2">
               {[["todos", "Todos os contatos"], ["tags", "Por etiqueta"], ["selecionados", "Escolher contatos"]].map(([v, r]) => (
                 <button key={v} type="button" data-testid={`campaign-audience-${v}`}
@@ -593,12 +596,7 @@ export default function CampanhasPage() {
             </select>
           </Campo>
 
-          <div className="col-span-3 flex gap-2 justify-end">
-            <button type="button" onClick={() => setEditando(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" className="zz-btn" data-testid="campaign-submit"
-              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
-          </div>
-        </form>
+        </Modal>
       )}
 
       <div className="border border-line bg-surface rounded-lg">

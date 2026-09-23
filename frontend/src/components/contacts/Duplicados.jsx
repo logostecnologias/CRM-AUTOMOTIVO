@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
-import { X, ArrowsMerge, CheckCircle } from "@phosphor-icons/react";
+import { ArrowsMerge, CheckCircle } from "@phosphor-icons/react";
+import Modal from "@/components/ui/Modal";
 
 const CRITERIO = { email: "mesmo e-mail", nome: "mesmo nome" };
 
@@ -50,18 +51,9 @@ export default function Duplicados({ onClose, onMesclou }) {
   };
 
   return (
-    <div className="border border-line-strong bg-surface p-6 mb-6 zz-panel-hard rounded-lg" data-testid="duplicados">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="font-heading text-xl font-black tracking-tighter">Possíveis duplicados</div>
-          <p className="text-xs text-ink-2 mt-1">
-            Fichas com o mesmo e-mail ou o mesmo nome. Escolha qual fica — as outras são
-            absorvidas e apagadas, e conversas, negócios, atividades e notas passam para ela.
-          </p>
-        </div>
-        <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
-      </div>
-
+    <Modal titulo="Possíveis duplicados" largo
+      descricao="Fichas com o mesmo e-mail ou o mesmo nome. Escolha qual fica — as outras são absorvidas e apagadas, e conversas, negócios, atividades e notas passam para ela."
+      onFechar={onClose} testId="duplicados">
       {grupos === null && <div className="text-xs text-ink-3 py-4">Procurando…</div>}
 
       {grupos?.length === 0 && (
@@ -111,6 +103,6 @@ export default function Duplicados({ onClose, onMesclou }) {
           </div>
         ))}
       </div>
-    </div>
+    </Modal>
   );
 }

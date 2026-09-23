@@ -2,8 +2,9 @@ import { useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import {
-  UploadSimple, DownloadSimple, X, Warning, CheckCircle, ArrowRight,
+  UploadSimple, DownloadSimple, Warning, CheckCircle, ArrowRight,
 } from "@phosphor-icons/react";
+import Modal from "@/components/ui/Modal";
 
 const ALVOS = [
   ["", "— não importar —"],
@@ -113,24 +114,15 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
     .map((c) => [`campo:${c.id}`, `${c.nome} (personalizado)`])];
 
   return (
-    <div className="border border-line-strong bg-surface p-6 mb-6 zz-panel-hard rounded-lg" data-testid="import-export">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="font-heading text-xl font-black tracking-tighter">Importar e exportar</div>
-          <p className="text-xs text-ink-2 mt-1">
-            CSV separado por ponto e vírgula ou vírgula. A primeira linha precisa ser o cabeçalho
-            com o nome das colunas.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={exportar} disabled={ocupado} className="zz-btn zz-btn-secondary text-xs py-1 disabled:opacity-40"
-            data-testid="exportar-btn">
-            <DownloadSimple size={13} weight="bold" /> Exportar {filtros && Object.keys(filtros).length > 0 ? "o filtrado" : "tudo"}
-          </button>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
-        </div>
-      </div>
-
+    <Modal titulo="Importar e exportar" largo
+      descricao="CSV separado por ponto e vírgula ou vírgula. A primeira linha precisa ser o cabeçalho com o nome das colunas."
+      onFechar={onClose} testId="import-export"
+      rodape={(
+        <button type="button" onClick={exportar} disabled={ocupado}
+          className="zz-btn zz-btn-secondary mr-auto disabled:opacity-40" data-testid="exportar-btn">
+          <DownloadSimple size={13} weight="bold" /> Exportar {filtros && Object.keys(filtros).length > 0 ? "o filtrado" : "tudo"}
+        </button>
+      )}>
       {!previa ? (
         <div className="border border-dashed border-line rounded-xl bg-surface-2 p-8 text-center">
           <input ref={entradaRef} type="file" accept=".csv,text/csv" className="hidden"
@@ -271,6 +263,6 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
           </div>
         </div>
       )}
-    </div>
+    </Modal>
   );
 }

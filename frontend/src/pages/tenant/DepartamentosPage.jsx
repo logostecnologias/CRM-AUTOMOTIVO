@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -18,8 +19,8 @@ export default function DepartamentosPage() {
   const openNew = () => { setForm({ nome: "", cor: DEFAULT_COLORS[0] }); setEditing({}); };
   const openEdit = (d) => { setForm({ nome: d.nome, cor: d.cor }); setEditing(d); };
 
-  const [save, salvando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const save = async () => {
     try {
       if (editing?.id) await api.patch(`/departments/${editing.id}`, form);
       else await api.post("/departments", form);
@@ -29,7 +30,7 @@ export default function DepartamentosPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao salvar");
     }
-  });
+  };
 
   const [remove, removendo] = useAcao(async (id) => {
     if (!(await confirmToast("Excluir departamento?", { confirmLabel: "Excluir" }))) return;
@@ -49,14 +50,15 @@ export default function DepartamentosPage() {
       </div>
 
       {editing && (
-        <form onSubmit={save} className="mb-6 border border-line-strong bg-surface p-5 flex gap-3 items-end zz-panel-hard rounded-lg" data-testid="dept-form">
-          <div className="flex-1">
+        <Modal titulo={editing?.id ? "Editar departamento" : "Novo departamento"}
+          onFechar={() => setEditing(null)} onSalvar={save} testId="dept-form">
+          <div>
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome</label>
             <input required autoFocus className="zz-input" data-testid="dept-name" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
           </div>
           <div>
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Cor</label>
-            <div className="flex gap-1">
+            <div className="flex gap-2 flex-wrap">
               {DEFAULT_COLORS.map((c) => (
                 <button key={c} type="button" onClick={() => setForm({ ...form, cor: c })}
                   className={`w-7 h-7 rounded-md border-2 ${form.cor === c ? "border-ink" : "border-line"}`}
@@ -64,10 +66,7 @@ export default function DepartamentosPage() {
               ))}
             </div>
           </div>
-          <button type="submit" className="zz-btn" data-testid="dept-submit"
-            disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
-          <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-        </form>
+        </Modal>
       )}
 
       <div className="border border-line bg-surface rounded-lg">

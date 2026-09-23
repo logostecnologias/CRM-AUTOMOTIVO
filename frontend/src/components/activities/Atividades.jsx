@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import {
   Check, Plus, Trash, Phone, ChatText, Users, ListChecks, ArrowCounterClockwise,
 } from "@phosphor-icons/react";
+import Modal from "@/components/ui/Modal";
 
 export const TIPOS = [
   ["ligacao", "Ligação", Phone],
@@ -43,28 +43,37 @@ export function emDias(dias, hora = 9) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar" }) {
+// A trava de clique repetido (inclusive o Enter apertado duas vezes) vem do
+// Modal, que embrulha o submit.
+function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar",
+                         titulo = "Nova atividade", descricao, extra }) {
   const [form, setForm] = useState(inicial);
-  // Enter apertado duas vezes envia o formulário duas vezes, do mesmo jeito que
-  // o duplo clique no botão. A trava fica aqui, no envio, e não no botão.
-  const [enviar, enviando] = useAcao(onSalvar);
   return (
-    <form
-      onSubmit={(e) => { e.preventDefault(); enviar(form); }}
-      className="border border-line bg-surface-2 p-3 space-y-2 rounded-lg"
-      data-testid="atividade-form"
-    >
-      <input required autoFocus className="zz-input h-8 py-1 text-sm" data-testid="atividade-titulo"
-        placeholder="Ligar para confirmar a proposta…"
-        value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} />
-      <div className="flex gap-2">
-        <select className="zz-input h-8 py-1 text-sm w-28" data-testid="atividade-tipo"
-          value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-          {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
-        </select>
-        <input required type="datetime-local" className="zz-input h-8 py-1 text-sm flex-1"
-          data-testid="atividade-vence"
-          value={form.vence_em} onChange={(e) => setForm({ ...form, vence_em: e.target.value })} />
+    <Modal titulo={titulo} descricao={descricao} onFechar={onCancelar}
+      onSalvar={() => onSalvar(form)} salvarLabel={rotulo}
+      rodape={extra} testId="atividade-form">
+      <div>
+        <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
+          O que precisa ser feito
+        </label>
+        <input required autoFocus className="zz-input" data-testid="atividade-titulo"
+          placeholder="Ligar para confirmar a proposta…"
+          value={form.titulo} onChange={(e) => setForm({ ...form, titulo: e.target.value })} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Tipo</label>
+          <select className="zz-input" data-testid="atividade-tipo"
+            value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
+            {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Quando</label>
+          <input required type="datetime-local" className="zz-input"
+            data-testid="atividade-vence"
+            value={form.vence_em} onChange={(e) => setForm({ ...form, vence_em: e.target.value })} />
+        </div>
       </div>
       <div className="flex gap-1.5">
         {[[1, "amanhã"], [3, "3 dias"], [7, "1 semana"]].map(([d, r]) => (
@@ -73,14 +82,8 @@ function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar" }) {
             {r}
           </button>
         ))}
-        <div className="flex-1" />
-        <button type="submit" className="zz-btn text-xs py-1" data-testid="atividade-submit"
-          disabled={enviando}>{enviando ? "Salvando…" : rotulo}</button>
-        <button type="button" onClick={onCancelar} className="zz-btn zz-btn-secondary text-xs py-1">
-          Cancelar
-        </button>
       </div>
-    </form>
+    </Modal>
   );
 }
 
@@ -161,10 +164,8 @@ export default function Atividades({ vinculo = {}, onMudou, mostrarVinculos = fa
       </div>
 
       {criando && (
-        <div className="mb-3">
-          <FormAtividade inicial={{ titulo: "", tipo: "ligacao", vence_em: emDias(1) }}
-            onSalvar={criar} onCancelar={() => setCriando(false)} />
-        </div>
+        <FormAtividade inicial={{ titulo: "", tipo: "ligacao", vence_em: emDias(1) }}
+          onSalvar={criar} onCancelar={() => setCriando(false)} />
       )}
 
       {itens.length === 0 && !criando && (
@@ -206,20 +207,22 @@ export default function Atividades({ vinculo = {}, onMudou, mostrarVinculos = fa
             </div>
 
             {concluindo === a.id && (
-              <div className="mt-2 pt-2 border-t border-line">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-ink-2 mb-1.5">
-                  Qual é o próximo passo?
-                </div>
-                <FormAtividade rotulo="Concluir e agendar"
-                  inicial={{ titulo: "", tipo: a.tipo, vence_em: emDias(3) }}
-                  onSalvar={(form) => concluir(a.id, form)}
-                  onCancelar={() => setConcluindo(null)} />
-                <button onClick={() => concluir(a.id, null)}
-                  className="text-[11px] text-ink-2 underline mt-1.5"
-                  data-testid={`concluir-sem-proxima-${a.id}`}>
-                  Concluir sem agendar próximo passo
-                </button>
-              </div>
+              // O próximo passo é perguntado aqui porque é aqui que a pessoa
+              // está pensando no assunto: "depois eu agendo" é como se perde a
+              // venda.
+              <FormAtividade titulo="Qual é o próximo passo?"
+                descricao={`Concluindo: ${a.titulo}`}
+                rotulo="Concluir e agendar"
+                inicial={{ titulo: "", tipo: a.tipo, vence_em: emDias(3) }}
+                onSalvar={(form) => concluir(a.id, form)}
+                onCancelar={() => setConcluindo(null)}
+                extra={(
+                  <button type="button" onClick={() => concluir(a.id, null)}
+                    className="text-xs text-ink-2 underline mr-auto"
+                    data-testid={`concluir-sem-proxima-${a.id}`}>
+                    Concluir sem agendar próximo passo
+                  </button>
+                )} />
             )}
           </div>
         ))}

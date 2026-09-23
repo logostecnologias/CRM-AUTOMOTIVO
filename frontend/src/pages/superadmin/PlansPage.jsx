@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -40,8 +41,8 @@ export default function PlansPage() {
     setEditing(p);
   };
 
-  const [save, salvando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const save = async () => {
     // Campo em branco vira null de propósito: é o que diz "herda o default do
     // servidor", diferente de 0, que manda guardar pra sempre.
     const payload = {
@@ -58,7 +59,7 @@ export default function PlansPage() {
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao salvar plano");
     }
-  });
+  };
 
   const [remove, removendo] = useAcao(async (id) => {
     if (!(await confirmToast("Excluir plano?", { confirmLabel: "Excluir" }))) return;
@@ -80,7 +81,10 @@ export default function PlansPage() {
       </div>
 
       {editing && (
-        <form onSubmit={save} className="border border-line-strong bg-surface p-6 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 zz-panel-hard rounded-lg" data-testid="plan-form">
+        <Modal titulo={editing?.id ? "Editar plano" : "Novo plano"}
+          descricao="Os limites são aplicados de verdade: a empresa leva 403 ao passar de qualquer um."
+          onFechar={() => setEditing(null)} onSalvar={save} largo testId="plan-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Field label="Nome">
             <input required autoFocus data-testid="plan-name" className="zz-input" value={form.nome}
               onChange={(e) => setForm({ ...form, nome: e.target.value })} />
@@ -120,12 +124,7 @@ export default function PlansPage() {
               onChange={(e) => setForm({ ...form, max_disparos_mes: e.target.value })} />
             <div className="text-[10px] text-ink-3 mt-1">Vazio ou 0 = ilimitado · conta mensagem entregue</div>
           </Field>
-          <div className="col-span-3 flex gap-2 justify-end">
-            <button type="button" onClick={() => setEditing(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-            <button type="submit" data-testid="plan-submit" className="zz-btn"
-              disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
-          </div>
-        </form>
+        </Modal>
       )}
 
       <div className="border border-line bg-surface rounded-lg">

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import {
   Plus, SlidersHorizontal, TrendUp, MagnifyingGlass, X, Megaphone, User, Warning,
   BellSlash,
 } from "@phosphor-icons/react";
+import Modal from "@/components/ui/Modal";
 import DealPanel from "@/components/deals/DealPanel";
 import FunilConfig from "@/components/deals/FunilConfig";
 import FunilMetricas from "@/components/deals/FunilMetricas";
@@ -161,8 +161,8 @@ export default function FunilPage() {
     else mover(dealId, etapa.id);
   };
 
-  const [criar, criando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const criar = async () => {
     if (!novo.contato) return toast.error("Escolha o contato do negócio");
     try {
       const r = await api.post("/deals", {
@@ -180,7 +180,7 @@ export default function FunilPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  });
+  };
 
   const funil = quadro?.pipeline;
   const totalAberto = (quadro?.colunas || [])
@@ -218,7 +218,11 @@ export default function FunilPage() {
         </div>
       </div>
 
-      {metricas && funilId && <FunilMetricas pipelineId={funilId} onClose={() => setMetricas(false)} />}
+      {metricas && funilId && (
+        <Modal titulo="Desempenho do funil" largo onFechar={() => setMetricas(false)}>
+          <FunilMetricas pipelineId={funilId} semMoldura />
+        </Modal>
+      )}
       {config && funil && (
         <FunilConfig pipeline={funil} onClose={() => setConfig(false)}
           onSaved={() => {
@@ -228,9 +232,12 @@ export default function FunilPage() {
       )}
 
       {novo && (
-        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 items-end zz-panel-hard rounded-lg"
-          data-testid="new-deal-form">
-          <div className="col-span-2">
+        <Modal titulo="Novo negócio"
+          descricao="O negócio é o que gera conversão, ticket médio e ciclo de venda — a conversa sozinha não."
+          onFechar={() => setNovo(null)} onSalvar={criar}
+          salvarLabel="Criar" salvandoLabel="Criando…" testId="new-deal-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Título</label>
             <input required autoFocus className="zz-input" data-testid="new-deal-title"
               placeholder="Plano anual, orçamento de reforma…"
@@ -246,12 +253,7 @@ export default function FunilPage() {
               value={formatBRL(novo.valor)}
               onChange={(e) => setNovo({ ...novo, valor: parseBRLInput(e.target.value) })} />
           </div>
-          <div className="flex gap-2">
-            <button type="submit" className="zz-btn" data-testid="new-deal-submit"
-              disabled={criando}>{criando ? "Criando…" : "Criar"}</button>
-            <button type="button" onClick={() => setNovo(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-          </div>
-        </form>
+        </Modal>
       )}
 
       <div className="flex gap-3 items-center mb-4">
@@ -312,37 +314,19 @@ export default function FunilPage() {
       )}
 
       {perda && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-          onClick={() => setPerda(null)}>
-          <form onClick={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault();
-              mover(perda.dealId, perda.etapaId, perda.motivo);
-              setPerda(null);
-            }}
-            className="bg-surface border border-line-strong p-6 w-full max-w-md zz-panel-hard rounded-lg"
-            data-testid="motivo-perda-dialog">
-            <div className="flex items-center gap-2 mb-2">
-              <Warning size={18} weight="bold" className="text-danger" />
-              <div className="font-heading text-xl font-black tracking-tighter">Por que perdemos?</div>
-            </div>
-            <p className="text-xs text-ink-2 mb-3">
-              É este campo que alimenta o relatório de motivos de perda. Pode deixar em branco, mas
-              aí o negócio entra como "não informado".
-            </p>
-            <input autoFocus className="zz-input mb-3" data-testid="motivo-perda-input"
-              placeholder="Preço, prazo, escolheu concorrente…"
-              value={perda.motivo} onChange={(e) => setPerda({ ...perda, motivo: e.target.value })} />
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setPerda(null)} className="zz-btn zz-btn-secondary">
-                Cancelar
-              </button>
-              <button type="submit" className="zz-btn" data-testid="motivo-perda-submit">
-                Marcar como perdido
-              </button>
-            </div>
-          </form>
-        </div>
+        <Modal titulo="Por que perdemos?"
+          descricao={'É este campo que alimenta o relatório de motivos de perda. Pode deixar em branco, mas aí o negócio entra como "não informado".'}
+          onFechar={() => setPerda(null)}
+          onSalvar={() => { mover(perda.dealId, perda.etapaId, perda.motivo); setPerda(null); }}
+          salvarLabel="Marcar como perdido" testId="motivo-perda-dialog">
+          <div className="flex items-center gap-2 text-danger">
+            <Warning size={18} weight="bold" />
+            <span className="text-sm font-semibold">Este negócio sai do funil como perdido.</span>
+          </div>
+          <input autoFocus className="zz-input" data-testid="motivo-perda-input"
+            placeholder="Preço, prazo, escolheu concorrente…"
+            value={perda.motivo} onChange={(e) => setPerda({ ...perda, motivo: e.target.value })} />
+        </Modal>
       )}
 
       {abertoId && (

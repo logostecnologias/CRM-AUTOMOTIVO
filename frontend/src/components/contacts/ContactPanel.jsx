@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import Atividades from "@/components/activities/Atividades";
 import { fotoDoContato } from "@/components/atendimento/shared";
 import {
@@ -152,8 +153,8 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     carregar();
   };
 
-  const [criarNegocio, criandoNoFunil] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const criarNegocio = async () => {
     try {
       await api.post("/deals", {
         titulo: criandoNegocio.titulo,
@@ -167,7 +168,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  });
+  };
 
   const excluir = async (modo) => {
     try {
@@ -350,29 +351,34 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
           )
         }>
           {criandoNegocio && (
-            <form onSubmit={criarNegocio} className="border border-line bg-surface-2 p-3 mb-3 space-y-2 rounded-lg"
-              data-testid="contact-deal-form">
-              <input required autoFocus className="zz-input h-8 py-1 text-sm" value={criandoNegocio.titulo}
-                onChange={(e) => setCriandoNegocio({ ...criandoNegocio, titulo: e.target.value })} />
-              <div className="flex gap-2">
-                <input className="zz-input h-8 py-1 text-sm font-mono flex-1"
-                  value={formatBRL(criandoNegocio.valor)}
-                  onChange={(e) => setCriandoNegocio({
-                    ...criandoNegocio, valor: parseBRLInput(e.target.value),
-                  })} />
-                {funis.length > 1 && (
-                  <select className="zz-input h-8 py-1 text-sm" value={criandoNegocio.pipeline_id}
-                    onChange={(e) => setCriandoNegocio({ ...criandoNegocio, pipeline_id: e.target.value })}>
-                    {funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                  </select>
-                )}
-                <button type="submit" className="zz-btn text-xs py-1" disabled={criandoNoFunil}>
-                  {criandoNoFunil ? "Criando…" : "Criar"}
-                </button>
-                <button type="button" onClick={() => setCriandoNegocio(null)}
-                  className="zz-btn zz-btn-secondary text-xs py-1">Cancelar</button>
+            <Modal titulo="Novo negócio" descricao={`Para o contato ${c.nome}.`}
+              onFechar={() => setCriandoNegocio(null)} onSalvar={criarNegocio}
+              salvarLabel="Criar" salvandoLabel="Criando…" testId="contact-deal-form">
+              <div>
+                <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Título</label>
+                <input required autoFocus className="zz-input" value={criandoNegocio.titulo}
+                  onChange={(e) => setCriandoNegocio({ ...criandoNegocio, titulo: e.target.value })} />
               </div>
-            </form>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Valor</label>
+                  <input className="zz-input font-mono"
+                    value={formatBRL(criandoNegocio.valor)}
+                    onChange={(e) => setCriandoNegocio({
+                      ...criandoNegocio, valor: parseBRLInput(e.target.value),
+                    })} />
+                </div>
+                {funis.length > 1 && (
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Funil</label>
+                    <select className="zz-input" value={criandoNegocio.pipeline_id}
+                      onChange={(e) => setCriandoNegocio({ ...criandoNegocio, pipeline_id: e.target.value })}>
+                      {funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </Modal>
           )}
           {negocios.length === 0 && !criandoNegocio && (
             <div className="text-xs text-ink-4">Nenhum negócio para este contato.</div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 import { toast } from "sonner";
 import { MagnifyingGlass, Prohibit, Plus, SlidersHorizontal, X, ArrowsDownUp, ArrowsMerge } from "@phosphor-icons/react";
 import ContactPanel from "@/components/contacts/ContactPanel";
@@ -62,8 +62,8 @@ export default function ContactsPage() {
   }, []);
   useEffect(() => { setPagina(0); }, [busca, tagFiltro, responsavelFiltro]);
 
-  const [criar, criando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const criar = async () => {
     try {
       const r = await api.post("/contacts", novo);
       setNovo(null);
@@ -73,7 +73,7 @@ export default function ContactsPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  });
+  };
 
   const nomeUsuario = (id) => {
     const u = usuarios.find((x) => x.id === id);
@@ -135,14 +135,17 @@ export default function ContactsPage() {
       )}
 
       {novo && (
-        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-6 flex gap-3 items-end zz-panel-hard rounded-lg"
-          data-testid="new-contact-form">
-          <div className="flex-1">
+        <Modal titulo="Novo contato"
+          descricao="O número é a identidade do contato: um já cadastrado é recusado em vez de virar ficha dupla."
+          onFechar={() => setNovo(null)} onSalvar={criar}
+          salvarLabel="Criar" salvandoLabel="Criando…" testId="new-contact-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome</label>
             <input required autoFocus className="zz-input" data-testid="new-contact-name"
               value={novo.nome} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} />
           </div>
-          <div className="flex-1">
+          <div>
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
               WhatsApp (com DDI e DDD)
             </label>
@@ -150,10 +153,7 @@ export default function ContactsPage() {
               placeholder="5511999998888" value={novo.numero_whatsapp}
               onChange={(e) => setNovo({ ...novo, numero_whatsapp: e.target.value })} />
           </div>
-          <button type="submit" className="zz-btn" data-testid="new-contact-submit"
-            disabled={criando}>{criando ? "Criando…" : "Criar"}</button>
-          <button type="button" onClick={() => setNovo(null)} className="zz-btn zz-btn-secondary">Cancelar</button>
-        </form>
+        </Modal>
       )}
 
       <div className="flex gap-3 items-center mb-4 flex-wrap">

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
-import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import {
   Check, Plus, Trash, Warning, CalendarBlank, X, ArrowCounterClockwise, User, Funnel,
 } from "@phosphor-icons/react";
 import { TIPOS, IconeTipo, quando, emDias } from "@/components/activities/Atividades";
+import Modal from "@/components/ui/Modal";
 
 // Os limites de "hoje" e "semana" saem daqui, no fuso de quem está olhando: o
 // servidor não sabe em que fuso o navegador está, e calcular lá faria a agenda
@@ -61,8 +61,8 @@ export default function AtividadesPage() {
     api.get("/users").then((r) => setUsuarios(r.data)).catch(() => {});
   }, []);
 
-  const [criar, criandoAtividade] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const criar = async () => {
     try {
       await api.post("/activities", {
         titulo: criando.titulo,
@@ -77,7 +77,7 @@ export default function AtividadesPage() {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  });
+  };
 
   const concluir = async (id, comProxima) => {
     try {
@@ -146,9 +146,12 @@ export default function AtividadesPage() {
       </div>
 
       {criando && (
-        <form onSubmit={criar} className="border border-line-strong bg-surface p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end zz-panel-hard rounded-lg"
-          data-testid="nova-atividade-form">
-          <div className="col-span-2">
+        <Modal titulo="Nova atividade"
+          descricao="Atividade sem responsável não aparece na agenda de ninguém — em branco, ela fica com você."
+          onFechar={() => setCriando(null)} onSalvar={criar}
+          salvarLabel="Criar" salvandoLabel="Criando…" testId="nova-atividade-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
               O que precisa ser feito
             </label>
@@ -168,7 +171,7 @@ export default function AtividadesPage() {
               value={criando.vence_em}
               onChange={(e) => setCriando({ ...criando, vence_em: e.target.value })} />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">
               Responsável
             </label>
@@ -178,14 +181,7 @@ export default function AtividadesPage() {
               {usuarios.map((u) => <option key={u.id} value={u.id}>{u.name || u.email}</option>)}
             </select>
           </div>
-          <div className="col-span-2 flex gap-2 justify-end">
-            <button type="button" onClick={() => setCriando(null)} className="zz-btn zz-btn-secondary">
-              Cancelar
-            </button>
-            <button type="submit" className="zz-btn" data-testid="nova-atividade-submit"
-              disabled={criandoAtividade}>{criandoAtividade ? "Criando…" : "Criar"}</button>
-          </div>
-        </form>
+        </Modal>
       )}
 
       <div className="flex gap-1 mb-4 border-b border-line">

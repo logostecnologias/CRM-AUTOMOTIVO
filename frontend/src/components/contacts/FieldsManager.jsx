@@ -3,7 +3,8 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
-import { Plus, Trash, PencilSimple, X } from "@phosphor-icons/react";
+import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
+import Modal from "@/components/ui/Modal";
 
 const TIPOS = [
   ["texto", "Texto"],
@@ -32,8 +33,8 @@ export default function FieldsManager({ onClose, onChanged }) {
     setOpcoesTexto((c.opcoes || []).join(", "));
   };
 
-  const [salvar, salvando] = useAcao(async (e) => {
-    e.preventDefault();
+  // A trava de clique repetido vem do Modal.
+  const salvar = async () => {
     const payload = {
       nome: form.nome,
       tipo: form.tipo,
@@ -52,7 +53,7 @@ export default function FieldsManager({ onClose, onChanged }) {
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
-  });
+  };
 
   const [remover, removendo] = useAcao(async (c) => {
     if (!(await confirmToast(
@@ -69,58 +70,47 @@ export default function FieldsManager({ onClose, onChanged }) {
   });
 
   return (
-    <div className="border border-line-strong bg-surface p-6 mb-6 zz-panel-hard rounded-lg" data-testid="fields-manager">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <div className="font-heading text-xl font-black tracking-tighter">Campos personalizados</div>
-          <p className="text-xs text-ink-2 mt-1">
-            Aparecem na ficha de todo contato desta empresa. Ex: número da apólice, curso de interesse, placa.
-          </p>
-        </div>
-        <div className="flex gap-1">
-          <button onClick={abrirNovo} className="zz-btn text-xs py-1" data-testid="new-field-btn">
-            <Plus size={13} weight="bold" /> Novo campo
-          </button>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-3"><X size={15} weight="bold" /></button>
-        </div>
-      </div>
-
+    <Modal titulo="Campos personalizados"
+      descricao="Aparecem na ficha de todo contato desta empresa. Ex: número da apólice, curso de interesse, placa."
+      onFechar={onClose} testId="fields-manager"
+      rodape={(
+        <button type="button" onClick={abrirNovo} className="zz-btn zz-btn-secondary mr-auto"
+          data-testid="new-field-btn">
+          <Plus size={13} weight="bold" /> Novo campo
+        </button>
+      )}>
       {form && (
-        <form onSubmit={salvar} className="border border-line bg-surface-2 p-4 mb-4 flex gap-3 items-end flex-wrap rounded-lg"
-          data-testid="field-form">
-          <div className="flex-1 min-w-[160px]">
+        <Modal titulo={form.id ? "Editar campo" : "Novo campo"}
+          onFechar={() => setForm(null)} onSalvar={salvar} testId="field-form"
+          corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
             <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">Nome</label>
-            <input required autoFocus className="zz-input h-8 py-1 text-sm" data-testid="field-name"
+            <input required autoFocus className="zz-input" data-testid="field-name"
               value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} />
           </div>
           <div>
             <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">Tipo</label>
-            <select className="zz-input h-8 py-1 text-sm" data-testid="field-type"
+            <select className="zz-input" data-testid="field-type"
               value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
               {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
           </div>
           {form.tipo === "selecao" && (
-            <div className="flex-1 min-w-[200px]">
+            <div className="sm:col-span-2">
               <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">
                 Opções (separadas por vírgula)
               </label>
-              <input required className="zz-input h-8 py-1 text-sm" data-testid="field-options"
+              <input required className="zz-input" data-testid="field-options"
                 placeholder="Bronze, Prata, Ouro"
                 value={opcoesTexto} onChange={(e) => setOpcoesTexto(e.target.value)} />
             </div>
           )}
-          <div className="w-20">
+          <div>
             <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">Ordem</label>
-            <input type="number" className="zz-input h-8 py-1 text-sm" value={form.ordem}
+            <input type="number" className="zz-input" value={form.ordem}
               onChange={(e) => setForm({ ...form, ordem: e.target.value })} />
           </div>
-          <button type="submit" className="zz-btn text-xs py-1" data-testid="field-submit"
-            disabled={salvando}>{salvando ? "Salvando…" : "Salvar"}</button>
-          <button type="button" onClick={() => setForm(null)} className="zz-btn zz-btn-secondary text-xs py-1">
-            Cancelar
-          </button>
-        </form>
+        </Modal>
       )}
 
       <div className="border border-line rounded-lg">
@@ -151,6 +141,6 @@ export default function FieldsManager({ onClose, onChanged }) {
           </div>
         ))}
       </div>
-    </div>
+    </Modal>
   );
 }
