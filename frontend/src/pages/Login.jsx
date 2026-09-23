@@ -2,8 +2,20 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { formatApiErrorDetail } from "@/lib/api";
-import { ChatCircleDots, ArrowRight } from "@phosphor-icons/react";
+import {
+  ChatCircleDots, ArrowRight, Headset, Sparkle, Robot,
+  UsersThree, CalendarCheck, Megaphone,
+} from "@phosphor-icons/react";
 import BotaoTema from "@/components/BotaoTema";
+
+const RECURSOS = [
+  { icone: Headset, titulo: "Central de Atendimento", linha: "Fila, times e histórico de cada conversa" },
+  { icone: Sparkle, titulo: "Agentes de IA", linha: "Respondem sozinhos e chamam gente na hora certa" },
+  { icone: Robot, titulo: "Fluxos automáticos", linha: "Editor visual, menus e integrações" },
+  { icone: UsersThree, titulo: "CRM e funil", linha: "Ficha do contato, negócios e próximo passo" },
+  { icone: CalendarCheck, titulo: "Agenda", linha: "Horário marcado pelo WhatsApp, com lembrete" },
+  { icone: Megaphone, titulo: "Campanhas", linha: "Disparo por modelo aprovado, com métrica" },
+];
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -38,18 +50,35 @@ export default function LoginPage() {
         </div>
 
         <div>
-          <h1 className="font-heading text-5xl font-black tracking-tighter leading-[0.95] mb-6">
-            Construa bots de WhatsApp<br/>com um <span className="text-info">canvas visual.</span>
+          <h1 className="font-heading text-4xl xl:text-5xl font-black tracking-tighter leading-[0.95] mb-5">
+            Todo o WhatsApp da sua<br/>empresa em <span className="text-info">um só painel.</span>
           </h1>
-          <p className="text-ink-2 text-base leading-relaxed max-w-md">
-            Várias empresas num só painel, blocos arrastáveis, integrações via webhook e atendimento humano quando o robô não conseguir resolver.
+          <p className="text-ink-2 text-base leading-relaxed max-w-md mb-8">
+            Atendimento em equipe, agentes de IA, CRM com funil, agenda e campanhas — sobre a API oficial da Meta, com várias empresas no mesmo lugar.
           </p>
+
+          {/* O que a tela mostra e o que o produto faz, nao uma funcionalidade
+              dele. Ate 2026-09-23 o painel vendia so o editor de fluxos
+              ("canvas visual", "10 tipos de no"), que hoje e um item entre
+              seis: quem chega procurando atendimento, CRM ou agenda lia uma
+              pagina sobre outra coisa. Os itens seguem os grupos da barra
+              lateral, entao a promessa da tela publica e o menu de dentro
+              dizem a mesma coisa. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 max-w-lg">
+            {RECURSOS.map(({ icone: Icone, titulo, linha }) => (
+              <div key={titulo} className="flex gap-2.5">
+                <Icone size={17} weight="bold" className="text-ink-3 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-sm font-bold text-ink leading-tight">{titulo}</div>
+                  <div className="text-xs text-ink-3 leading-snug mt-0.5">{linha}</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 font-mono text-xs text-ink-3">
-          <div className="border border-line p-4 rounded-lg"><div className="text-2xl font-black text-ink">10</div>tipos de nó</div>
-          <div className="border border-line p-4 rounded-lg"><div className="text-2xl font-black text-ink">∞</div>bots por empresa</div>
-          <div className="border border-line p-4 rounded-lg"><div className="text-2xl font-black text-ink">1</div>painel de tudo</div>
+        <div className="font-mono text-[11px] text-ink-3 tracking-wide">
+          Multiempresa · Em português
         </div>
       </div>
 
@@ -62,7 +91,7 @@ export default function LoginPage() {
           <div className="mb-8">
             <div className="text-xs font-bold tracking-[0.2em] uppercase text-ink-3 mb-2">Bem-vindo</div>
             <h2 className="font-heading text-3xl font-black tracking-tighter">Entre na sua conta</h2>
-            <p className="text-sm text-ink-2 mt-2">Super admins e admins de empresa fazem login aqui.</p>
+            <p className="text-sm text-ink-2 mt-2">Toda a equipe entra por aqui.</p>
           </div>
 
           <form onSubmit={submit} className="space-y-4" data-testid="login-form">
