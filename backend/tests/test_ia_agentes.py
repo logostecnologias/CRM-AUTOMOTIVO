@@ -594,7 +594,7 @@ async def etapa_credencial_por_agente():
     # validado com a SUA chave e o SEU modelo.
     validados = []
 
-    async def fake_validar(provedor, chave, modelo):
+    async def fake_validar(provedor, chave, modelo, base_url=None):
         validados.append((provedor, chave, modelo))
         return ai_client.Resposta(texto="ok", modelo=modelo)
 

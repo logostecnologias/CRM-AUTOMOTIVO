@@ -1,4 +1,10 @@
-"""Camada única de chamada aos provedores de IA (Anthropic e OpenAI).
+"""Camada única de chamada aos provedores de IA.
+
+Três protocolos, não um por provedor: a Anthropic (Messages), a OpenAI
+(Responses) e o **Chat Completions compatível com OpenAI**, que é o que Groq,
+Gemini, OpenRouter, DeepSeek, Mistral, xAI e quase todo o resto expõem. Um
+provedor novo desse terceiro grupo é uma entrada no catálogo com `base_url`,
+não código novo.
 
 Mesmo papel que `whatsapp_client.py` tem para o WhatsApp: nenhuma outra parte do
 backend fala com provedor de IA diretamente. Quem chama passa provedor, modelo
@@ -33,11 +39,15 @@ Decisões que valem registro:
 """
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 
 import ai_credentials
 
 logger = logging.getLogger("zappzen.ia")
+
+
+PROVEDOR_COMPATIVEL = "compativel"
 
 
 class IAError(Exception):
@@ -66,9 +76,25 @@ class Modelo:
     nota: str = ""
 
 
+# `protocolo` decide qual caminho de chamada o provedor usa. `chat` é o Chat
+# Completions compatível com OpenAI, apontado para `base_url`.
+#
+# `modelo_livre` aceita qualquer id de modelo além dos sugeridos: nesses
+# provedores o catálogo muda toda semana (Groq e OpenRouter trocam modelo mais
+# rápido do que um deploy nosso), e barrar um id que o provedor aceita só
+# faria o cliente esperar por nós. Modelo fora da lista é medido em tokens com
+# custo zero, porque não sabemos o preço, e a tela diz isso.
+#
+# Sem desconto de cache no provedor, `cache_leitura` é igual à entrada: é o que
+# faz a projeção de custo da tela não contar um desconto que não existe.
+#
+# `prefixo_chave` None = o provedor não tem prefixo fixo (Mistral, endpoint
+# próprio), e aí só a chamada de teste decide.
+
 PROVEDORES: dict[str, dict] = {
     "anthropic": {
         "rotulo": "Anthropic (Claude)",
+        "protocolo": "anthropic",
         # Link direto para a página de chaves — é o "abrir console" da tela de
         # conexão. Levar o cliente à home do provedor faria ele se perder.
         "console_url": "https://console.anthropic.com/settings/keys",
@@ -82,6 +108,7 @@ PROVEDORES: dict[str, dict] = {
     },
     "openai": {
         "rotulo": "OpenAI (GPT)",
+        "protocolo": "responses",
         "console_url": "https://platform.openai.com/api-keys",
         "prefixo_chave": "sk-",
         "modelos": [
@@ -93,22 +120,168 @@ PROVEDORES: dict[str, dict] = {
                    "Melhor qualidade, ~5x o custo do mini."),
         ],
     },
+    "groq": {
+        "rotulo": "Groq",
+        "protocolo": "chat",
+        "base_url": "https://api.groq.com/openai/v1",
+        "console_url": "https://console.groq.com/keys",
+        "prefixo_chave": "gsk_",
+        "modelo_livre": True,
+        # O plano gratuito da Groq não cobra, só limita requisições por minuto
+        # e por dia. Os preços abaixo são os do plano pago, para a projeção não
+        # prometer zero a quem passar do limite gratuito.
+        "gratuito": True,
+        "modelos": [
+            Modelo("llama-3.3-70b-versatile", "Llama 3.3 70B", 0.59, 0.79, 0.59, 0.0,
+                   "Recomendado: boa qualidade em português, respostas muito rápidas."),
+            Modelo("openai/gpt-oss-120b", "GPT-OSS 120B", 0.15, 0.75, 0.075, 0.0,
+                   "Modelo aberto da OpenAI, bom em seguir instruções."),
+            Modelo("llama-3.1-8b-instant", "Llama 3.1 8B", 0.05, 0.08, 0.05, 0.0,
+                   "O mais barato e rápido. Para triagem simples."),
+        ],
+    },
+    "gemini": {
+        "rotulo": "Google (Gemini)",
+        "protocolo": "chat",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "console_url": "https://aistudio.google.com/app/apikey",
+        "prefixo_chave": "AIza",
+        "modelo_livre": True,
+        "gratuito": True,
+        "modelos": [
+            Modelo("gemini-2.5-flash", "Gemini 2.5 Flash", 0.30, 2.50, 0.075, 0.0,
+                   "Recomendado: rápido, barato e com cota gratuita no AI Studio."),
+            Modelo("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", 0.10, 0.40, 0.025, 0.0,
+                   "O mais barato do Google. Para triagem e perguntas frequentes."),
+            Modelo("gemini-2.5-pro", "Gemini 2.5 Pro", 1.25, 10.00, 0.31, 0.0,
+                   "Melhor qualidade, bem mais caro."),
+        ],
+    },
+    "openrouter": {
+        "rotulo": "OpenRouter",
+        "protocolo": "chat",
+        "base_url": "https://openrouter.ai/api/v1",
+        "console_url": "https://openrouter.ai/settings/keys",
+        "prefixo_chave": "sk-or-",
+        "modelo_livre": True,
+        "gratuito": True,
+        "modelos": [
+            Modelo("meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B (gratuito)",
+                   0.0, 0.0, 0.0, 0.0,
+                   "Versão gratuita, com limite diário de requisições."),
+            Modelo("google/gemini-2.5-flash", "Gemini 2.5 Flash", 0.30, 2.50, 0.075, 0.0,
+                   "Centenas de modelos numa conta só: dá para digitar outro id."),
+        ],
+    },
+    "deepseek": {
+        "rotulo": "DeepSeek",
+        "protocolo": "chat",
+        "base_url": "https://api.deepseek.com",
+        "console_url": "https://platform.deepseek.com/api_keys",
+        "prefixo_chave": "sk-",
+        "modelo_livre": True,
+        "modelos": [
+            Modelo("deepseek-chat", "DeepSeek V3", 0.28, 0.42, 0.028, 0.0,
+                   "Muito barato, boa qualidade."),
+        ],
+    },
+    "mistral": {
+        "rotulo": "Mistral",
+        "protocolo": "chat",
+        "base_url": "https://api.mistral.ai/v1",
+        "console_url": "https://console.mistral.ai/api-keys",
+        "prefixo_chave": None,
+        "modelo_livre": True,
+        "gratuito": True,
+        "modelos": [
+            Modelo("mistral-small-latest", "Mistral Small", 0.10, 0.30, 0.10, 0.0,
+                   "Barato, bom em português."),
+            Modelo("mistral-medium-latest", "Mistral Medium", 0.40, 2.00, 0.40, 0.0,
+                   "Mais elaborado."),
+        ],
+    },
+    "xai": {
+        "rotulo": "xAI (Grok)",
+        "protocolo": "chat",
+        "base_url": "https://api.x.ai/v1",
+        "console_url": "https://console.x.ai",
+        "prefixo_chave": "xai-",
+        "modelo_livre": True,
+        "modelos": [
+            Modelo("grok-4-fast-non-reasoning", "Grok 4 Fast", 0.20, 0.50, 0.05, 0.0,
+                   "Rápido e barato."),
+        ],
+    },
+    # Qualquer outro serviço que fale Chat Completions (Together, Fireworks,
+    # Cerebras, um vLLM próprio publicado na internet...). O endereço é do
+    # cliente, e por isso passa pelo `net_guard` antes de toda chamada: é o
+    # servidor que vai até ele, e sem a checagem um admin de empresa apontaria
+    # o backend para a própria rede interna.
+    PROVEDOR_COMPATIVEL: {
+        "rotulo": "Outro (compatível com OpenAI)",
+        "protocolo": "chat",
+        "url_livre": True,
+        "console_url": None,
+        "prefixo_chave": None,
+        "modelo_livre": True,
+        "modelos": [],
+    },
 }
+
+# Teto do id de modelo digitado. Os ids reais passam pouco de 60 caracteres;
+# o teto só impede que um campo livre vire um texto qualquer no documento.
+MAX_ID_MODELO = 120
+
+
+def base_url_de(provedor: str, base_url: str | None = None) -> str | None:
+    """O endereço do Chat Completions deste provedor: o do catálogo, ou o que
+    o cliente informou quando o provedor é o compatível genérico."""
+    p = PROVEDORES.get(provedor) or {}
+    if p.get("url_livre"):
+        return (base_url or "").strip() or None
+    return p.get("base_url")
+
+
+async def validar_base_url(base_url: str | None) -> str:
+    """Recusa endereço que não seja https público. Levanta `IAError` com texto
+    para a tela. Chamado ao salvar e antes de toda chamada: o DNS de um domínio
+    do cliente pode mudar depois de salvo."""
+    import net_guard
+    from urllib.parse import urlsplit
+    url = (base_url or "").strip()
+    if not url:
+        raise IAError("Informe o endereço da API (ex.: https://api.exemplo.com/v1)")
+    if urlsplit(url).scheme != "https":
+        raise IAError("O endereço da API precisa começar com https://")
+    try:
+        host, port = net_guard._checar_esquema_e_host(url)
+        await net_guard._validar_host(host, port)
+    except net_guard.SSRFError as e:
+        raise IAError(f"Endereço da API recusado: {e}")
+    return url.rstrip("/")
 
 
 def modelo_de(provedor: str, modelo_id: str) -> Modelo:
-    for m in PROVEDORES.get(provedor, {}).get("modelos", []):
+    p = PROVEDORES.get(provedor, {})
+    for m in p.get("modelos", []):
         if m.id == modelo_id:
             return m
+    modelo_id = (modelo_id or "").strip()
+    if p.get("modelo_livre") and modelo_id and len(modelo_id) <= MAX_ID_MODELO \
+            and not any(c.isspace() for c in modelo_id):
+        # Preço desconhecido: o consumo é medido em tokens e o custo fica zero.
+        return Modelo(modelo_id, modelo_id, 0.0, 0.0, 0.0, 0.0)
     raise IAError(f"Modelo desconhecido para {provedor}: {modelo_id}")
 
 
 def modelo_padrao(provedor: str) -> str:
     """O primeiro da lista é o recomendado — a ordem do catálogo é a
     recomendação, não alfabética."""
-    modelos = PROVEDORES.get(provedor, {}).get("modelos", [])
-    if not modelos:
+    if provedor not in PROVEDORES:
         raise IAError(f"Provedor desconhecido: {provedor}")
+    modelos = PROVEDORES[provedor].get("modelos", [])
+    if not modelos:
+        raise IAError("Informe o id do modelo")
     return modelos[0].id
 
 
@@ -120,6 +293,12 @@ def catalogo_publico() -> list[dict]:
             "id": pid,
             "rotulo": p["rotulo"],
             "console_url": p["console_url"],
+            # O começo esperado da credencial, só para o texto de ajuda do
+            # campo. Não é segredo: é o que a documentação do provedor diz.
+            "prefixo": p.get("prefixo_chave"),
+            "modelo_livre": bool(p.get("modelo_livre")),
+            "url_livre": bool(p.get("url_livre")),
+            "gratuito": bool(p.get("gratuito")),
             "modelos": [
                 {
                     "id": m.id,
@@ -219,6 +398,7 @@ async def responder(
     historico: list[dict],
     ferramentas: list | None = None,
     executar=None,
+    base_url: str | None = None,
 ) -> Resposta:
     """Uma resposta do agente.
 
@@ -242,12 +422,19 @@ async def responder(
         raise IAError("Histórico vazio — não há o que responder")
     if ferramentas and executar is None:
         raise IAError("Ferramentas informadas sem executor")
-    if provedor == "anthropic":
+    protocolo = (PROVEDORES.get(provedor) or {}).get("protocolo")
+    if protocolo == "anthropic":
         return await _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
                                           ferramentas, executar)
-    if provedor == "openai":
+    if protocolo == "responses":
         return await _responder_openai(chave_api, modelo_id, instrucoes, historico,
                                        ferramentas, executar)
+    if protocolo == "chat":
+        url = base_url_de(provedor, base_url)
+        if PROVEDORES[provedor].get("url_livre"):
+            url = await validar_base_url(url)
+        return await _responder_chat(url, chave_api, modelo_id, instrucoes, historico,
+                                     ferramentas, executar)
     raise IAError(f"Provedor desconhecido: {provedor}")
 
 
@@ -431,6 +618,88 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
     return total
 
 
+# Raciocínio exposto no próprio texto (Qwen3, DeepSeek R1 e afins servidos por
+# Groq/OpenRouter). Sem o corte, o contato receberia o rascunho do modelo.
+_PENSAMENTO = re.compile(r"<think>.*?</think>", re.S | re.I)
+
+
+async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
+                          ferramentas=None, executar=None) -> Resposta:
+    """Chat Completions compatível com OpenAI: Groq, Gemini, OpenRouter,
+    DeepSeek, Mistral, xAI e qualquer endpoint que imite a OpenAI.
+
+    Não usa a Responses API porque quase nenhum desses provedores a implementa;
+    Chat Completions é o denominador comum. A instrução vai como primeira
+    mensagem `system`, sempre igual, que é o que os provedores com cache
+    automático de prefixo (Gemini, DeepSeek, Groq) precisam para cachear.
+    """
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
+
+    mensagens = [{"role": "system", "content": instrucoes}, *historico]
+    total = Resposta(texto="", modelo=modelo_id)
+    extra = {}
+    if ferramentas:
+        extra["tools"] = [{"type": "function", "function": {
+            "name": f.nome, "description": f.descricao, "parameters": f.parametros}}
+            for f in ferramentas]
+
+    async with AsyncOpenAI(api_key=chave_api, base_url=base_url, max_retries=2,
+                           timeout=60) as client:
+        for _ in range(MAX_RODADAS_FERRAMENTA):
+            try:
+                r = await client.chat.completions.create(
+                    model=modelo_id, messages=mensagens, max_tokens=MAX_SAIDA, **extra)
+            except Exception as e:
+                raise IAError(_traduz_erro(e))
+
+            u = getattr(r, "usage", None)
+            cacheados = getattr(getattr(u, "prompt_tokens_details", None),
+                                "cached_tokens", 0) or 0
+            bruta = getattr(u, "prompt_tokens", 0) or 0
+            total.somar(Resposta(
+                texto="", modelo=modelo_id,
+                # Mesmo desconto da OpenAI: `prompt_tokens` já inclui os cacheados.
+                tokens_entrada=max(bruta - cacheados, 0),
+                tokens_cache_leitura=cacheados,
+                tokens_saida=getattr(u, "completion_tokens", 0) or 0,
+            ))
+
+            escolhas = getattr(r, "choices", None) or []
+            if not escolhas:
+                raise IAError("O provedor devolveu uma resposta sem conteúdo")
+            msg = escolhas[0].message
+            chamadas = getattr(msg, "tool_calls", None) or []
+            if not chamadas:
+                texto = _PENSAMENTO.sub("", getattr(msg, "content", None) or "").strip()
+                if not texto and getattr(escolhas[0], "finish_reason", None) == "length":
+                    raise IAError("Resposta truncada pelo provedor (length)")
+                total.texto = texto
+                break
+
+            mensagens.append({
+                "role": "assistant",
+                "content": getattr(msg, "content", None),
+                "tool_calls": [{"id": c.id, "type": "function",
+                                "function": {"name": c.function.name,
+                                             "arguments": c.function.arguments or "{}"}}
+                               for c in chamadas],
+            })
+            for c in chamadas:
+                mensagens.append({
+                    "role": "tool", "tool_call_id": c.id,
+                    "content": await _rodar_ferramenta(
+                        executar, c.function.name, _json(c.function.arguments),
+                        total.ferramentas_usadas),
+                })
+
+    if not total.texto:
+        raise IAError("O modelo respondeu vazio")
+    return total
+
+
 def _json(argumentos) -> dict:
     """Os argumentos da chamada, que a OpenAI entrega como texto JSON.
 
@@ -455,7 +724,9 @@ def _traduz_erro(e: Exception) -> str:
     o volume."""
     nome = type(e).__name__
     status = getattr(e, "status_code", None)
-    if status == 401 or "Authentication" in nome:
+    # O Gemini responde chave inválida com 400 ("API key not valid"), não 401.
+    if status == 401 or "Authentication" in nome or (
+            status == 400 and "api key" in str(e).lower()):
         return "Chave de API recusada pelo provedor. Confira se copiou a chave inteira e se ela não foi revogada."
     if status == 402 or "credit" in str(e).lower() or "quota" in str(e).lower():
         return "A conta no provedor está sem saldo ou sem cota. Adicione créditos e tente de novo."
@@ -473,7 +744,8 @@ def _traduz_erro(e: Exception) -> str:
 # Validação (o "testar conexão" da tela)
 # ---------------------------------------------------------------------------
 
-async def validar(provedor: str, chave_api: str, modelo_id: str) -> Resposta:
+async def validar(provedor: str, chave_api: str, modelo_id: str,
+                  base_url: str | None = None) -> Resposta:
     """Chamada mínima só para provar que a credencial funciona *neste* modelo.
 
     Vale mais que uma checagem de formato: uma chave pode ser válida e mesmo
@@ -490,6 +762,7 @@ async def validar(provedor: str, chave_api: str, modelo_id: str) -> Resposta:
         modelo_id,
         instrucoes="Responda exatamente: ok",
         historico=[{"role": "user", "content": "ok"}],
+        base_url=base_url,
     )
 
 
@@ -499,4 +772,5 @@ async def validar_conexao(conexao: dict) -> Resposta:
         conexao["provedor"],
         ai_credentials.decifrar(conexao.get("credencial") or {}),
         conexao["modelo"],
+        base_url=conexao.get("base_url"),
     )

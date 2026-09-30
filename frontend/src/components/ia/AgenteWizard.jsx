@@ -24,6 +24,7 @@ const SAIDA = 120;
 const USD_BRL = 5.5;
 
 function custoMensal(m) {
+  if (!m.entrada && !m.saida) return "Grátis";
   const cacheLeitura = m.cache_leitura ?? m.entrada * 0.1;
   const usd =
     (RESPOSTAS_MES *
@@ -90,6 +91,7 @@ const VAZIO = {
   provedor: "",
   modelo: "",
   chave_api: "",
+  base_url: "",
 };
 
 function Rotulo({ children, obrigatorio }) {
@@ -107,12 +109,22 @@ export default function AgenteWizard({
   const [passo, setPasso] = useState(0);
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState(() =>
-    agente ? { ...VAZIO, ...agente, max_respostas: agente.max_respostas ?? "" } : { ...VAZIO },
+    agente
+      ? { ...VAZIO, ...agente, max_respostas: agente.max_respostas ?? "", base_url: agente.base_url || "" }
+      : { ...VAZIO },
   );
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const provedorAtual = (provedores || []).find((p) => p.id === form.provedor);
   const editando = Boolean(agente);
+  // Modelo digitado à mão (fora da lista sugerida), nos provedores que aceitam.
+  const modeloSugerido = provedorAtual?.modelos.some((m) => m.id === form.modelo);
+  // A chave guardada só serve se provedor e endereço forem os mesmos: o backend
+  // exige a chave de novo quando o endereço da API muda.
+  const chaveGuardadaServe =
+    agente?.tem_chave &&
+    agente.provedor === form.provedor &&
+    (agente.base_url || "") === (provedorAtual?.url_livre ? form.base_url.trim().replace(/\/+$/, "") : "");
 
   const alternarTom = (id) =>
     set({ tom: form.tom.includes(id) ? form.tom.filter((t) => t !== id) : [...form.tom, id] });
@@ -138,9 +150,13 @@ export default function AgenteWizard({
     // só não é, quando não existe chave da plataforma para cair.
     !form.provedor && !plataformaDisponivel
       ? "Escolha o provedor e informe a chave"
-      : form.provedor && !form.chave_api.trim() && !(agente?.tem_chave && agente.provedor === form.provedor)
-        ? "Cole a chave de API"
-        : null,
+      : form.provedor && !form.modelo.trim()
+        ? "Informe o modelo"
+        : provedorAtual?.url_livre && !form.base_url.trim()
+          ? "Informe o endereço da API"
+          : form.provedor && !form.chave_api.trim() && !chaveGuardadaServe
+            ? "Cole a chave de API"
+            : null,
   ][passo];
 
   const salvar = async () => {
@@ -601,19 +617,21 @@ export default function AgenteWizard({
                 </div>
                 <p className="text-xs text-ink-2 mt-0.5">
                   A chave é deste agente, não da empresa — dá para ter um agente na Anthropic e
-                  outro na OpenAI, com contas separadas.
+                  outro na Groq, com contas separadas. Serve qualquer serviço compatível com a API
+                  da OpenAI.
                 </p>
               </div>
 
               <div>
                 <Rotulo>Provedor</Rotulo>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {(provedores || []).map((p) => (
                     <button key={p.id} type="button"
                       onClick={() => set({
                         provedor: p.id,
                         modelo: p.modelos[0]?.id || "",
                         chave_api: "",
+                        base_url: p.id === agente?.provedor ? agente?.base_url || "" : "",
                       })}
                       data-testid={`agente-provedor-${p.id}`}
                       className={`border rounded-lg p-3 text-left transition-colors ${
@@ -621,14 +639,21 @@ export default function AgenteWizard({
                           ? "border-info bg-info-soft ring-1 ring-info"
                           : "border-line hover:border-line-strong"
                       }`}>
-                      <div className="font-bold text-sm">{p.rotulo}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-sm">{p.rotulo}</span>
+                        {p.gratuito && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-success-soft text-success">
+                            Plano grátis
+                          </span>
+                        )}
+                      </div>
                     </button>
                   ))}
                   {plataformaDisponivel && (
                     <button type="button"
-                      onClick={() => set({ provedor: "", modelo: "", chave_api: "" })}
+                      onClick={() => set({ provedor: "", modelo: "", chave_api: "", base_url: "" })}
                       data-testid="agente-provedor-plataforma"
-                      className={`border rounded-lg p-3 text-left transition-colors sm:col-span-2 ${
+                      className={`border rounded-lg p-3 text-left transition-colors sm:col-span-2 lg:col-span-3 ${
                         !form.provedor
                           ? "border-info bg-info-soft ring-1 ring-info"
                           : "border-line hover:border-line-strong"
@@ -668,30 +693,85 @@ export default function AgenteWizard({
                           </div>
                         </label>
                       ))}
+                      {provedorAtual.modelo_livre && (
+                        // O catálogo do provedor muda mais rápido que o nosso:
+                        // qualquer id que ele aceite serve, e a chamada de teste
+                        // ao salvar confirma.
+                        <label
+                          className={`flex items-start gap-3 border rounded-lg p-3 cursor-pointer transition-colors ${
+                            !modeloSugerido
+                              ? "border-info bg-info-soft"
+                              : "border-line hover:border-line-strong"
+                          }`}>
+                          <input type="radio" name="modelo" className="mt-1"
+                            checked={!modeloSugerido}
+                            onChange={() => set({ modelo: "" })}
+                            data-testid="agente-modelo-outro" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-sm">
+                              {provedorAtual.modelos.length ? "Outro modelo" : "Modelo"}
+                            </div>
+                            <input className="zz-input font-mono mt-1.5"
+                              placeholder="id do modelo, como aparece na documentação do provedor"
+                              value={modeloSugerido ? "" : form.modelo}
+                              onFocus={() => modeloSugerido && set({ modelo: "" })}
+                              onChange={(e) => set({ modelo: e.target.value.trim() })}
+                              data-testid="agente-modelo-livre" />
+                            <div className="text-[11px] text-ink-3 mt-1">
+                              Sem estimativa de custo: o consumo é medido em tokens.
+                            </div>
+                          </div>
+                        </label>
+                      )}
                     </div>
-                    <p className="text-[11px] text-ink-3 mt-2">
-                      Estimativa para 50 atendimentos por dia (~9.000 respostas no mês). O provedor
-                      cobra em dólar, direto na conta da empresa.
-                    </p>
+                    {provedorAtual.modelos.length > 0 && (
+                      <p className="text-[11px] text-ink-3 mt-2">
+                        Estimativa para 50 atendimentos por dia (~9.000 respostas no mês). O provedor
+                        cobra em dólar, direto na conta da empresa
+                        {provedorAtual.gratuito
+                          ? "; no plano grátis dele não há cobrança, só limite de mensagens por minuto e por dia."
+                          : "."}
+                      </p>
+                    )}
                   </div>
+
+                  {provedorAtual.url_livre && (
+                    <div>
+                      <Rotulo obrigatorio>Endereço da API</Rotulo>
+                      <input className="zz-input font-mono"
+                        placeholder="https://api.exemplo.com/v1"
+                        value={form.base_url}
+                        onChange={(e) => set({ base_url: e.target.value })}
+                        data-testid="agente-base-url" />
+                      <p className="text-[11px] text-ink-3 mt-1.5">
+                        O endereço base do serviço compatível com a OpenAI (Together, Fireworks,
+                        Cerebras e afins), sem o <span className="font-mono">/chat/completions</span>.
+                        Precisa ser https e acessível pela internet.
+                      </p>
+                    </div>
+                  )}
 
                   <div>
                     <div className="flex items-center justify-between gap-3 mb-1.5">
                       <Rotulo>Chave de API</Rotulo>
-                      <a href={provedorAtual.console_url} target="_blank" rel="noreferrer"
-                        className="zz-btn zz-btn-secondary text-xs py-1"
-                        data-testid="agente-abrir-console">
-                        <ArrowSquareOut size={13} weight="bold" /> Abrir o console
-                      </a>
+                      {provedorAtual.console_url && (
+                        <a href={provedorAtual.console_url} target="_blank" rel="noreferrer"
+                          className="zz-btn zz-btn-secondary text-xs py-1"
+                          data-testid="agente-abrir-console">
+                          <ArrowSquareOut size={13} weight="bold" /> Abrir o console
+                        </a>
+                      )}
                     </div>
                     <div className="relative">
                       <Key size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
                       <input type="password" autoComplete="off"
                         className="zz-input pl-9 font-mono"
                         placeholder={
-                          agente?.tem_chave && agente.provedor === form.provedor
+                          chaveGuardadaServe
                             ? `Chave atual ${agente.mascara} — deixe em branco para manter`
-                            : `Cole a chave (começa com ${form.provedor === "anthropic" ? "sk-ant-" : "sk-"})`
+                            : provedorAtual.prefixo
+                              ? `Cole a chave (começa com ${provedorAtual.prefixo})`
+                              : "Cole a chave"
                         }
                         value={form.chave_api}
                         onChange={(e) => set({ chave_api: e.target.value })}

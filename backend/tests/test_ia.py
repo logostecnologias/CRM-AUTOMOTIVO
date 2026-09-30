@@ -85,8 +85,9 @@ class _ValidacaoFalsa:
         self.chamadas = []
         self.erro = None
 
-    async def __call__(self, provedor, chave, modelo):
+    async def __call__(self, provedor, chave, modelo, base_url=None):
         self.chamadas.append((provedor, chave, modelo))
+        self.base_url = base_url
         if self.erro:
             raise ai_client.IAError(self.erro)
         return ai_client.Resposta(texto="ok", modelo=modelo, tokens_entrada=10,
@@ -147,7 +148,7 @@ async def etapa_salvar():
     await semear()
     # Provedor desconhecido nem chega perto da rede.
     st, det = await erro(rai.criar_agente(
-        rai.AgenteIn(nome="X", provedor="deepseek", chave_api="sk-x"), ADMIN_A))
+        rai.AgenteIn(nome="X", provedor="inexistente", chave_api="sk-x"), ADMIN_A))
     check("provedor desconhecido e recusado", st == 400, (st, det))
 
     # Chave com o prefixo do outro provedor e barrada ANTES da chamada.
@@ -384,15 +385,162 @@ async def etapa_barreira_de_permissao():
 async def etapa_catalogo():
     print("\n[catalogo]")
     cat = ai_client.catalogo_publico()
-    check("os dois provedores aparecem", {c["id"] for c in cat} == {"anthropic", "openai"}, cat)
+    ids = {c["id"] for c in cat}
+    check("os provedores aparecem", {"anthropic", "openai", "groq", "gemini",
+                                     "compativel"} <= ids, ids)
     for prov in cat:
-        check(f"{prov['id']} tem link do console", prov["console_url"].startswith("https://"))
+        if not prov["url_livre"]:
+            check(f"{prov['id']} tem link do console", prov["console_url"].startswith("https://"))
         for m in prov["modelos"]:
             check(f"{m['id']} expoe preco de cache", "cache_leitura" in m, m)
-            check(f"{m['id']} tem preco de cache menor que o de entrada",
-                  m["cache_leitura"] < m["entrada"], m)
+            # Igual quando o provedor nao da desconto de cache (Mistral, Llama na Groq).
+            check(f"{m['id']} tem preco de cache nao maior que o de entrada",
+                  m["cache_leitura"] <= m["entrada"], m)
     check("o catalogo nao carrega segredo nenhum",
           "prefixo_chave" not in str(cat) and "chave" not in str(cat).lower())
+
+
+CHAVE_GROQ = "gsk_" + "G" * 48
+
+
+async def etapa_provedores_compativeis():
+    print("\n[provedores compativeis com OpenAI]")
+    await semear()
+
+    # Prefixo conferido tambem aqui, antes de gastar chamada.
+    VALIDAR.chamadas.clear()
+    st, det = await erro(rai.criar_agente(
+        rai.AgenteIn(nome="G", provedor="groq", chave_api=CHAVE_OPENAI), ADMIN_A))
+    check("chave da openai no campo da groq e recusada", st == 400 and "gsk_" in det, det)
+    check("sem chamada ao provedor", VALIDAR.chamadas == [])
+
+    # Modelo fora da lista sugerida e aceito nos provedores de modelo livre.
+    ag = await rai.criar_agente(rai.AgenteIn(
+        nome="Groq", provedor="groq", modelo="qwen/qwen3-32b", chave_api=CHAVE_GROQ), ADMIN_A)
+    check("modelo livre aceito na groq", ag["modelo"] == "qwen/qwen3-32b", ag)
+    check("com a mascara da chave", ag["mascara"].startswith("gsk_"), ag["mascara"])
+    check("sem endereco proprio", ag["base_url"] is None, ag.get("base_url"))
+
+    # ... mas nao em anthropic/openai, que tem lista fechada.
+    st, _ = await erro(rai.criar_agente(rai.AgenteIn(
+        nome="X", provedor="openai", modelo="gpt-inventado", chave_api=CHAVE_OPENAI), ADMIN_A))
+    check("modelo inventado recusado na openai", st == 400, st)
+    st, _ = await erro(rai.criar_agente(rai.AgenteIn(
+        nome="X", provedor="groq", modelo="tem espaco", chave_api=CHAVE_GROQ), ADMIN_A))
+    check("id de modelo com espaco recusado", st == 400, st)
+
+    # Compativel: endereco obrigatorio, https e publico.
+    for url, motivo in [(None, "sem endereco"), ("http://8.8.8.8/v1", "http"),
+                        ("https://127.0.0.1/v1", "loopback"),
+                        ("https://10.0.0.5/v1", "rede privada"),
+                        ("https://169.254.169.254/v1", "metadados de nuvem")]:
+        VALIDAR.chamadas.clear()
+        st, det = await erro(rai.criar_agente(rai.AgenteIn(
+            nome="C", provedor="compativel", modelo="llama", base_url=url,
+            chave_api="qualquer-coisa-123"), ADMIN_A))
+        check(f"endereco recusado: {motivo}", st == 400, (st, det))
+        check(f"e a chave nao saiu do servidor ({motivo})", VALIDAR.chamadas == [])
+
+    ag = await rai.criar_agente(rai.AgenteIn(
+        nome="Proprio", provedor="compativel", modelo="meu-modelo",
+        base_url="https://8.8.8.8/v1/", chave_api="tok-" + "x" * 30), ADMIN_A)
+    check("compativel com endereco publico e gravado", ag["base_url"] == "https://8.8.8.8/v1", ag)
+    check("e a validacao recebeu o endereco", VALIDAR.base_url == "https://8.8.8.8/v1")
+
+    atual = await DB.ai_agents.find_one({"id": ag["id"]}, {"_id": 0})
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_A, atual)
+    check("o runtime carrega o endereco", cred["base_url"] == "https://8.8.8.8/v1", cred)
+
+    # Trocar o endereco sem reenviar a chave: recusado.
+    st, det = await erro(rai.atualizar_agente(ag["id"], rai.AgenteIn(
+        nome="Proprio", provedor="compativel", modelo="meu-modelo",
+        base_url="https://1.1.1.1/v1"), ADMIN_A))
+    check("trocar o endereco exige a chave de novo", st == 400 and "endereço" in det, (st, det))
+    # Mesmo endereco: reaproveita a guardada.
+    r = await rai.atualizar_agente(ag["id"], rai.AgenteIn(
+        nome="Renomeado", provedor="compativel", modelo="meu-modelo",
+        base_url="https://8.8.8.8/v1"), ADMIN_A)
+    check("mesmo endereco reaproveita a chave", r["nome"] == "Renomeado" and r["tem_chave"], r)
+
+
+class _Obj:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class _ClienteChatFalso:
+    """Imita `AsyncOpenAI` o bastante para o laco de Chat Completions: primeira
+    volta pede uma ferramenta, segunda responde texto."""
+    ultimo = None
+
+    def __init__(self, api_key=None, base_url=None, **kw):
+        self.base_url = base_url
+        self.pedidos = []
+        _ClienteChatFalso.ultimo = self
+        self.chat = _Obj(completions=_Obj(create=self._create))
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def _create(self, **kw):
+        import copy
+        self.pedidos.append(copy.deepcopy(kw))
+        uso = _Obj(prompt_tokens=100, completion_tokens=10,
+                   prompt_tokens_details=_Obj(cached_tokens=40))
+        if len(self.pedidos) == 1:
+            chamada = _Obj(id="call_1",
+                           function=_Obj(name="consultar", arguments='{"dia": "amanha"}'))
+            msg = _Obj(content=None, tool_calls=[chamada])
+        else:
+            msg = _Obj(content="<think>rascunho</think>Tem as 14h.", tool_calls=None)
+        return _Obj(usage=uso, choices=[_Obj(message=msg, finish_reason="stop")])
+
+
+async def etapa_laco_chat_completions():
+    print("\n[laco de ferramentas no Chat Completions]")
+    import openai
+    original = openai.AsyncOpenAI
+    openai.AsyncOpenAI = _ClienteChatFalso
+    recebidos = []
+
+    async def executar(nome, args):
+        recebidos.append((nome, args))
+        return "14:00 livre"
+
+    try:
+        r = await ai_client.responder(
+            "groq", CHAVE_GROQ, "llama-3.3-70b-versatile", "Instrucoes",
+            [{"role": "user", "content": "tem horario?"}],
+            ferramentas=[ai_client.Ferramenta("consultar", "Consulta", {"type": "object"})],
+            executar=executar)
+    finally:
+        openai.AsyncOpenAI = original
+    cli = _ClienteChatFalso.ultimo
+    check("usa o endereco da groq", cli.base_url == "https://api.groq.com/openai/v1", cli.base_url)
+    check("instrucao vai como system", cli.pedidos[0]["messages"][0] ==
+          {"role": "system", "content": "Instrucoes"}, cli.pedidos[0]["messages"][0])
+    check("ferramenta no envelope do chat",
+          cli.pedidos[0]["tools"][0]["function"]["name"] == "consultar", cli.pedidos[0]["tools"])
+    check("executou com os argumentos decodificados",
+          recebidos == [("consultar", {"dia": "amanha"})], recebidos)
+    volta = cli.pedidos[1]["messages"]
+    check("devolveu o resultado como role tool",
+          volta[-1] == {"role": "tool", "tool_call_id": "call_1", "content": "14:00 livre"},
+          volta[-1])
+    check("o raciocinio <think> nao chega ao contato", r.texto == "Tem as 14h.", r.texto)
+    check("consumo das duas voltas somado, sem os cacheados na entrada",
+          (r.tokens_entrada, r.tokens_cache_leitura, r.tokens_saida) == (120, 80, 20),
+          (r.tokens_entrada, r.tokens_cache_leitura, r.tokens_saida))
+    check("ferramenta registrada", r.ferramentas_usadas == ["consultar"])
+
+    # Registrar uso de modelo fora do catalogo nao pode perder a contagem.
+    await ai_runtime.registrar_uso(DB, TENANT_A, ai_runtime.ORIGEM_CLIENTE,
+                                   "groq", "qwen/qwen3-32b", r)
+    doc = await DB.ai_usage.find_one({"tenant_id": TENANT_A, "modelo": "qwen/qwen3-32b"})
+    check("modelo livre e medido em tokens", doc and doc["tokens"] == 220, doc)
 
 
 # ---------------------------------------------------------------------------
@@ -411,5 +559,7 @@ def test_suite():
         await etapa_cota_do_plano()
         await etapa_barreira_de_permissao()
         await etapa_catalogo()
+        await etapa_provedores_compativeis()
+        await etapa_laco_chat_completions()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

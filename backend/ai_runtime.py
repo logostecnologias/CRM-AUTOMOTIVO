@@ -61,7 +61,9 @@ def _credencial_plataforma() -> dict | None:
         logger.warning("AI_PLATFORM_PROVIDER inválido (%s) — ignorando chave da plataforma", provedor)
         return None
     modelo = os.environ.get("AI_PLATFORM_MODEL") or ai_client.modelo_padrao(provedor)
-    return {"provedor": provedor, "chave": chave, "modelo": modelo, "origem": ORIGEM_PLATAFORMA}
+    return {"provedor": provedor, "chave": chave, "modelo": modelo, "origem": ORIGEM_PLATAFORMA,
+            # Só usado quando AI_PLATFORM_PROVIDER=compativel.
+            "base_url": os.environ.get("AI_PLATFORM_BASE_URL")}
 
 
 async def resolver_credencial(db, tenant_id: str, agente: dict) -> dict:
@@ -80,6 +82,7 @@ async def resolver_credencial(db, tenant_id: str, agente: dict) -> dict:
             "chave": ai_credentials.decifrar(agente["credencial"]),
             "modelo": agente["modelo"],
             "origem": ORIGEM_CLIENTE,
+            "base_url": agente.get("base_url"),
         }
 
     plataforma = _credencial_plataforma()
@@ -221,7 +224,7 @@ async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str
     cred = await resolver_credencial(db, tenant_id, agente)
     resposta = await ai_client.responder(
         cred["provedor"], cred["chave"], cred["modelo"], instrucoes, historico,
-        ferramentas=ferramentas, executar=executar,
+        ferramentas=ferramentas, executar=executar, base_url=cred.get("base_url"),
     )
     await registrar_uso(db, tenant_id, cred["origem"], cred["provedor"],
                         cred["modelo"], resposta, agente.get("id"))

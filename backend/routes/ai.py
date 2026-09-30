@@ -77,6 +77,9 @@ class AgenteIn(BaseModel):
     # guardada (o cliente não tem como reenviá-la: nunca a devolvemos).
     provedor: str | None = None
     modelo: str | None = None
+    # Endereço do Chat Completions, só para o provedor "compativel". Nos
+    # outros o endereço é o do catálogo e este campo é ignorado.
+    base_url: str | None = None
     chave_api: str | None = None
     tipo: str = "geral"
     objetivo: str | None = None          # obrigatório quando tipo = personalizado
@@ -148,20 +151,30 @@ async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
     if not body.provedor:
         return {"provedor": None, "modelo": None, "credencial": None,
                 "credencial_status": None, "credencial_erro": None,
-                "credencial_em": None}
+                "credencial_em": None, "base_url": None}
 
     if body.provedor not in ai_client.PROVEDORES:
         raise HTTPException(status_code=400, detail="Provedor desconhecido")
-    modelo = body.modelo or ai_client.modelo_padrao(body.provedor)
+    provedor = ai_client.PROVEDORES[body.provedor]
     try:
+        modelo = (body.modelo or "").strip() or ai_client.modelo_padrao(body.provedor)
         ai_client.modelo_de(body.provedor, modelo)
     except ai_client.IAError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Endereço informado pelo cliente: https e destino público, conferido antes
+    # de a chave sair do servidor em direção a ele.
+    base_url = None
+    if provedor.get("url_livre"):
+        try:
+            base_url = await ai_client.validar_base_url(body.base_url)
+        except ai_client.IAError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
     if body.chave_api:
         chave = body.chave_api.strip()
-        prefixo = ai_client.PROVEDORES[body.provedor]["prefixo_chave"]
-        if not chave.startswith(prefixo):
+        prefixo = provedor.get("prefixo_chave")
+        if prefixo and not chave.startswith(prefixo):
             # Conferido antes de gastar uma chamada: o engano comum é colar a
             # chave de um provedor no campo do outro.
             raise HTTPException(
@@ -170,7 +183,11 @@ async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
                         f"{ai_client.PROVEDORES[body.provedor]['rotulo']} "
                         f"(deveria começar com \"{prefixo}\")."),
             )
-    elif atual and atual.get("credencial") and atual.get("provedor") == body.provedor:
+    elif (atual and atual.get("credencial") and atual.get("provedor") == body.provedor
+          # Trocar o endereço exige a chave de novo: reaproveitar a guardada
+          # mandaria a credencial para um servidor que ela nunca conheceu, e
+          # quem troca o endereço pode não ser quem colou a chave.
+          and (atual.get("base_url") or None) == base_url):
         try:
             chave = ai_credentials.decifrar(atual["credencial"])
         except ai_credentials.CredencialError as e:
@@ -179,10 +196,13 @@ async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
         # Trocar de provedor sem informar a chave nova não tem como funcionar:
         # a guardada é do provedor antigo.
         raise HTTPException(status_code=400,
-                            detail="Informe a chave de API do provedor escolhido")
+                            detail=("Informe a chave de API de novo: o endereço da API mudou"
+                                    if atual and atual.get("provedor") == body.provedor
+                                    and atual.get("credencial")
+                                    else "Informe a chave de API do provedor escolhido"))
 
     try:
-        await ai_client.validar(body.provedor, chave, modelo)
+        await ai_client.validar(body.provedor, chave, modelo, base_url=base_url)
     except ai_client.IAError as e:
         # 400, não 502: quem precisa agir é o cliente (chave, saldo, acesso ao
         # modelo), e a mensagem de `_traduz_erro` já diz o quê.
@@ -195,7 +215,7 @@ async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
 
     return {"provedor": body.provedor, "modelo": modelo, "credencial": credencial,
             "credencial_status": "ok", "credencial_erro": None,
-            "credencial_em": _now()}
+            "credencial_em": _now(), "base_url": base_url}
 
 
 def _publico(agente: dict) -> dict:
