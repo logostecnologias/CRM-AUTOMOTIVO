@@ -51,6 +51,43 @@ async def listar_provedores(_=Depends(require_tenant_admin)):
     }
 
 
+class ModelosIn(BaseModel):
+    provedor: str
+    chave_api: str | None = None
+    base_url: str | None = None
+    # Ao editar: sem chave nova, usa a guardada neste agente, desde que
+    # provedor e endereço sejam os mesmos (mesma regra de salvar).
+    agente_id: str | None = None
+
+
+@router.post("/models")
+async def modelos_da_conta(body: ModelosIn, user=Depends(require_tenant_admin)):
+    """Os modelos que esta chave alcança, lidos do provedor na hora.
+
+    POST e não GET porque leva a chave no corpo: numa query string ela iria
+    parar no log de acesso do Caddy e no histórico do navegador.
+    """
+    chave = (body.chave_api or "").strip()
+    if not chave and body.agente_id:
+        atual = await get_db().ai_agents.find_one(
+            {"id": body.agente_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
+        mesmo_endereco = ((atual or {}).get("base_url") or None) == (
+            (body.base_url or "").strip().rstrip("/") or None)
+        if (atual and atual.get("credencial") and atual.get("provedor") == body.provedor
+                and (mesmo_endereco or not ai_client.PROVEDORES.get(body.provedor, {}).get("url_livre"))):
+            try:
+                chave = ai_credentials.decifrar(atual["credencial"])
+            except ai_credentials.CredencialError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+    if not chave:
+        raise HTTPException(status_code=400, detail="Cole a chave de API para buscar os modelos")
+    try:
+        modelos = await ai_client.listar_modelos(body.provedor, chave, body.base_url)
+    except ai_client.IAError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"modelos": modelos}
+
+
 @router.get("/usage")
 async def consumo(mes: str | None = None, user=Depends(require_tenant_admin)):
     """Consumo do mês. `mes` no formato AAAA-MM; ausente = mês corrente."""

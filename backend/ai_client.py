@@ -132,12 +132,13 @@ PROVEDORES: dict[str, dict] = {
         # prometer zero a quem passar do limite gratuito.
         "gratuito": True,
         "modelos": [
-            Modelo("llama-3.3-70b-versatile", "Llama 3.3 70B", 0.59, 0.79, 0.59, 0.0,
-                   "Recomendado: boa qualidade em português, respostas muito rápidas."),
-            Modelo("openai/gpt-oss-120b", "GPT-OSS 120B", 0.15, 0.75, 0.075, 0.0,
-                   "Modelo aberto da OpenAI, bom em seguir instruções."),
-            Modelo("llama-3.1-8b-instant", "Llama 3.1 8B", 0.05, 0.08, 0.05, 0.0,
-                   "O mais barato e rápido. Para triagem simples."),
+            # Os Llama da Groq passaram a "fale com vendas" (out/2026): numa
+            # chave do plano grátis eles respondem 404. Por isso não são
+            # sugeridos; quem tiver acesso os acha em "Buscar modelos".
+            Modelo("openai/gpt-oss-120b", "GPT-OSS 120B", 0.15, 0.60, 0.075, 0.0,
+                   "Recomendado: modelo aberto da OpenAI, bom em seguir instruções."),
+            Modelo("openai/gpt-oss-20b", "GPT-OSS 20B", 0.075, 0.30, 0.0375, 0.0,
+                   "Mais barato e mais rápido. Para triagem simples."),
         ],
     },
     "gemini": {
@@ -166,11 +167,11 @@ PROVEDORES: dict[str, dict] = {
         "modelo_livre": True,
         "gratuito": True,
         "modelos": [
-            Modelo("meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B (gratuito)",
-                   0.0, 0.0, 0.0, 0.0,
-                   "Versão gratuita, com limite diário de requisições."),
+            # Os gratuitos do OpenRouter (sufixo `:free`) mudam toda semana, e
+            # sugerir um deles foi o que produziu 404 no primeiro uso. Ficam
+            # para "Buscar modelos", que lê a lista viva da conta.
             Modelo("google/gemini-2.5-flash", "Gemini 2.5 Flash", 0.30, 2.50, 0.075, 0.0,
-                   "Centenas de modelos numa conta só: dá para digitar outro id."),
+                   "Centenas de modelos numa conta só, inclusive gratuitos (:free)."),
         ],
     },
     "deepseek": {
@@ -731,7 +732,11 @@ def _traduz_erro(e: Exception) -> str:
     if status == 402 or "credit" in str(e).lower() or "quota" in str(e).lower():
         return "A conta no provedor está sem saldo ou sem cota. Adicione créditos e tente de novo."
     if status == 404:
-        return "Modelo indisponível para esta conta. Alguns modelos exigem um nível de acesso que a conta ainda não tem."
+        # Na Groq e no OpenRouter é quase sempre modelo descontinuado ou fora
+        # do plano da conta, não chave errada: a saída é escolher outro.
+        return ("O provedor não encontrou este modelo para a sua conta: ele pode ter sido "
+                "descontinuado ou não estar liberado no seu plano. Use \"Buscar modelos da "
+                "conta\" e escolha um da lista.")
     if status == 429 or "RateLimit" in nome:
         return "O provedor está limitando as chamadas desta conta no momento. Tente novamente em instantes."
     if status and status >= 500:
@@ -774,3 +779,57 @@ async def validar_conexao(conexao: dict) -> Resposta:
         conexao["modelo"],
         base_url=conexao.get("base_url"),
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Modelos da conta (o "Buscar modelos" da tela)
+# ---------------------------------------------------------------------------
+#
+# A lista sugerida do catálogo envelhece: no primeiro uso real (30/09/2026) os
+# dois modelos sugeridos para Groq e OpenRouter respondiam 404, um porque saiu
+# do plano grátis e outro porque deixou de existir. A lista que vale é a que o
+# provedor devolve para aquela chave, e todos os provedores aqui expõem
+# `GET /models` no formato da OpenAI.
+
+# O que não é modelo de conversa. A lista do provedor mistura embeddings,
+# transcrição, voz, moderação e imagem, e escolher um deles daria erro na
+# primeira mensagem do contato.
+_NAO_CONVERSA = ("embed", "whisper", "tts", "transcribe", "moderation", "guard",
+                 "safeguard", "dall-e", "image", "audio", "realtime", "orpheus",
+                 "rerank", "search")
+
+MAX_MODELOS_LISTADOS = 500
+
+
+async def listar_modelos(provedor: str, chave_api: str, base_url: str | None = None) -> list[str]:
+    """Ids de modelo de conversa que esta chave alcança, em ordem alfabética.
+
+    Levanta `IAError` com texto para a tela: é a mesma chave que vai ser
+    validada ao salvar, então um 401 aqui já diz o que vai dar errado depois.
+    """
+    p = PROVEDORES.get(provedor)
+    if not p:
+        raise IAError(f"Provedor desconhecido: {provedor}")
+    # Só onde o modelo é livre: em Anthropic e OpenAI a lista é fechada, e
+    # mostrar ids que `modelo_de` recusaria ao salvar só confundiria.
+    if not p.get("modelo_livre") or p.get("protocolo") != "chat":
+        raise IAError("Este provedor usa a lista de modelos do próprio ZappZen")
+    try:
+        from openai import AsyncOpenAI
+        url = base_url_de(provedor, base_url)
+        if p.get("url_livre"):
+            url = await validar_base_url(url)
+        async with AsyncOpenAI(api_key=chave_api, base_url=url, max_retries=1,
+                               timeout=30) as client:
+            pagina = await client.models.list()
+            ids = [m.id for m in pagina.data]
+    except IAError:
+        raise
+    except ImportError:
+        raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
+    except Exception as e:
+        raise IAError(_traduz_erro(e))
+
+    ids = sorted({i for i in ids if i and not any(x in i.lower() for x in _NAO_CONVERSA)})
+    return ids[:MAX_MODELOS_LISTADOS]

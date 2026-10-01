@@ -478,6 +478,12 @@ class _ClienteChatFalso:
         self.pedidos = []
         _ClienteChatFalso.ultimo = self
         self.chat = _Obj(completions=_Obj(create=self._create))
+        self.models = _Obj(list=self._listar)
+
+    async def _listar(self):
+        ids = ["openai/gpt-oss-120b", "whisper-large-v3", "meta-llama/llama-prompt-guard-2-86m",
+               "nomic-embed-text", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+        return _Obj(data=[_Obj(id=i) for i in ids])
 
     async def __aenter__(self):
         return self
@@ -543,6 +549,59 @@ async def etapa_laco_chat_completions():
     check("modelo livre e medido em tokens", doc and doc["tokens"] == 220, doc)
 
 
+async def etapa_buscar_modelos():
+    print("\n[buscar modelos da conta]")
+    import openai
+    original = openai.AsyncOpenAI
+    openai.AsyncOpenAI = _ClienteChatFalso
+    try:
+        ids = await ai_client.listar_modelos("groq", CHAVE_GROQ)
+        check("so modelos de conversa, sem repetidos e em ordem",
+              ids == ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"], ids)
+        check("no endereco do provedor",
+              _ClienteChatFalso.ultimo.base_url == "https://api.groq.com/openai/v1")
+        try:
+            await ai_client.listar_modelos("openai", CHAVE_OPENAI)
+            check("lista fechada nao e buscada", False)
+        except ai_client.IAError:
+            check("lista fechada (openai) nao e buscada", True)
+    finally:
+        openai.AsyncOpenAI = original
+
+    chamadas = []
+
+    async def listar_falso(provedor, chave, base_url=None):
+        chamadas.append((provedor, chave, base_url))
+        return ["m1"]
+
+    original_l = rai.ai_client.listar_modelos
+    rai.ai_client.listar_modelos = listar_falso
+    try:
+        r = await rai.modelos_da_conta(rai.ModelosIn(provedor="groq", chave_api=CHAVE_GROQ), ADMIN_A)
+        check("devolve a lista", r == {"modelos": ["m1"]}, r)
+
+        st, _ = await erro(rai.modelos_da_conta(rai.ModelosIn(provedor="groq"), ADMIN_A))
+        check("sem chave e sem agente pede a chave", st == 400, st)
+
+        ag = await rai.criar_agente(rai.AgenteIn(
+            nome="Busca", provedor="groq", modelo="openai/gpt-oss-20b",
+            chave_api=CHAVE_GROQ), ADMIN_A)
+        chamadas.clear()
+        await rai.modelos_da_conta(rai.ModelosIn(provedor="groq", agente_id=ag["id"]), ADMIN_A)
+        check("ao editar reaproveita a chave guardada", chamadas[0][1] == CHAVE_GROQ, chamadas)
+
+        st, _ = await erro(rai.modelos_da_conta(
+            rai.ModelosIn(provedor="groq", agente_id=ag["id"]), ADMIN_B))
+        check("outra empresa nao usa a chave guardada", st == 400, st)
+        st, _ = await erro(rai.modelos_da_conta(
+            rai.ModelosIn(provedor="gemini", agente_id=ag["id"]), ADMIN_A))
+        check("chave de outro provedor nao e reaproveitada", st == 400, st)
+    finally:
+        rai.ai_client.listar_modelos = original_l
+    check("rota exige admin", "require_tenant_admin" in str(
+        inspect.signature(rai.modelos_da_conta).parameters["user"].default))
+
+
 # ---------------------------------------------------------------------------
 
 def test_suite():
@@ -561,5 +620,6 @@ def test_suite():
         await etapa_catalogo()
         await etapa_provedores_compativeis()
         await etapa_laco_chat_completions()
+        await etapa_buscar_modelos()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

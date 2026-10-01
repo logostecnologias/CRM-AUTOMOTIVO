@@ -3,7 +3,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import {
   ArrowLeft, ArrowRight, Check, FloppyDisk, ArrowSquareOut, Key,
   ShoppingCart, Target, Headset, ChatCircleDots, CalendarBlank, Star,
-  Lightning, TextAlignLeft, Article, Lifebuoy, Flag, Prohibit,
+  Lightning, TextAlignLeft, Article, Lifebuoy, Flag, Prohibit, MagnifyingGlass,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import FotosAgente from "./FotosAgente";
@@ -125,6 +125,36 @@ export default function AgenteWizard({
     agente?.tem_chave &&
     agente.provedor === form.provedor &&
     (agente.base_url || "") === (provedorAtual?.url_livre ? form.base_url.trim().replace(/\/+$/, "") : "");
+
+  // Modelos lidos do provedor com a chave do cliente. A lista sugerida do
+  // catálogo envelhece (modelo sai do plano grátis, é descontinuado); esta é a
+  // que vale para aquela conta.
+  const [modelosConta, setModelosConta] = useState(null); // { provedor, ids }
+  const [buscandoModelos, setBuscandoModelos] = useState(false);
+  const listaDaConta = modelosConta?.provedor === form.provedor ? modelosConta.ids : null;
+  const filtroModelo = modeloSugerido ? "" : form.modelo.toLowerCase();
+  const listaFiltrada = (listaDaConta || [])
+    .filter((id) => !filtroModelo || id === form.modelo || id.toLowerCase().includes(filtroModelo))
+    .slice(0, 200);
+
+  const buscarModelos = async () => {
+    if (buscandoModelos) return;
+    setBuscandoModelos(true);
+    try {
+      const { data } = await api.post("/ai/models", {
+        provedor: form.provedor,
+        chave_api: form.chave_api.trim() || null,
+        base_url: form.base_url || null,
+        agente_id: agente?.id || null,
+      });
+      setModelosConta({ provedor: form.provedor, ids: data.modelos });
+      if (!data.modelos.length) toast.message("O provedor não devolveu nenhum modelo para esta chave.");
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    } finally {
+      setBuscandoModelos(false);
+    }
+  };
 
   const alternarTom = (id) =>
     set({ tom: form.tom.includes(id) ? form.tom.filter((t) => t !== id) : [...form.tom, id] });
@@ -717,9 +747,39 @@ export default function AgenteWizard({
                               onFocus={() => modeloSugerido && set({ modelo: "" })}
                               onChange={(e) => set({ modelo: e.target.value.trim() })}
                               data-testid="agente-modelo-livre" />
-                            <div className="text-[11px] text-ink-3 mt-1">
-                              Sem estimativa de custo: o consumo é medido em tokens.
+                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                              <span className="text-[11px] text-ink-3">
+                                Sem estimativa de custo: o consumo é medido em tokens.
+                              </span>
+                              <button type="button"
+                                className="zz-btn zz-btn-secondary text-xs py-1 shrink-0"
+                                disabled={buscandoModelos}
+                                onClick={buscarModelos}
+                                data-testid="agente-buscar-modelos">
+                                <MagnifyingGlass size={13} weight="bold" />
+                                {buscandoModelos ? "Buscando…" : "Buscar modelos da conta"}
+                              </button>
                             </div>
+                            {listaDaConta && (
+                              <div className="mt-2 border border-line rounded-lg max-h-56 overflow-y-auto"
+                                data-testid="agente-modelos-conta">
+                                {listaFiltrada.length === 0 ? (
+                                  <div className="p-3 text-xs text-ink-3">
+                                    Nenhum modelo com esse nome nesta conta.
+                                  </div>
+                                ) : (
+                                  listaFiltrada.map((id) => (
+                                    <button key={id} type="button"
+                                      onClick={() => set({ modelo: id })}
+                                      className={`block w-full text-left px-3 py-1.5 font-mono text-xs border-b border-line last:border-b-0 ${
+                                        form.modelo === id ? "bg-info-soft text-info" : "hover:bg-surface-2"
+                                      }`}>
+                                      {id}
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+                            )}
                           </div>
                         </label>
                       )}
