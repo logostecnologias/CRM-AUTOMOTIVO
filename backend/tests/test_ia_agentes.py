@@ -72,6 +72,9 @@ class _IAFalsa:
         self.chamadas = []
         self.proxima = "Claro, posso ajudar com isso."
         self.erro = None
+        # (nome, argumentos): a ferramenta que o "modelo" chama antes de
+        # responder. Exercita o executor de verdade, como o laço do ai_client faria.
+        self.chamar = None
 
     async def __call__(self, db, tenant_id, agente, instrucoes, historico,
                        ferramentas=None, executar=None):
@@ -84,8 +87,15 @@ class _IAFalsa:
                               "ferramentas": ferramentas})
         if self.erro:
             raise self.erro
+        usadas = []
+        if self.chamar and ferramentas and executar:
+            nome, args = self.chamar
+            if nome in {f.nome for f in ferramentas}:
+                self.chamadas[-1]["resultado_ferramenta"] = await executar(nome, args)
+                usadas.append(nome)
         return ai_client.Resposta(texto=self.proxima, modelo="claude-haiku-4-5",
-                                  tokens_entrada=100, tokens_saida=20)
+                                  tokens_entrada=100, tokens_saida=20,
+                                  ferramentas_usadas=usadas)
 
 
 IA = _IAFalsa()
@@ -187,6 +197,7 @@ async def semear(*, agente=None, com_bot=False, bot_trigger="first_message",
     MIDIAS_ENVIADAS.clear()
     IA.chamadas.clear()
     IA.erro = None
+    IA.chamar = None
     IA.proxima = "Claro, posso ajudar com isso."
     os.environ.pop("AI_PLATFORM_KEY", None)
 
@@ -294,18 +305,15 @@ async def etapa_sentinela():
 
 
 async def etapa_teto_de_respostas():
-    print("\n[freio de mao]")
+    print("\n[sem teto de respostas]")
+    # Um `max_respostas` gravado antes da mudanca nao pode voltar a cortar.
     await semear(agente={"max_respostas": 2})
-    await receber("oi")
-    await receber("nao entendi")
-    check("respondeu duas vezes", len(ENVIADOS) == 2, ENVIADOS)
-    await receber("continuo sem entender")
+    for i in range(15):
+        await receber(f"mensagem {i}")
     s = await sessao()
-    check("na terceira, transferiu", len(ENVIADOS) == 2, ENVIADOS)
-    check("foi para a fila", s["status_atendimento"] == "aguardando", s["status_atendimento"])
-    check("dizendo quantas vezes tentou",
-          any("respondeu 2 vezes" in m for m in await sistemas(s["id"])),
-          await sistemas(s["id"]))
+    check("respondeu todas as 15", len(ENVIADOS) == 15, len(ENVIADOS))
+    check("e a conversa continua com o agente", s["status_atendimento"] == "bot", s["status_atendimento"])
+    check("o contador segue contando", s.get("ia_respostas") == 15, s.get("ia_respostas"))
 
 
 async def etapa_nao_rouba_do_bot():
@@ -511,8 +519,6 @@ async def etapa_prompt():
     check("tom fora do catalogo e recusado", st == 400, (st, det))
     st, det = await erro(rai.criar_agente(rai.AgenteIn(nome="X", modo="turbo"), ADMIN))
     check("modo fora do catalogo e recusado", st == 400, (st, det))
-    st, det = await erro(rai.criar_agente(rai.AgenteIn(nome="X", max_respostas=999), ADMIN))
-    check("teto absurdo de respostas e recusado", st == 400, (st, det))
 
 
 async def etapa_historico():
@@ -831,6 +837,176 @@ async def etapa_upload_de_fotos():
           await DB.media_files.count_documents({"tenant_id": TENANT}) >= 1)
 
 
+async def etapa_treinamento():
+    print()
+    print("[treinar o agente]")
+    await semear(agente={})
+
+    st, det = await erro(rai.ensinar("ag-1", rai.MemoriaIn(texto="   "), ADMIN))
+    check("ensinamento vazio e recusado", st == 400, (st, det))
+
+    a = await rai.ensinar("ag-1", rai.MemoriaIn(texto="O frete custa R$ 30."), ADMIN)
+    b = await rai.ensinar("ag-1", rai.MemoriaIn(texto="Na verdade o frete e gratis acima de R$ 200."), ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("os dois ficam guardados, na ordem", [m["texto"][:5] for m in doc["memoria"]] == ["O fre", "Na ve"],
+          doc.get("memoria"))
+    prompt = ai_agents.montar_instrucoes(doc)
+    check("entram no prompt numerados",
+          "1. O frete custa R$ 30." in prompt and "2. Na verdade" in prompt, prompt)
+    check("e o prompt diz que o mais recente ganha", "número maior" in prompt)
+
+    # Salvar a configuracao pelo assistente nao apaga o treino: o PATCH do
+    # agente faz $set so dos campos do formulario, e `memoria` nao e um deles.
+    check("memoria fica fora do formulario do agente", "memoria" not in rai.AgenteIn.model_fields)
+
+    await rai.corrigir_ensinamento("ag-1", a["id"], rai.MemoriaIn(texto="O frete custa R$ 25."), ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("o ensinamento pode ser corrigido", doc["memoria"][0]["texto"] == "O frete custa R$ 25.")
+
+    st, _ = await erro(rai.ensinar("ag-1", rai.MemoriaIn(texto="x" * (ai_agents.MAX_MEMORIA_ITEM + 1)), ADMIN))
+    check("ensinamento longo demais e recusado", st == 400, st)
+    await DB.ai_agents.update_one({"id": "ag-1"}, {"$set": {"memoria": doc["memoria"] + [
+        {"id": "grande", "texto": "y" * (ai_agents.MAX_MEMORIA_TOTAL - 60)}]}})
+    st, det = await erro(rai.ensinar("ag-1", rai.MemoriaIn(texto="z" * 100), ADMIN))
+    check("o total do treino tem teto", st == 400 and "limite" in det, (st, det))
+    await rai.esquecer("ag-1", "grande", ADMIN)
+
+    outro = {"id": "u-b", "tenant_id": "t-outro", "role": "tenant_admin",
+             "name": "B", "email": "b@x.com"}
+    st, _ = await erro(rai.ensinar("ag-1", rai.MemoriaIn(texto="invasao"), outro))
+    check("outra empresa nao ensina o agente alheio", st == 404, st)
+    st, _ = await erro(rai.esquecer("ag-1", a["id"], outro))
+    check("nem apaga o que ele aprendeu", st == 404, st)
+
+    await rai.esquecer("ag-1", b["id"], ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("esquecer tira so aquele", [m["id"] for m in doc["memoria"]] == [a["id"]], doc["memoria"])
+    await rai.esquecer_tudo("ag-1", ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("esquecer tudo zera o treino", doc["memoria"] == [])
+    check("e o bloco some do prompt", "já te ensinou" not in ai_agents.montar_instrucoes(doc))
+
+
+PLANILHA = (
+    "Modelo;Ano;Cor;Preço\n"
+    "Onix;2019;Prata;62.900\n"
+    "Onix;2020;Preto;68.500\n"
+    "HB20;2019;Prata;59.000\n"
+    ";;;\n"
+    "Tênis Corrida;;Azul;399\n"
+).encode("cp1252")
+
+
+async def etapa_estoque():
+    print()
+    print("[estoque do cliente]")
+    await semear(agente={})
+    import ai_estoque
+
+    st, det = await erro(rai.subir_estoque("ag-1", _upload("e.xlsx", "application/vnd.ms-excel", b"PK"), ADMIN))
+    check("xlsx e recusado dizendo como salvar em CSV", st == 400 and "CSV" in det, (st, det))
+
+    resumo = await rai.subir_estoque("ag-1", _upload("estoque.csv", "text/csv", PLANILHA), ADMIN)
+    check("a planilha entra, sem a linha em branco", resumo["total"] == 4, resumo)
+    check("as colunas sao as da planilha", resumo["colunas"] == ["Modelo", "Ano", "Cor", "Preço"], resumo)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+
+    linhas, total = await ai_estoque.buscar(DB, TENANT, doc, "tem o onix prata?")
+    check("busca exige todas as palavras", total == 1 and linhas[0]["Ano"] == "2019", (total, linhas))
+    linhas, _ = await ai_estoque.buscar(DB, TENANT, doc, "TENIS")
+    check("sem acento e sem caixa", linhas and linhas[0]["Modelo"] == "Tênis Corrida", linhas)
+    linhas, total = await ai_estoque.buscar(DB, TENANT, doc, "onix vermelho")
+    check("sem nenhum completo, devolve os mais parecidos", total == 2, (total, linhas))
+    linhas, total = await ai_estoque.buscar(DB, TENANT, doc, "")
+    check("sem busca, os primeiros na ordem da planilha", linhas[0]["Modelo"] == "Onix" and total == 4)
+
+    prompt = ai_agents.montar_instrucoes(doc)
+    check("o prompt leva o formato, nao a planilha",
+          "4 itens" in prompt and "consultar_estoque" in prompt and "HB20" not in prompt, prompt)
+
+    _, ferramentas, executar = await ai_agents.preparar_ferramentas(
+        DB, TENANT, doc, {"id": "c"}, None)
+    check("o agente recebe a ferramenta", [f.nome for f in ferramentas] == ["consultar_estoque"])
+    saida = await executar("consultar_estoque", {"busca": "hb20"})
+    check("e a ferramenta responde com a linha", "HB20" in saida and "59.000" in saida, saida)
+    _, sem, _ = await ai_agents.preparar_ferramentas(DB, TENANT, {"id": "x"}, {"id": "c"}, None)
+    check("agente sem estoque nao ganha ferramenta", not sem)
+
+    novo = "Modelo;Ano\nCivic;2021\n".encode()
+    await rai.subir_estoque("ag-1", _upload("novo.csv", "text/csv", novo), ADMIN)
+    check("subir de novo substitui o estoque inteiro",
+          await DB.ai_estoque.count_documents({"agente_id": "ag-1"}) == 1)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    linhas, _ = await ai_estoque.buscar(DB, TENANT, doc, "onix")
+    check("o vendido some", linhas == [], linhas)
+
+    outro = {"id": "u-b", "tenant_id": "t-outro", "role": "tenant_admin",
+             "name": "B", "email": "b@x.com"}
+    st, _ = await erro(rai.ver_estoque("ag-1", "", outro))
+    check("outra empresa nao ve o estoque", st == 404, st)
+    st, _ = await erro(rai.subir_estoque("ag-1", _upload("x.csv", "text/csv", novo), outro))
+    check("nem troca", st == 404, st)
+
+    vista = await rai.ver_estoque("ag-1", "civic", ADMIN)
+    check("a tela usa a mesma busca", vista["total"] == 1, vista)
+
+    await rai.remover_estoque("ag-1", ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("remover limpa as linhas e o resumo",
+          doc["estoque"] is None and await DB.ai_estoque.count_documents({}) == 0)
+
+    await rai.subir_estoque("ag-1", _upload("novo.csv", "text/csv", novo), ADMIN)
+    await rai.remover_agente("ag-1", ADMIN)
+    check("excluir o agente leva o estoque junto", await DB.ai_estoque.count_documents({}) == 0)
+
+
+async def etapa_finalizar():
+    print()
+    print("[agente finaliza o atendimento]")
+    await semear(agente={})
+    IA.chamar = ("finalizar_atendimento", {"resumo": "Tirou duvida sobre frete"})
+
+    await receber("oi, qual o frete?")
+    s = await sessao()
+    check("desligado, o agente nao ganha a ferramenta",
+          not IA.chamadas[-1]["ferramentas"] and s["status_atendimento"] == "bot", s["status_atendimento"])
+
+    poderes = await rai.mudar_poderes("ag-1", rai.PoderesIn(finalizar_ativo=True), ADMIN)
+    check("o poder e ligado pela tela de treino", poderes == {"agenda_ativa": False, "finalizar_ativo": True}, poderes)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("o prompt diz quando encerrar", "finalizar_atendimento" in ai_agents.montar_instrucoes(doc))
+
+    # Conversa ja existente: o caminho do agente grava so os contadores.
+    IA.proxima = "Por nada! Qualquer coisa estamos aqui."
+    await receber("obrigado, era so isso")
+    s = await sessao()
+    check("conversa existente: finalizada", s["status_atendimento"] == "finalizado"
+          and s["status"] == "finalizada" and s.get("finalizado_em"), s)
+    check("o motivo fica no historico",
+          any("finalizou o atendimento: Tirou duvida" in t for t in await sistemas(s["id"])))
+    check("e a despedida sai para o contato", ENVIADOS and ENVIADOS[-1][1].startswith("Por nada"), ENVIADOS)
+
+    # A mensagem seguinte abre outra conversa, que e o caminho da sessao nova:
+    # ela e gravada inteira no fim, e o $set nao pode desfazer o status.
+    await receber("oi de novo, obrigado, era so isso")
+    sessoes = await DB.conversation_sessions.find({"tenant_id": TENANT}).to_list(10)
+    check("a nova mensagem abriu outra conversa", len(sessoes) == 2, len(sessoes))
+    nova = [x for x in sessoes if x["id"] != s["id"]][0]
+    check("conversa nova: tambem finalizada", nova["status_atendimento"] == "finalizado", nova["status_atendimento"])
+
+    # Chat de teste: diz que finalizaria, sem gravar nada.
+    antes = await DB.conversation_sessions.count_documents({"status": "finalizada"})
+    r = await rai.testar_agente("ag-1", rai.TesteIn(mensagens=[{"role": "user", "content": "valeu"}]), ADMIN)
+    check("no teste a tela sabe que finalizaria", r["finalizou"] is True, r)
+    check("e nada foi gravado", "seria finalizado" in IA.chamadas[-1]["resultado_ferramenta"]
+          and await DB.conversation_sessions.count_documents({"status": "finalizada"}) == antes)
+
+    outro = {"id": "u-b", "tenant_id": "t-outro", "role": "tenant_admin", "name": "B", "email": "b@x.com"}
+    st, _ = await erro(rai.mudar_poderes("ag-1", rai.PoderesIn(agenda_ativa=True), outro))
+    check("outra empresa nao muda os poderes", st == 404, st)
+    IA.chamar = None
+
+
 # ---------------------------------------------------------------------------
 
 def test_suite():
@@ -856,5 +1032,8 @@ def test_suite():
         await etapa_credencial_por_agente()
         await etapa_fotos()
         await etapa_upload_de_fotos()
+        await etapa_treinamento()
+        await etapa_estoque()
+        await etapa_finalizar()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

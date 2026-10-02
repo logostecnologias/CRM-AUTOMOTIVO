@@ -307,6 +307,10 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # índice porque entram no filtro (agente desligado não deve nem ser lido).
     ("ai_agents", [("tenant_id", 1), ("ativo", 1), ("modo", 1), ("created_at", 1)], {}),
     ("ai_agents", [("id", 1)], {}),
+    # Toda consulta de estoque do agente filtra pela versão atual, ordenada
+    # pela linha da planilha. A busca por palavra é regex sobre `busca`, que
+    # nenhum índice cobre: este é o que a restringe às linhas de um agente só.
+    ("ai_estoque", [("tenant_id", 1), ("agente_id", 1), ("versao", 1), ("ordem", 1)], {}),
 
     # Consumo agregado do mês (cota do plano e o número que a tela mostra).
     ("ai_usage", [("tenant_id", 1), ("mes", 1)], {}),

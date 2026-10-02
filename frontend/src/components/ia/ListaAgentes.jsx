@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import {
   Plus, PencilSimple, Trash, ChatCircleDots, Robot, PaperPlaneRight, Code,
-  DotsThree, MagnifyingGlass, PlugsConnected, Warning,
+  DotsThree, MagnifyingGlass, PlugsConnected, Warning, Brain,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import AgenteWizard from "./AgenteWizard";
+import TreinarAgente from "./TreinarAgente";
 
 const MODO_ROTULO = {
   fallback: "Entra quando nenhum robô atende",
@@ -43,6 +44,10 @@ function ChatTeste({ agente, onFechar }) {
         data.transferiu
           ? { role: "sistema", content: `Transferido para atendimento humano — ${data.motivo}` }
           : { role: "assistant", content: data.texto },
+        // No teste nada é gravado; numa conversa real ela terminaria aqui.
+        ...(data.finalizou
+          ? [{ role: "sistema", content: "O agente finalizou o atendimento (no teste nada é gravado)." }]
+          : []),
       ]);
     } catch (ex) {
       setMensagens([
@@ -206,6 +211,7 @@ export default function ListaAgentes({ plataformaDisponivel }) {
   const [busca, setBusca] = useState("");
   const [editando, setEditando] = useState(null); // objeto do agente, ou "novo"
   const [testando, setTestando] = useState(null);
+  const [treinando, setTreinando] = useState(null);
   const [vendoPrompt, setVendoPrompt] = useState(null);
 
   const carregar = () => api.get("/ai/agents").then((r) => setAgentes(r.data));
@@ -404,10 +410,19 @@ export default function ListaAgentes({ plataformaDisponivel }) {
                       Configurar
                     </button>
                   </div>
-                  <button className="zz-btn zz-btn-secondary w-full justify-center"
-                    onClick={() => setTestando(a)} data-testid={`agente-testar-${a.id}`}>
-                    <ChatCircleDots size={15} weight="bold" /> Testar conversa
-                  </button>
+                  <div className="flex gap-2">
+                    <button className="zz-btn zz-btn-secondary flex-1 justify-center"
+                      onClick={() => setTreinando(a)} data-testid={`agente-treinar-${a.id}`}>
+                      <Brain size={15} weight="bold" /> Treinar
+                      {(a.memoria || []).length > 0 && (
+                        <span className="text-[11px] text-ink-3 font-normal">({a.memoria.length})</span>
+                      )}
+                    </button>
+                    <button className="zz-btn zz-btn-secondary flex-1 justify-center"
+                      onClick={() => setTestando(a)} data-testid={`agente-testar-${a.id}`}>
+                      <ChatCircleDots size={15} weight="bold" /> Testar
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -442,6 +457,14 @@ export default function ListaAgentes({ plataformaDisponivel }) {
           agente={editando === "novo" ? null : editando}
           onFechar={() => setEditando(null)}
           onSalvo={() => { setEditando(null); carregar(); }}
+        />
+      )}
+      {treinando && (
+        <TreinarAgente
+          agente={treinando}
+          onFechar={() => setTreinando(null)}
+          onMudou={() => carregar().catch(() => {})}
+          onTestar={() => { setTestando(treinando); setTreinando(null); }}
         />
       )}
       {testando && <ChatTeste agente={testando} onFechar={() => setTestando(null)} />}

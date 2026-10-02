@@ -203,6 +203,7 @@ COLECOES_DA_EMPRESA = (
     # Agentes de IA e o consumo medido deles.
     "ai_agents",
     "ai_usage",
+    "ai_estoque",
 )
 
 

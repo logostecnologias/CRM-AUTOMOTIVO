@@ -85,7 +85,7 @@ const VAZIO = {
   base_conhecimento: "",
   escalar_quando: "",
   agenda_ativa: false,
-  max_respostas: "",
+  finalizar_ativo: false,
   conexoes: [],
   departamento_id: "",
   provedor: "",
@@ -110,7 +110,7 @@ export default function AgenteWizard({
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState(() =>
     agente
-      ? { ...VAZIO, ...agente, max_respostas: agente.max_respostas ?? "", base_url: agente.base_url || "" }
+      ? { ...VAZIO, ...agente, base_url: agente.base_url || "" }
       : { ...VAZIO },
   );
 
@@ -194,7 +194,6 @@ export default function AgenteWizard({
     try {
       const corpo = {
         ...form,
-        max_respostas: form.max_respostas === "" ? null : Number(form.max_respostas),
         departamento_id: form.departamento_id || null,
       };
       delete corpo.id;
@@ -414,22 +413,6 @@ export default function AgenteWizard({
                     É assim que ele se apresenta ao contato.
                   </p>
                 </div>
-                <div>
-                  <Rotulo>Transferir depois de</Rotulo>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    className="zz-input"
-                    data-testid="agente-max-respostas"
-                    placeholder="10 respostas"
-                    value={form.max_respostas}
-                    onChange={(e) => set({ max_respostas: e.target.value })}
-                  />
-                  <p className="text-[11px] text-ink-3 mt-1">
-                    Freio contra conversa que não termina. Vazio = 10.
-                  </p>
-                </div>
               </div>
 
               <div>
@@ -532,6 +515,23 @@ export default function AgenteWizard({
                       pelo WhatsApp, em vez de anotar a preferência e transferir. Os serviços,
                       profissionais e grade de horários vêm da tela <strong>Agenda</strong>;
                       sem nenhum serviço cadastrado, esta opção não tem efeito.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 border rounded-xl p-4 mt-2 cursor-pointer transition-colors border-line hover:border-line-strong hover:bg-surface-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    data-testid="agente-finalizar-ativo"
+                    checked={!!form.finalizar_ativo}
+                    onChange={(e) => set({ finalizar_ativo: e.target.checked })}
+                  />
+                  <span>
+                    <span className="font-semibold block">Deixar o agente finalizar o atendimento</span>
+                    <span className="text-[11px] text-ink-3 block mt-1">
+                      Quando o assunto se resolve e o contato se despede, ele encerra a conversa
+                      sozinho e deixa um resumo no histórico. Se o contato escrever de novo, uma
+                      conversa nova começa.
                     </span>
                   </span>
                 </label>

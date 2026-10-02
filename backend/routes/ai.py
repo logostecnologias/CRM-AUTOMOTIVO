@@ -26,8 +26,10 @@ from auth import require_tenant_admin
 import ai_agents
 import ai_client
 import ai_credentials
+import ai_estoque
 import ai_runtime
 import media_store
+from routes.contacts import _le_upload
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -138,13 +140,15 @@ class AgenteIn(BaseModel):
     nao_fazer: str | None = None
     base_conhecimento: str | None = None
     escalar_quando: str | None = None
-    max_respostas: int | None = None
 
     # Deixa o agente consultar a agenda e marcar horário de verdade. Desligado
     # por padrão: ligar dá ao modelo a capacidade de **escrever** no sistema, e
     # isso é uma decisão do cliente, não um default. Sem serviços cadastrados, a
     # opção não tem efeito nenhum (ver `ai_agents.preparar_agenda`).
     agenda_ativa: bool = False
+    # Deixa o agente encerrar o atendimento quando o assunto se resolve (ver
+    # `ai_atendimento`). Desligado pelo mesmo motivo da agenda.
+    finalizar_ativo: bool = False
 
     # Onde atende. Vazio = todas as conexões da empresa.
     conexoes: list[str] = []
@@ -169,9 +173,6 @@ def _valida_agente(body: AgenteIn):
     if desconhecidos:
         raise HTTPException(status_code=400,
                             detail=f"Tom desconhecido: {', '.join(desconhecidos)}")
-    if body.max_respostas is not None and not (1 <= body.max_respostas <= 50):
-        raise HTTPException(status_code=400,
-                            detail="O limite de respostas deve ficar entre 1 e 50")
 
 
 async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
@@ -356,7 +357,32 @@ async def remover_agente(agent_id: str, user=Depends(require_tenant_admin)):
     res = await db.ai_agents.delete_one({"id": agent_id, "tenant_id": user["tenant_id"]})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Agente não encontrado")
+    # O estoque é do agente: sem ele, as linhas ficariam no banco sem dono.
+    await db.ai_estoque.delete_many({"tenant_id": user["tenant_id"], "agente_id": agent_id})
     return {"ok": True}
+
+
+class PoderesIn(BaseModel):
+    # Só o que vier preenchido muda. Uma chave por poder, e não o agente
+    # inteiro: o PATCH completo exige o formulário todo, e a tela de treino não
+    # tem (nem deve ter) provedor, chave e tom à mão.
+    agenda_ativa: bool | None = None
+    finalizar_ativo: bool | None = None
+
+
+@router.patch("/agents/{agent_id}/poderes")
+async def mudar_poderes(agent_id: str, body: PoderesIn, user=Depends(require_tenant_admin)):
+    """O que o agente pode fazer no sistema além de conversar."""
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    mudanca = {k: v for k, v in body.model_dump().items() if v is not None}
+    if mudanca:
+        await db.ai_agents.update_one(
+            {"id": agent_id, "tenant_id": user["tenant_id"]},
+            {"$set": {**mudanca, "updated_at": _now()}})
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    return {"agenda_ativa": bool(agente.get("agenda_ativa")),
+            "finalizar_ativo": bool(agente.get("finalizar_ativo"))}
 
 
 class TesteIn(BaseModel):
@@ -400,7 +426,7 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     # consultam a agenda de verdade (é o que prova que a grade está certa) e não
     # gravam nada. Um teste que marcasse horário ocuparia a agenda do cliente.
     contato_teste = {"id": "teste", "nome": "Contato de teste", "numero_whatsapp": ""}
-    bloco_agenda, ferramentas, executar = await ai_agents.preparar_agenda(
+    bloco_agenda, ferramentas, executar = await ai_agents.preparar_ferramentas(
         db, user["tenant_id"], agente, contato_teste, None, simulado=True)
 
     try:
@@ -436,6 +462,9 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
         # agente foi de fato à agenda em vez de inventar um horário plausível
         # a diferença entre as duas coisas não aparece no texto da resposta.
         "ferramentas": resposta.ferramentas_usadas,
+        # No teste nada é gravado, mas a tela precisa mostrar que, numa
+        # conversa real, a conversa teria sido encerrada aqui.
+        "finalizou": "finalizar_atendimento" in (resposta.ferramentas_usadas or []),
     }
 
 
@@ -570,4 +599,156 @@ async def remover_foto(agent_id: str, midia_id: str, user=Depends(require_tenant
         {"$pull": {"midias": {"id": midia_id}}, "$set": {"updated_at": _now()}})
     if res.modified_count == 0:
         raise HTTPException(status_code=404, detail="Foto não encontrada")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Treinamento: o que a empresa vai ensinando ao agente
+# ---------------------------------------------------------------------------
+#
+# Cada mensagem mandada na tela de treino vira um ensinamento guardado no
+# próprio agente (`memoria`) e entra no prompt de toda resposta. Embutido no
+# documento pelo mesmo motivo das fotos: é lido em toda mensagem recebida, e o
+# teto de caracteres (`MAX_MEMORIA_TOTAL`) mantém a lista curta.
+#
+# Quem ensina é só o admin, nunca o contato. Deixar o agente memorizar sozinho a
+# partir das conversas reais daria a qualquer pessoa que escreve para a empresa
+# o poder de "ensinar" um preço falso que valeria para todos os seguintes.
+
+
+class MemoriaIn(BaseModel):
+    texto: str
+
+
+def _texto_memoria(texto: str, memoria: list[dict], ignorar_id: str | None = None) -> str:
+    texto = (texto or "").strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="Escreva o que o agente deve aprender")
+    if len(texto) > ai_agents.MAX_MEMORIA_ITEM:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Cada ensinamento vai até {ai_agents.MAX_MEMORIA_ITEM} caracteres. "
+                    "Divida em mensagens menores, um assunto por vez."))
+    total = sum(len(m.get("texto") or "") for m in memoria if m.get("id") != ignorar_id)
+    if total + len(texto) > ai_agents.MAX_MEMORIA_TOTAL:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"O treinamento chegou ao limite de {ai_agents.MAX_MEMORIA_TOTAL} caracteres. "
+                    "Tudo isso vai em toda resposta do agente: apague ensinamentos antigos "
+                    "ou que já foram corrigidos por outros mais novos."))
+    return texto
+
+
+@router.post("/agents/{agent_id}/memoria")
+async def ensinar(agent_id: str, body: MemoriaIn, user=Depends(require_tenant_admin)):
+    """Guarda um ensinamento. Vale a partir da próxima mensagem que o agente responder."""
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    item = {
+        "id": str(uuid.uuid4()),
+        "texto": _texto_memoria(body.texto, agente.get("memoria") or []),
+        "autor_id": user["id"],
+        "autor_nome": user.get("name"),
+        "created_at": _now(),
+    }
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$push": {"memoria": item}, "$set": {"updated_at": _now()}})
+    return item
+
+
+@router.patch("/agents/{agent_id}/memoria/{item_id}")
+async def corrigir_ensinamento(agent_id: str, item_id: str, body: MemoriaIn,
+                               user=Depends(require_tenant_admin)):
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    memoria = agente.get("memoria") or []
+    texto = _texto_memoria(body.texto, memoria, ignorar_id=item_id)
+    # Reescreve a lista inteira, como `editar_foto`: é curta, e o operador
+    # posicional dependeria de um detalhe do Mongo difícil de enxergar aqui.
+    achou = False
+    for m in memoria:
+        if m.get("id") == item_id:
+            m["texto"] = texto
+            m["editado_em"] = _now()
+            achou = True
+    if not achou:
+        raise HTTPException(status_code=404, detail="Ensinamento não encontrado")
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$set": {"memoria": memoria, "updated_at": _now()}})
+    return {"ok": True}
+
+
+@router.delete("/agents/{agent_id}/memoria/{item_id}")
+async def esquecer(agent_id: str, item_id: str, user=Depends(require_tenant_admin)):
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    res = await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$pull": {"memoria": {"id": item_id}}, "$set": {"updated_at": _now()}})
+    if res.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Ensinamento não encontrado")
+    return {"ok": True}
+
+
+@router.delete("/agents/{agent_id}/memoria")
+async def esquecer_tudo(agent_id: str, user=Depends(require_tenant_admin)):
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$set": {"memoria": [], "updated_at": _now()}})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Estoque que o agente consulta (ver `ai_estoque`)
+# ---------------------------------------------------------------------------
+
+@router.post("/agents/{agent_id}/estoque")
+async def subir_estoque(agent_id: str, file: UploadFile = File(...),
+                        user=Depends(require_tenant_admin)):
+    """Troca o estoque do agente pela planilha enviada (CSV, como o Excel salva)."""
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+
+    nome = (file.filename or "").lower()
+    if nome.endswith((".xlsx", ".xls", ".ods")):
+        # Sem leitor de Excel no servidor. Dizer como resolver é melhor do que
+        # o "não tem cabeçalho" que o binário do xlsx produziria no leitor de CSV.
+        raise HTTPException(
+            status_code=400,
+            detail=("Envie a planilha em CSV. No Excel: Arquivo > Salvar como > "
+                    "CSV UTF-8 (separado por vírgulas)."))
+
+    # Mesmo leitor da importação de contatos: teto de 10MB aplicado durante a
+    # leitura, não depois de o arquivo inteiro já estar na memória.
+    dados = await _le_upload(file)
+    try:
+        colunas, linhas = ai_estoque.le_planilha(dados)
+    except ai_estoque.EstoqueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await ai_estoque.substituir(db, user["tenant_id"], agent_id,
+                                       file.filename, colunas, linhas)
+
+
+@router.get("/agents/{agent_id}/estoque")
+async def ver_estoque(agent_id: str, busca: str = "", user=Depends(require_tenant_admin)):
+    """As linhas do estoque, pela **mesma** busca que o agente usa.
+
+    É o que a tela mostra quando o admin procura "onix prata": se não achar ali,
+    o agente também não acha, e o problema está na planilha, não no modelo.
+    """
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    linhas, total = await ai_estoque.buscar(db, user["tenant_id"], agente, busca, limite=50)
+    return {"estoque": agente.get("estoque"), "linhas": linhas, "total": total}
+
+
+@router.delete("/agents/{agent_id}/estoque")
+async def remover_estoque(agent_id: str, user=Depends(require_tenant_admin)):
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    await ai_estoque.remover(db, user["tenant_id"], agent_id)
     return {"ok": True}

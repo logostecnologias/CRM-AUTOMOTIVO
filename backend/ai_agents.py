@@ -39,6 +39,8 @@ import unicodedata
 from fastapi import HTTPException
 
 import agenda
+import ai_atendimento
+import ai_estoque
 import ai_runtime
 import ai_tools
 
@@ -61,11 +63,6 @@ SENTINELA = "[HUMANO]"
 # cobre com folga o assunto corrente de um atendimento.
 JANELA_HISTORICO = 20
 
-# Teto de respostas do agente numa mesma conversa antes de entregar para
-# alguém. É o freio de mão: um contato confuso e um agente prestativo
-# conversam indefinidamente, e cada volta custa. Dúvida de atendimento que
-# sobrevive a 10 respostas precisa de gente.
-MAX_RESPOSTAS_PADRAO = 10
 
 # Fotos que o agente pode mandar. O teto existe porque a descrição de CADA foto
 # entra no prompt de TODA chamada — é o catálogo que o modelo consulta para
@@ -77,6 +74,15 @@ MAX_FOTOS = 30
 # manda o álbum inteiro e o contato recebe vinte imagens de uma vez — que no
 # WhatsApp é a diferença entre um vendedor e um spammer.
 MAX_FOTOS_POR_RESPOSTA = 5
+
+# Treinamento: o que a empresa vai ensinando ao agente, uma mensagem por vez.
+# Cada ensinamento entra inteiro no prompt de TODA chamada, como as instruções.
+# O teto é sobre o total de caracteres, não sobre a contagem: dez frases curtas
+# custam menos que um texto colado de três páginas. 20 mil caracteres são ~5 mil
+# tokens de prefixo, que o cache absorve; sem teto, um treino de meses
+# encareceria cada resposta sem ninguém perceber.
+MAX_MEMORIA_ITEM = 2000
+MAX_MEMORIA_TOTAL = 20000
 
 # `[FOTO:3]`, pelo índice mostrado no prompt e não pelo uuid do arquivo: um uuid
 # gasta ~20 tokens por linha do catálogo e o modelo erra dígito no meio dele. O
@@ -251,6 +257,17 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
         partes.append("Instruções específicas da empresa — siga à risca:\n"
                       + agente["instrucoes"].strip())
 
+    # O treinamento, na ordem em que foi ensinado. Numerado porque é o número
+    # que desempata: o cliente corrige o agente mandando uma mensagem nova, e
+    # não editando a antiga, então a mais recente tem de ganhar.
+    memoria = [m for m in (agente.get("memoria") or []) if (m.get("texto") or "").strip()]
+    if memoria:
+        partes.append(
+            "O que a empresa já te ensinou — siga à risca. Se dois ensinamentos "
+            "se contradisserem, vale o de número maior, que é o mais recente:\n"
+            + "\n".join(f"{i + 1}. {m['texto'].strip()}" for i, m in enumerate(memoria))
+        )
+
     tons = [TONS[t]["frase"] for t in (agente.get("tom") or []) if t in TONS]
     tamanho = TAMANHOS.get(agente.get("tamanho") or "normais", TAMANHOS["normais"])
     estilo = [f"Escreva em português do Brasil, com cerca de {tamanho['palavras']} palavras por resposta."]
@@ -263,8 +280,11 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
     )
     partes.append("Como escrever:\n" + " ".join(estilo))
 
+    tem_estoque = bool((agente.get("estoque") or {}).get("total"))
     regras = [
-        "Não invente informação. Se não estiver na base de conhecimento abaixo, você não sabe.",
+        ("Não invente informação. Se não estiver na base de conhecimento abaixo nem no "
+         "que a consulta ao estoque devolver, você não sabe." if tem_estoque else
+         "Não invente informação. Se não estiver na base de conhecimento abaixo, você não sabe."),
         "Nunca prometa preço, prazo, desconto ou condição que não esteja escrito abaixo.",
         "Nunca peça senha, número de cartão ou dado bancário.",
         "Não repita o que a pessoa acabou de dizer antes de responder.",
@@ -292,6 +312,14 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
         partes.append(
             "Base de conhecimento — é a sua única fonte de fatos sobre a empresa:\n"
             + conhecimento
+        )
+    elif tem_estoque:
+        # Sem base mas com estoque: preço e disponibilidade vêm da ferramenta, e
+        # mandar transferir "qualquer pergunta de preço" anularia o estoque.
+        partes.append(
+            "Você não recebeu base de conhecimento sobre a empresa além do estoque. "
+            "Horário, endereço, prazo e condições que não estejam no estoque você "
+            "não sabe: transfira quando perguntarem."
         )
     else:
         # Sem base, o modelo preenche a lacuna sozinho. Dizer isso explicitamente
@@ -321,6 +349,13 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
             "Só existem as fotos desta lista. Nunca invente um número de etiqueta e "
             "nunca descreva uma foto que não esteja aqui."
         )
+
+    # O estoque entra só como formato (colunas, total, exemplo); as linhas vêm
+    # da ferramenta `consultar_estoque`. Ver `ai_estoque`.
+    if tem_estoque:
+        partes.append(ai_estoque.bloco_de_instrucoes(agente))
+    if agente.get("finalizar_ativo"):
+        partes.append(ai_atendimento.INSTRUCOES)
 
     # A agenda entra depois da base de conhecimento e antes das regras de
     # transferência, porque é ela que muda quando transferir: um agente que
@@ -503,6 +538,44 @@ async def preparar_agenda(db, tenant_id: str, agente: dict, contato: dict = None
             ai_tools.executor(db, tenant_id, contato, session, simulado=simulado))
 
 
+async def preparar_ferramentas(db, tenant_id: str, agente: dict, contato: dict = None,
+                               session: dict = None, simulado: bool = False):
+    """Agenda, estoque e atendimento: o bloco da agenda, as ferramentas e um executor só.
+
+    Mesmo formato de `preparar_agenda`, para quem chama não precisar saber
+    quantas fontes de ferramenta existem. Os blocos de estoque e de
+    atendimento não vêm aqui: saem do próprio documento do agente, dentro de
+    `montar_instrucoes`, que não tem banco.
+    """
+    bloco_agenda, ferr_agenda, exec_agenda = await preparar_agenda(
+        db, tenant_id, agente, contato, session, simulado=simulado)
+    if contato is None:
+        return bloco_agenda, ferr_agenda, exec_agenda
+
+    fontes = []  # (ferramentas, executor)
+    if ferr_agenda:
+        fontes.append((ferr_agenda, exec_agenda))
+    if (agente.get("estoque") or {}).get("total"):
+        fontes.append((ai_estoque.FERRAMENTAS, ai_estoque.executor(db, tenant_id, agente)))
+    if agente.get("finalizar_ativo"):
+        fontes.append((ai_atendimento.FERRAMENTAS,
+                       ai_atendimento.executor(db, tenant_id, session, simulado=simulado)))
+    if not fontes:
+        return bloco_agenda, None, None
+    if len(fontes) == 1:
+        return bloco_agenda, list(fontes[0][0]), fontes[0][1]
+
+    rota = {f.nome: exe for ferrs, exe in fontes for f in ferrs}
+
+    async def executar(nome: str, argumentos: dict) -> str:
+        exe = rota.get(nome)
+        if not exe:
+            return f"ERRO: ferramenta desconhecida ({nome})."
+        return await exe(nome, argumentos)
+
+    return bloco_agenda, [f for ferrs, _ in fontes for f in ferrs], executar
+
+
 # ---------------------------------------------------------------------------
 # Atendimento
 # ---------------------------------------------------------------------------
@@ -539,17 +612,19 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
     if not (texto or "").strip():
         return await escalar("Mensagem sem texto — encaminhada para atendimento humano")
 
-    teto = agente.get("max_respostas") or MAX_RESPOSTAS_PADRAO
-    if session.get("ia_respostas", 0) >= teto:
-        return await escalar(f"Agente de IA respondeu {teto} vezes sem resolver — "
-                             "encaminhado para atendimento humano")
+    # Sem teto de respostas por conversa, a pedido do cliente: o agente nunca
+    # para de responder por ter respondido muito. Já houve um (10 por padrão,
+    # `max_respostas` no agente), e ele cortava justamente as conversas longas
+    # de venda, que são as que mais valem. O campo antigo, se gravado, é
+    # ignorado. `ia_respostas` continua sendo contado na sessão, só não barra.
+    # O que segura o custo é o teto de tokens do plano (`ai_runtime`).
 
     historico = await montar_historico(db, session_id, tenant_id, contato)
     if not historico:
         return await escalar("Sem histórico utilizável para o agente de IA — "
                              "encaminhado para atendimento humano")
 
-    bloco_agenda, ferramentas, executar = await preparar_agenda(
+    bloco_agenda, ferramentas, executar = await preparar_ferramentas(
         db, tenant_id, agente, contato, session)
 
     try:
