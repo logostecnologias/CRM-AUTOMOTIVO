@@ -34,6 +34,7 @@ Decisões:
     empresa está treinando, e um agente de peças e outro de carros na mesma
     empresa não devem enxergar o estoque um do outro.
 """
+import io
 import re
 import unicodedata
 import uuid
@@ -83,12 +84,92 @@ class EstoqueError(ValueError):
     pass
 
 
-def le_planilha(dados: bytes) -> tuple[list[str], list[dict]]:
-    """(colunas, linhas) da planilha, já limpas. Levanta `EstoqueError` com o motivo."""
+def _celula(valor) -> str:
+    """O valor de uma célula do Excel como a pessoa o vê na planilha."""
+    if valor is None:
+        return ""
+    if isinstance(valor, bool):
+        return "sim" if valor else "não"
+    if isinstance(valor, float) and valor.is_integer():
+        # 62900.0 viraria "62900.0" no texto que o modelo lê.
+        return str(int(valor))
+    if isinstance(valor, datetime):
+        return valor.strftime("%d/%m/%Y %H:%M") if (valor.hour or valor.minute) else valor.strftime("%d/%m/%Y")
+    if hasattr(valor, "strftime"):
+        return valor.strftime("%d/%m/%Y")
+    return str(valor)
+
+
+def _le_xlsx(dados: bytes) -> tuple[list[str], list[dict]]:
+    """Mesmo formato de `contatos_csv.le_arquivo`: cabeçalho e linhas como dicionário.
+
+    Lê a primeira aba que tiver conteúdo, e o cabeçalho é a primeira linha com
+    alguma célula preenchida: planilha de loja costuma ter um título ou uma
+    linha em branco em cima da tabela.
+    """
+    import openpyxl  # preguiçoso: só quem sobe Excel paga o import
     try:
-        colunas, brutas, _ = contatos_csv.le_arquivo(dados)
-    except ValueError as e:
-        raise EstoqueError(str(e))
+        livro = openpyxl.load_workbook(io.BytesIO(dados), read_only=True, data_only=True)
+    except Exception:
+        raise EstoqueError("Não foi possível ler esta planilha do Excel. Ela pode estar corrompida ou protegida por senha.")
+    try:
+        for aba in livro.worksheets:
+            linhas = aba.iter_rows(values_only=True)
+            # O cabeçalho é a primeira linha com duas células preenchidas ou
+            # mais, procurada nas primeiras 20: um título em cima da tabela
+            # ("Estoque ADS Veículos") ocupa uma célula só e não é cabeçalho.
+            # Planilha de uma coluna só fica com a primeira linha preenchida.
+            cabecalho, primeira, vistas = None, None, []
+            for valores in linhas:
+                vistas.append(valores)
+                cheias = sum(1 for v in valores if _celula(v).strip())
+                if cheias and primeira is None:
+                    primeira = len(vistas) - 1
+                if cheias >= 2:
+                    cabecalho = valores
+                    break
+                if len(vistas) >= 20:
+                    break
+            if cabecalho is None:
+                if primeira is None:
+                    continue
+                # Uma coluna só: o que vem depois da primeira linha cheia é dado.
+                cabecalho = vistas[primeira]
+                resto = vistas[primeira + 1:]
+                linhas = iter(resto + list(linhas))
+            colunas, vistos = [], {}
+            for i, v in enumerate(cabecalho):
+                nome = _celula(v).strip() or f"Coluna {i + 1}"
+                # Duas colunas com o mesmo título se apagariam no dicionário.
+                vistos[nome] = vistos.get(nome, 0) + 1
+                colunas.append(nome if vistos[nome] == 1 else f"{nome} {vistos[nome]}")
+            brutas = []
+            for valores in linhas:
+                brutas.append({c: _celula(v) for c, v in zip(colunas, valores)})
+                if len(brutas) > MAX_LINHAS:
+                    break
+            return colunas, brutas
+    finally:
+        livro.close()
+    raise EstoqueError("A planilha está vazia.")
+
+
+def le_planilha(dados: bytes, filename: str = "") -> tuple[list[str], list[dict]]:
+    """(colunas, linhas) da planilha, já limpas. Levanta `EstoqueError` com o motivo.
+
+    Excel (.xlsx) ou CSV. O .xls antigo é recusado dizendo como salvar: é outro
+    formato binário, e quem tem Excel salva em .xlsx em dois cliques.
+    """
+    nome = (filename or "").lower()
+    if nome.endswith(".xls"):
+        raise EstoqueError("Planilha .xls antiga não é lida. No Excel: Arquivo > Salvar como > Pasta de Trabalho do Excel (.xlsx).")
+    if nome.endswith(".xlsx") or dados[:2] == b"PK":
+        colunas, brutas = _le_xlsx(dados)
+    else:
+        try:
+            colunas, brutas, _ = contatos_csv.le_arquivo(dados)
+        except ValueError as e:
+            raise EstoqueError(str(e))
     # O cabeçalho cru é a chave do dicionário de cada linha; o limpo é o que se mostra.
     pares = [(c, c.strip()) for c in colunas][:MAX_COLUNAS]
     colunas = [limpo for _, limpo in pares]

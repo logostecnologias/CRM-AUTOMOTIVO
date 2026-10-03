@@ -40,6 +40,7 @@ from fastapi import HTTPException
 
 import agenda
 import ai_atendimento
+import ai_documentos
 import ai_estoque
 import ai_runtime
 import ai_tools
@@ -144,14 +145,6 @@ TIPOS: dict[str, dict] = {
             "preferência de dia e horário, e conduza até um horário fechado. "
             "Faça uma pergunta de cada vez e confirme o combinado ao final."
         ),
-        # Sem o módulo de agenda ligado, este agente coleta preferência e passa
-        # adiante, e precisa ser dito, senão ele confirma um horário que ninguém
-        # reservou. A frase é acrescentada em `montar_instrucoes` só nesse caso:
-        # com as ferramentas ligadas ela seria a instrução oposta à verdade.
-        "sem_agenda": (
-            "Você NÃO tem acesso à agenda: nunca diga que um horário está "
-            "reservado. Registre a preferência e transfira para a confirmação."
-        ),
     },
     "personalizado": {
         "rotulo": "Personalizado",
@@ -239,8 +232,6 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
 
     tipo = TIPOS.get(agente.get("tipo") or "geral", TIPOS["geral"])
     estrategia = tipo["estrategia"]
-    if tipo.get("sem_agenda") and not bloco_agenda:
-        estrategia = f"{estrategia}\n{tipo['sem_agenda']}"
     if agente.get("tipo") == "personalizado":
         estrategia = (agente.get("objetivo") or "").strip()
     elif agente.get("objetivo"):
@@ -306,6 +297,7 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
         bloco.strip() for bloco in (
             agente.get("empresa_descricao"),
             agente.get("base_conhecimento"),
+            ai_documentos.bloco(agente),
         ) if bloco and bloco.strip()
     )
     if conhecimento:
@@ -372,14 +364,49 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
     ]
     if agente.get("escalar_quando"):
         escalar += [l.strip(" -•\t") for l in agente["escalar_quando"].strip().splitlines() if l.strip()]
+    if not bloco_agenda:
+        # Vale para TODO tipo de agente, não só o de agendamento. Caso real de
+        # 02/10/2026: um agente SDR de loja de veículos, cujo objetivo é
+        # justamente "conduzir para agendar", sem nenhuma ferramenta de agenda
+        # (a chave estava ligada, mas a empresa não tinha serviço cadastrado),
+        # escreveu "sua visita está confirmada para terça às 10h" a dois
+        # clientes. Nada foi gravado. Com a instrução só no tipo "agendamento",
+        # os outros tipos nunca ouviam que não podiam marcar.
+        partes.append(
+            "Agenda: você NÃO tem acesso à agenda e não consegue marcar nada no "
+            "sistema. Nunca diga que uma visita, reunião, consulta, avaliação ou "
+            "qualquer horário está confirmado, marcado, agendado ou reservado, nem "
+            "que a empresa espera a pessoa num dia e hora. Quando o contato quiser "
+            "marcar, pergunte o dia e o horário de preferência; com a resposta, diga "
+            "em uma frase que vai passar para a equipe confirmar e transfira."
+        )
     partes.append(
         "Quando transferir para um atendente humano:\n"
         + "\n".join(f"- {e}" for e in escalar)
-        + f"\n\nPara transferir, responda exatamente {SENTINELA} e mais nada. "
-        f"Não se despeça e não avise que vai transferir: apenas {SENTINELA}. "
-        "O sistema cuida de avisar o contato e chamar a pessoa certa."
+        + f"\n\nPara transferir, escreva {SENTINELA}. Antes dele você pode pôr uma "
+        "frase curta para o contato saber o que acontece agora (por exemplo, que a "
+        "equipe vai continuar o atendimento por aqui), sem despedida longa. O sistema "
+        "chama a pessoa certa."
     )
+    # A data de hoje, por último. Sem ela o modelo calcula "amanhã" e "terça"
+    # a partir de nada: no mesmo caso real ele disse "amanhã, dia 17" no dia 2.
+    # Fica no fim para o prefixo estável continuar aproveitando o cache, e é só
+    # a data (sem a hora) para mudar uma vez por dia, não a cada minuto.
+    partes.append(hoje())
     return "\n\n".join(partes)
+
+
+_DIAS = ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+         "sexta-feira", "sábado", "domingo")
+
+
+def hoje(fuso: str = "America/Sao_Paulo") -> str:
+    """A data local da empresa. O fuso é o padrão do produto (Brasília): esta
+    função não tem banco, e mudar o fuso de uma empresa já é caso de suporte."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    agora = datetime.now(ZoneInfo(fuso))
+    return f"Hoje é {_DIAS[agora.weekday()]}, {agora.strftime('%d/%m/%Y')}."
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +604,82 @@ async def preparar_ferramentas(db, tenant_id: str, agente: dict, contato: dict =
 
 
 # ---------------------------------------------------------------------------
+# Confirmação de horário que não existe
+# ---------------------------------------------------------------------------
+#
+# A instrução de "nunca diga que está marcado" não basta: o modelo já ignorou
+# uma instrução parecida e confirmou duas visitas que ninguém gravou. E é aqui
+# que nasce a marcação dupla: sem passar pela agenda, nada impede o agente de
+# prometer terça às 10h a três pessoas. Com a ferramenta, `agenda.agendar`
+# reconfere a sobreposição depois de gravar; sem ela, a promessa é só texto.
+#
+# A trava olha o resultado, não a intenção: a resposta diz que algo está
+# confirmado/marcado/agendado, e não há agendamento gravado para este contato
+# (nem marcado agora, nem futuro já existente). Aí a mensagem não sai.
+#
+# O agendamento futuro já existente é o que evita o falso positivo comum: o
+# contato pergunta dois dias depois "está confirmado?", e o agente responde
+# "sim, está confirmado para terça" sobre um horário que ele mesmo marcou.
+
+RE_CONFIRMACAO = re.compile(
+    r"\b(est[aá]|ficou|fica|ficar[aá]|foi|j[aá]\s+est[aá])\s+"
+    r"(confirmad|agendad|marcad|reservad)[oa]s?\b"
+    r"|\b(agendei|marquei|reservei|confirmei|agendamos|marcamos|reservamos)\b"
+    r"|\b(visita|hor[aá]rio|agendamento|consulta|reuni[aã]o|avalia[cç][aã]o|test[e]?[- ]drive)"
+    r"\s+(est[aá]\s+)?(confirmad|agendad|marcad|reservad)[oa]\b"
+    r"|\b(agendad|marcad|reservad)[oa]s?\s+(para|pra|no|na)\s+"
+    r"(o\s+)?(dia|amanh|hoje|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|\d)",
+    re.IGNORECASE,
+)
+
+AVISO_CONFIRMACAO = ("Vou confirmar esse horário com a equipe e já te retorno por "
+                     "aqui, tudo bem?")
+
+
+def frase_de_transferencia(texto: str) -> str:
+    """O que sobra da resposta sem a sentinela, se for uma frase de verdade."""
+    resto = re.sub(re.escape(SENTINELA), " ", texto, flags=re.IGNORECASE)
+    resto = re.sub(r"\s+", " ", resto).strip()
+    return resto if re.search(r"[A-Za-zÀ-ÿ]{2}", resto) else ""
+
+
+def registrar_marcacao(executar):
+    """Embrulha o executor para saber se a ferramenta `agendar` gravou algo
+    nesta resposta. Devolve (executor, marcou), e `marcou` é um dict mutável
+    porque o laço de ferramentas roda dentro do `ai_client`."""
+    marcou = {"ok": False}
+    if executar is None:
+        return None, marcou
+
+    async def embrulhado(nome: str, argumentos: dict) -> str:
+        resultado = await executar(nome, argumentos)
+        if nome == "agendar" and str(resultado).startswith("MARCADO"):
+            marcou["ok"] = True
+        return resultado
+
+    return embrulhado, marcou
+
+
+async def confirmou_sem_agenda(db, tenant_id: str, contato: dict, texto: str,
+                               marcou: dict) -> bool:
+    if not RE_CONFIRMACAO.search(texto or ""):
+        return False
+    if marcou.get("ok"):
+        return False
+    contato_id = (contato or {}).get("id")
+    if contato_id:
+        from datetime import datetime, timezone
+        agora = agenda._iso(datetime.now(timezone.utc))
+        futuro = await db.appointments.find_one({
+            "tenant_id": tenant_id, "contact_id": contato_id,
+            "status": {"$in": list(agenda.OCUPAM)}, "inicio": {"$gte": agora},
+        }, {"_id": 1})
+        if futuro:
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Atendimento
 # ---------------------------------------------------------------------------
 
@@ -626,6 +729,7 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
 
     bloco_agenda, ferramentas, executar = await preparar_ferramentas(
         db, tenant_id, agente, contato, session)
+    executar, marcou = registrar_marcacao(executar)
 
     try:
         resposta = await ai_runtime.responder_por_agente(
@@ -646,9 +750,24 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
     # acrescenta pontuação ou uma linha em volta, e tratar isso como resposta
     # normal mandaria "[HUMANO]" para o contato.
     if SENTINELA.lower() in texto_resposta.lower():
+        # A frase que o agente pôs junto da sentinela vai para o contato antes
+        # da fila. Sem ela o contato que acabou de dizer "pode ser terça às 10h"
+        # ficava sem resposta nenhuma até alguém assumir.
+        frase = frase_de_transferencia(texto_resposta)
+        if frase and not await confirmou_sem_agenda(db, tenant_id, contato, frase, marcou):
+            outputs.append({"type": "text", "content": frase})
         return await escalar("Agente de IA transferiu para atendimento humano")
     if not texto_resposta:
         return await escalar("Agente de IA respondeu vazio — encaminhado para atendimento humano")
+
+    if await confirmou_sem_agenda(db, tenant_id, contato, texto_resposta, marcou):
+        # A resposta não sai. O contato recebe só um aviso neutro, e uma pessoa
+        # confirma de verdade. Ver `confirmou_sem_agenda`.
+        outputs.append({"type": "text", "content": AVISO_CONFIRMACAO})
+        return await escalar(
+            "O agente de IA ia confirmar um horário que não está gravado na Agenda, "
+            "e a mensagem foi segurada. Confirme com o contato. O que ele ia dizer: "
+            f"\"{texto_resposta[:500]}\"")
 
     # As etiquetas saem do texto antes de qualquer coisa: se sobrarem, o contato
     # lê "[FOTO:1]" na bolha.

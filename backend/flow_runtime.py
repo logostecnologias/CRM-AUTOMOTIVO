@@ -710,6 +710,12 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
                           "updated_at": _now()},
                  "$inc": {"unread_count": 1}},
             )
+            # O agente pode ter deixado uma frase para o contato ao transferir
+            # ("vou passar para a equipe confirmar"). Sem este envio ela era
+            # montada e descartada, e o contato ficava sem resposta até alguém
+            # assumir a conversa.
+            if cred and outputs:
+                await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs)
             # A conversa aberta por um aviso de agendamento também nasce sem
             # bot, e cai aqui quando o contato responde outra coisa que não
             # CONFIRMAR/CANCELAR ("posso remarcar?"). Dizer "bot indisponível"

@@ -3,6 +3,7 @@ import api, { API, formatApiErrorDetail } from "@/lib/api";
 import {
   Brain, Check, PaperPlaneRight, PencilSimple, Trash, X, ChatCircleDots,
   ImageSquare, Table, MagnifyingGlass, ArrowsClockwise, CalendarCheck, CheckCircle,
+  Paperclip, FileText, Warning, UploadSimple,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -24,14 +25,45 @@ import { useAcao } from "@/hooks/useAcao";
 // agente escrevendo no sistema. Transferir para uma pessoa (aguardando) não é
 // poder: está sempre ligado, é a saída de qualquer dúvida.
 //
-// Estoque: uma planilha CSV por agente. Subir de novo substitui a anterior,
-// porque estoque é foto do momento. A busca da faixa é a mesma que o agente usa.
+// Estoque: uma planilha (Excel .xlsx ou CSV) por agente. Subir de novo
+// substitui a anterior, porque estoque é foto do momento. A busca da faixa é a
+// mesma que o agente usa.
+//
+// Documentos: PDF, Word (.docx) ou texto. O texto é extraído no servidor e
+// entra na base de conhecimento do agente; o arquivo em si não é guardado.
+//
+// **Um botão de anexo só, que aceita tudo, e o tipo do arquivo decide o
+// destino.** Eram dois botões de ícone, um com `accept="image/*"` e outro com
+// `accept=".csv"`. No seletor do Windows e do Mac, qualquer outro arquivo
+// (xlsx, pdf, docx) aparecia apagado e não podia ser escolhido, sem nenhuma
+// mensagem: o cliente achava que "anexar não funciona" (02/10/2026). Formato
+// que não serve agora é escolhido e recusado com o motivo, em vez de sumir.
 
 // Os tetos de `ai_agents` e `routes/ai.py`, repetidos só para avisar antes;
 // quem recusa é o servidor.
 const MAX_ITEM = 2000;
 const MAX_TOTAL = 20000;
 const MAX_FOTOS = 30;
+const MAX_DOCUMENTOS = 60000; // `ai_documentos.MAX_TOTAL`
+
+// O que o seletor mostra. Inclui .xls e .doc antigos de propósito: escolher e
+// ouvir "salve como .xlsx" é melhor que não conseguir escolher.
+const ACEITOS = [
+  "image/*", ".csv", ".xlsx", ".xls", ".pdf", ".docx", ".doc", ".txt", ".md",
+  "text/csv", "text/plain", "application/pdf", "application/msword", "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+].join(",");
+
+/** Para onde o arquivo vai, pelo nome (o `type` do navegador vem vazio para
+ * .xlsx em vários Windows) e, na falta dele, pelo tipo. */
+function destinoDoArquivo(f) {
+  const nome = (f.name || "").toLowerCase();
+  if (/\.(csv|xlsx|xls)$/.test(nome)) return "planilha";
+  if (/\.(pdf|docx|doc|txt|md)$/.test(nome)) return "documento";
+  if ((f.type || "").startsWith("image/") || /\.(jpe?g|png|webp|gif|heic|heif)$/.test(nome)) return "foto";
+  return null;
+}
 
 const quando = (iso) => {
   try {
@@ -125,6 +157,8 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const [itens, setItens] = useState(() => agente.memoria || []);
   const [fotos, setFotos] = useState(() => agente.midias || []);
   const [estoque, setEstoque] = useState(() => agente.estoque || null);
+  const [documentos, setDocumentos] = useState(() => agente.documentos || []);
+  const [arrastando, setArrastando] = useState(false);
   const [texto, setTexto] = useState("");
   const [foto, setFoto] = useState(null); // {arquivo, previa}
   const [editando, setEditando] = useState(null); // {tipo: "memoria"|"foto", id, texto}
@@ -135,8 +169,13 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   }));
   const fim = useRef(null);
   const campo = useRef(null);
-  const inputFoto = useRef(null);
-  const inputEstoque = useRef(null);
+  const inputArquivo = useRef(null);
+
+  // O cartão só sabe se a chave está ligada. Se a Agenda tem serviço e
+  // profissional para o agente trabalhar, só o servidor sabe.
+  useEffect(() => {
+    api.get(`/ai/agents/${agente.id}/poderes`).then((r) => setPoderes(r.data)).catch(() => {});
+  }, [agente.id]);
 
   // Ensinamentos e fotos numa linha do tempo só, na ordem em que entraram. O
   // número da foto é a posição no catálogo, que é a etiqueta [FOTO:n] do prompt.
@@ -144,9 +183,10 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
     const t = [
       ...itens.map((m, i) => ({ tipo: "memoria", n: i + 1, item: m })),
       ...fotos.map((f, i) => ({ tipo: "foto", n: i + 1, item: f })),
+      ...documentos.map((d, i) => ({ tipo: "documento", n: i + 1, item: d })),
     ];
     return t.sort((a, b) => String(a.item.created_at || "").localeCompare(String(b.item.created_at || "")));
-  }, [itens, fotos]);
+  }, [itens, fotos, documentos]);
 
   useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [linhaDoTempo.length]);
   useEffect(() => () => { if (foto?.previa) URL.revokeObjectURL(foto.previa); }, [foto]);
@@ -154,17 +194,72 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const total = itens.reduce((s, m) => s + (m.texto || "").length, 0);
   const memoriaCheia = total >= MAX_TOTAL;
   const fotosCheias = fotos.length >= MAX_FOTOS;
+  const caracteresDocs = documentos.reduce((s, d) => s + (d.caracteres || 0), 0);
 
-  const escolherFoto = (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f) return;
-    if (!f.type.startsWith("image/")) {
-      toast.error("Escolha uma imagem (JPG, PNG ou WebP).");
-      return;
+  const [subirDocumento, subindoDocumento] = useAcao(async (arquivo) => {
+    const corpo = new FormData();
+    corpo.append("file", arquivo);
+    try {
+      const { data } = await api.post(`/ai/agents/${agente.id}/documentos`, corpo);
+      setDocumentos((l) => [...l, data]);
+      onMudou?.();
+      toast.success(`"${arquivo.name}" lido: ${data.caracteres.toLocaleString("pt-BR")} caracteres.`);
+    } catch (ex) {
+      erroApi(ex);
     }
-    setFoto({ arquivo: f, previa: URL.createObjectURL(f) });
-    campo.current?.focus();
+  });
+
+  // Toda entrada de arquivo passa por aqui: botão, arrastar e colar.
+  const receberArquivo = (f) => {
+    if (!f) return;
+    const destino = destinoDoArquivo(f);
+    if (destino === "foto") {
+      if (fotosCheias) {
+        toast.error(`O agente já tem ${MAX_FOTOS} fotos, o máximo. Tire alguma antes de anexar outra.`);
+        return;
+      }
+      setFoto({ arquivo: f, previa: URL.createObjectURL(f) });
+      campo.current?.focus();
+    } else if (destino === "planilha") {
+      subirEstoque(f);
+    } else if (destino === "documento") {
+      subirDocumento(f);
+    } else {
+      toast.error(`"${f.name}" não é um formato aceito. Envie foto, planilha (Excel ou CSV) ` +
+        "ou documento (PDF, Word ou texto).");
+    }
+  };
+
+  const escolherArquivo = (e) => {
+    const lista = Array.from(e.target.files || []);
+    e.target.value = "";
+    receberArquivo(lista[0]);
+  };
+
+  // Arrastar só reage a arquivo: texto arrastado de outro lugar segue o
+  // comportamento normal do campo.
+  const temArquivo = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+  const aoArrastar = (e) => {
+    if (!temArquivo(e)) return;
+    e.preventDefault();
+    if (!arrastando) setArrastando(true);
+  };
+  const aoSair = (e) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) setArrastando(false);
+  };
+  const aoSoltar = (e) => {
+    if (!temArquivo(e)) return;
+    e.preventDefault();
+    setArrastando(false);
+    const lista = Array.from(e.dataTransfer.files || []);
+    if (lista.length > 1) toast("Um arquivo por vez: usei o primeiro.");
+    receberArquivo(lista[0]);
+  };
+  const aoColar = (e) => {
+    const imagem = Array.from(e.clipboardData?.files || []).find((f) => (f.type || "").startsWith("image/"));
+    if (!imagem) return;
+    e.preventDefault();
+    receberArquivo(imagem);
   };
 
   const [enviar, enviando] = useAcao(async () => {
@@ -206,12 +301,6 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
       erroApi(ex);
     }
   });
-
-  const escolherEstoque = (e) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (f) subirEstoque(f);
-  };
 
   const [removerEstoque] = useAcao(async () => {
     if (!(await confirmToast("Remover o estoque? O agente deixa de consultar produtos.",
@@ -256,10 +345,15 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const [apagar] = useAcao(async (tipo, item) => {
     const pergunta = tipo === "foto"
       ? `Tirar a foto "${item.descricao}" do catálogo do agente?`
-      : "O agente vai esquecer este ensinamento. Continuar?";
+      : tipo === "documento"
+        ? `O agente vai esquecer o que leu em "${item.nome}". Continuar?`
+        : "O agente vai esquecer este ensinamento. Continuar?";
     if (!(await confirmToast(pergunta, { confirmLabel: tipo === "foto" ? "Tirar" : "Esquecer" }))) return;
     try {
-      if (tipo === "foto") {
+      if (tipo === "documento") {
+        await api.delete(`/ai/agents/${agente.id}/documentos/${item.id}`);
+        setDocumentos((l) => l.filter((d) => d.id !== item.id));
+      } else if (tipo === "foto") {
         await api.delete(`/ai/agents/${agente.id}/midias/${item.id}`);
         setFotos((l) => l.filter((f) => f.id !== item.id));
       } else {
@@ -306,10 +400,12 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
 
   const acoesItem = (tipo, item, textoAtual) => (
     <span className="flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-      <button className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-surface-3 hover:text-ink"
-        onClick={() => setEditando({ tipo, id: item.id, texto: textoAtual })} aria-label="Corrigir">
-        <PencilSimple size={12} />
-      </button>
+      {tipo !== "documento" && (
+        <button className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-surface-3 hover:text-ink"
+          onClick={() => setEditando({ tipo, id: item.id, texto: textoAtual })} aria-label="Corrigir">
+          <PencilSimple size={12} />
+        </button>
+      )}
       <button className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-danger-soft hover:text-danger"
         onClick={() => apagar(tipo, item)} aria-label="Apagar">
         <Trash size={12} />
@@ -345,16 +441,25 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
       onClick={onFechar}>
       <div onClick={(e) => e.stopPropagation()}
-        className="bg-surface w-full max-w-2xl zz-panel-hard flex flex-col overflow-hidden"
+        onDragEnter={aoArrastar} onDragOver={aoArrastar} onDragLeave={aoSair} onDrop={aoSoltar}
+        className="relative bg-surface w-full max-w-2xl zz-panel-hard flex flex-col overflow-hidden"
         style={{ height: "min(88vh, 760px)" }}
         data-testid="agente-treinar">
+        {arrastando && (
+          <div className="absolute inset-0 z-20 m-2 rounded-2xl border-2 border-dashed border-info bg-info-soft
+                          flex flex-col items-center justify-center gap-2 pointer-events-none">
+            <UploadSimple size={32} weight="bold" className="text-info" />
+            <div className="text-sm font-bold text-info">Solte para ensinar o agente</div>
+            <div className="text-xs text-ink-2">Foto, planilha (Excel ou CSV) ou documento (PDF, Word, texto)</div>
+          </div>
+        )}
         <div className="border-b border-line p-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="font-heading text-lg font-bold tracking-tight truncate">
               Treinar {agente.nome}
             </div>
             <div className="text-[11px] text-ink-3">
-              Ensinamentos, fotos e estoque valem em toda conversa a partir da próxima resposta.
+              Ensinamentos, fotos, documentos e estoque valem em toda conversa a partir da próxima resposta.
             </div>
           </div>
           <div className="flex gap-2 shrink-0">
@@ -396,6 +501,18 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           <span className="text-[11px] text-ink-3" title="Sempre ligado: é a saída de qualquer dúvida do agente.">
             · transferir para uma pessoa, sempre
           </span>
+          {poderes.agenda_ativa && poderes.agenda_pronta === false && (
+            <div className="w-full flex items-start gap-2 rounded-lg border border-warning/40 bg-warning-soft p-2.5 text-[11px] text-warning"
+              data-testid="agenda-sem-servico">
+              <Warning size={14} weight="bold" className="shrink-0 mt-px" />
+              <span>
+                A Agenda ainda não tem {poderes.agenda_servicos === 0 ? "nenhum serviço" : "nenhum profissional"} cadastrado,
+                então o agente <strong>não consegue marcar</strong>: ele anota o dia e o horário que o cliente quer e
+                passa para a equipe confirmar. Para ele marcar sozinho, cadastre na tela <strong>Agenda</strong> um
+                serviço (por exemplo, "Visita à loja") e quem atende, com os horários de atendimento.
+              </span>
+            </div>
+          )}
         </div>
 
         {estoque && (
@@ -415,7 +532,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
                 <MagnifyingGlass size={13} weight="bold" /> Ver itens
               </button>
               <button className="zz-btn zz-btn-secondary text-xs py-1.5" disabled={subindoEstoque}
-                onClick={() => inputEstoque.current?.click()} aria-label="Substituir planilha" title="Substituir planilha">
+                onClick={() => inputArquivo.current?.click()} aria-label="Substituir planilha" title="Substituir planilha">
                 <ArrowsClockwise size={13} weight="bold" />
               </button>
               <button className="zz-btn zz-btn-secondary text-xs py-1.5 hover:text-danger" onClick={removerEstoque}
@@ -441,8 +558,12 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
                   <ImageSquare size={14} weight="bold" /> Anexe <strong>fotos</strong> com uma descrição, e ele manda na hora certa.
                 </p>
                 <p className="flex items-center justify-center gap-1.5">
-                  <Table size={14} weight="bold" /> Suba a <strong>planilha de estoque</strong>, e ele consulta antes de responder.
+                  <Table size={14} weight="bold" /> Suba a <strong>planilha de estoque</strong> (Excel ou CSV), e ele consulta antes de responder.
                 </p>
+                <p className="flex items-center justify-center gap-1.5">
+                  <FileText size={14} weight="bold" /> Anexe <strong>documentos</strong> (PDF, Word), e ele aprende o que está escrito.
+                </p>
+                <p className="mt-2">Use o botão <strong>Anexar arquivo</strong>, ou arraste o arquivo para esta janela.</p>
               </div>
               <p className="text-xs text-ink-3 mt-4">
                 Para corrigir algo, é só mandar a versão certa: o ensinamento mais recente sempre ganha.
@@ -455,7 +576,15 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
             return (
               <div key={`${tipo}-${item.id}`} className="flex justify-end group">
                 <div className="max-w-[85%] w-fit">
-                  {emEdicao ? editor() : tipo === "foto" ? (
+                  {emEdicao ? editor() : tipo === "documento" ? (
+                    <div className="rounded-2xl bg-brand text-brand-fg p-3 w-72">
+                      <div className="flex items-center gap-2 font-semibold text-sm">
+                        <FileText size={18} weight="bold" className="shrink-0" />
+                        <span className="truncate">{item.nome}</span>
+                      </div>
+                      <div className="text-xs opacity-80 mt-1.5 line-clamp-4 whitespace-pre-wrap break-words">{item.previa}</div>
+                    </div>
+                  ) : tipo === "foto" ? (
                     <div className="rounded-2xl bg-brand text-brand-fg p-1.5 w-64">
                       <img src={`${API}/media/${item.media_id}`} alt={item.descricao}
                         className="w-full max-h-56 object-cover rounded-xl bg-surface-3" />
@@ -467,10 +596,13 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
                     </div>
                   )}
                   <div className="flex items-center justify-end gap-2 mt-1 text-[10px] text-ink-3">
-                    <span className="font-mono text-ink-4">{tipo === "foto" ? `[FOTO:${n}]` : `#${n}`}</span>
+                    <span className="font-mono text-ink-4">
+                      {tipo === "foto" ? `[FOTO:${n}]` : tipo === "documento"
+                        ? `${(item.caracteres || 0).toLocaleString("pt-BR")} caracteres` : `#${n}`}
+                    </span>
                     <span>{quando(item.created_at)}</span>
                     <span className="flex items-center gap-0.5 text-success">
-                      <Check size={11} weight="bold" /> {tipo === "foto" ? "no catálogo" : "memorizado"}
+                      <Check size={11} weight="bold" /> {tipo === "foto" ? "no catálogo" : tipo === "documento" ? "lido" : "memorizado"}
                     </span>
                     {!emEdicao && acoesItem(tipo, item, tipo === "foto" ? item.descricao : item.texto)}
                   </div>
@@ -495,23 +627,20 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               </button>
             </div>
           )}
-          <div className="flex gap-2 items-end">
-            <div className="flex flex-col gap-1 shrink-0">
-              <button type="button" disabled={fotosCheias || !!foto}
-                onClick={() => inputFoto.current?.click()} data-testid="treinar-foto"
-                title={fotosCheias ? `Limite de ${MAX_FOTOS} fotos atingido` : "Anexar foto para o agente usar"}
-                aria-label="Anexar foto"
-                className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-3 hover:bg-surface-2 hover:text-info disabled:opacity-40">
-                <ImageSquare size={18} weight="bold" />
+          {!foto && (
+            <div className="flex items-center gap-2 mb-2">
+              <button type="button" disabled={subindoEstoque || subindoDocumento}
+                onClick={() => inputArquivo.current?.click()} data-testid="treinar-anexar"
+                className="zz-btn zz-btn-secondary text-xs py-1.5 shrink-0">
+                <Paperclip size={14} weight="bold" />
+                {subindoEstoque || subindoDocumento ? "Lendo o arquivo…" : "Anexar arquivo"}
               </button>
-              <button type="button" disabled={subindoEstoque || !!foto}
-                onClick={() => inputEstoque.current?.click()} data-testid="treinar-estoque"
-                title={estoque ? "Substituir planilha de estoque (CSV)" : "Enviar planilha de estoque (CSV)"}
-                aria-label="Enviar estoque"
-                className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-3 hover:bg-surface-2 hover:text-info disabled:opacity-40">
-                <Table size={18} weight="bold" />
-              </button>
+              <span className="text-[11px] text-ink-3 truncate">
+                Foto, planilha (Excel ou CSV) ou documento (PDF, Word, texto). Também dá para arrastar ou colar.
+              </span>
             </div>
+          )}
+          <div className="flex gap-2 items-end">
             <textarea
               ref={campo}
               className="zz-input text-sm resize-none"
@@ -523,6 +652,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               value={texto}
               onChange={(e) => setTexto(e.target.value)}
               onKeyDown={aoTeclar}
+              onPaste={aoColar}
               data-testid="treinar-input"
             />
             <button className="zz-btn shrink-0" disabled={enviando || !texto.trim() || bloqueado}
@@ -532,12 +662,11 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           </div>
           <div className="flex items-center justify-between mt-1.5 text-[11px] text-ink-3 gap-3">
             <span className="truncate">
-              {subindoEstoque ? "Carregando a planilha…" : (
-                <>
-                  {itens.length} {itens.length === 1 ? "ensinamento" : "ensinamentos"} ·{" "}
-                  {total.toLocaleString("pt-BR")} de {MAX_TOTAL.toLocaleString("pt-BR")} caracteres ·{" "}
-                  {fotos.length} de {MAX_FOTOS} fotos
-                </>
+              {itens.length} {itens.length === 1 ? "ensinamento" : "ensinamentos"} ·{" "}
+              {total.toLocaleString("pt-BR")} de {MAX_TOTAL.toLocaleString("pt-BR")} caracteres ·{" "}
+              {fotos.length} de {MAX_FOTOS} fotos
+              {documentos.length > 0 && (
+                <> · documentos: {caracteresDocs.toLocaleString("pt-BR")} de {MAX_DOCUMENTOS.toLocaleString("pt-BR")} caracteres</>
               )}
             </span>
             {itens.length > 0 && (
@@ -548,8 +677,8 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           </div>
         </div>
 
-        <input ref={inputFoto} type="file" accept="image/*" className="hidden" onChange={escolherFoto} />
-        <input ref={inputEstoque} type="file" accept=".csv,text/csv" className="hidden" onChange={escolherEstoque} />
+        <input ref={inputArquivo} type="file" accept={ACEITOS} className="hidden" onChange={escolherArquivo}
+          data-testid="treinar-arquivo" />
 
         {/* Dentro do painel, e não ao lado: o clique no fundo da busca não pode
             chegar ao fundo do treino, que fecharia os dois. */}

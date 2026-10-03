@@ -41,6 +41,13 @@ function ChatTeste({ agente, onFechar }) {
       const { data } = await api.post(`/ai/agents/${agente.id}/test`, { mensagens: proximas });
       setMensagens([
         ...proximas,
+        // Ao transferir, o agente pode deixar uma frase para o contato; e quando
+        // a trava segura uma confirmação de horário inventada, o contato recebe
+        // um aviso neutro. Nos dois casos é isso que o cliente leria.
+        ...(data.transferiu && data.texto ? [{ role: "assistant", content: data.texto }] : []),
+        ...(data.segurada
+          ? [{ role: "sistema", content: `Mensagem segurada, não enviada ao contato: "${data.segurada}"` }]
+          : []),
         data.transferiu
           ? { role: "sistema", content: `Transferido para atendimento humano — ${data.motivo}` }
           : { role: "assistant", content: data.texto },

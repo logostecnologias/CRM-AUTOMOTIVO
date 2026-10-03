@@ -903,8 +903,31 @@ async def etapa_estoque():
     await semear(agente={})
     import ai_estoque
 
-    st, det = await erro(rai.subir_estoque("ag-1", _upload("e.xlsx", "application/vnd.ms-excel", b"PK"), ADMIN))
-    check("xlsx e recusado dizendo como salvar em CSV", st == 400 and "CSV" in det, (st, det))
+    st, det = await erro(rai.subir_estoque("ag-1", _upload("e.xls", "application/vnd.ms-excel", b"\xd0\xcf"), ADMIN))
+    check(".xls antigo e recusado dizendo como salvar em .xlsx", st == 400 and ".xlsx" in det, (st, det))
+    st, det = await erro(rai.subir_estoque("ag-1", _upload("e.xlsx", "application/vnd.ms-excel", b"PK lixo"), ADMIN))
+    check("xlsx corrompido e recusado com motivo", st == 400 and "Excel" in det, (st, det))
+
+    # Excel de verdade, do jeito que loja manda: titulo em cima, linha em
+    # branco, numero inteiro que o openpyxl le como float, data.
+    import io as _io
+    import datetime as _dt
+    import openpyxl
+    livro = openpyxl.Workbook()
+    aba = livro.active
+    aba.append(["Estoque ADS Veiculos"])
+    aba.append([])
+    aba.append(["Modelo", "Ano", "Preço", "Entrada"])
+    aba.append(["Clio", 2012, 32900.0, _dt.date(2026, 9, 1)])
+    aba.append(["Palio", 2015, 38500.5, None])
+    buf = _io.BytesIO()
+    livro.save(buf)
+    resumo = await rai.subir_estoque("ag-1", _upload("estoque.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.getvalue()), ADMIN)
+    check("xlsx entra, achando o cabecalho abaixo do titulo",
+          resumo["colunas"] == ["Modelo", "Ano", "Preço", "Entrada"] and resumo["total"] == 2, resumo)
+    check("numero inteiro sai sem .0 e data sai em pt-BR",
+          resumo["exemplos"][0] == {"Modelo": "Clio", "Ano": "2012", "Preço": "32900", "Entrada": "01/09/2026"},
+          resumo["exemplos"])
 
     resumo = await rai.subir_estoque("ag-1", _upload("estoque.csv", "text/csv", PLANILHA), ADMIN)
     check("a planilha entra, sem a linha em branco", resumo["total"] == 4, resumo)
@@ -972,7 +995,8 @@ async def etapa_finalizar():
           not IA.chamadas[-1]["ferramentas"] and s["status_atendimento"] == "bot", s["status_atendimento"])
 
     poderes = await rai.mudar_poderes("ag-1", rai.PoderesIn(finalizar_ativo=True), ADMIN)
-    check("o poder e ligado pela tela de treino", poderes == {"agenda_ativa": False, "finalizar_ativo": True}, poderes)
+    check("o poder e ligado pela tela de treino",
+          poderes["agenda_ativa"] is False and poderes["finalizar_ativo"] is True, poderes)
     doc = await DB.ai_agents.find_one({"id": "ag-1"})
     check("o prompt diz quando encerrar", "finalizar_atendimento" in ai_agents.montar_instrucoes(doc))
 
@@ -1007,6 +1031,156 @@ async def etapa_finalizar():
     IA.chamar = None
 
 
+def _pdf_com_texto(texto: str) -> bytes:
+    """Um PDF minimo com uma linha de texto, montado a mao (o pypdf le, mas
+    nao escreve texto). Os offsets do xref sao calculados, nao chutados."""
+    conteudo = f"BT /F1 12 Tf 72 720 Td ({texto}) Tj ET".encode("latin-1")
+    objetos = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(conteudo)).encode() + b" >>\nstream\n" + conteudo + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    saida = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, corpo in enumerate(objetos, 1):
+        offsets.append(len(saida))
+        saida += f"{i} 0 obj\n".encode() + corpo + b"\nendobj\n"
+    xref = len(saida)
+    saida += f"xref\n0 {len(objetos) + 1}\n0000000000 65535 f \n".encode()
+    for o in offsets:
+        saida += f"{o:010d} 00000 n \n".encode()
+    saida += f"trailer\n<< /Size {len(objetos) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode()
+    return bytes(saida)
+
+
+def _docx_com_texto(*paragrafos: str) -> bytes:
+    import io as _io
+    import zipfile as _zip
+    corpo = "".join(f"<w:p><w:r><w:t>{p}</w:t></w:r></w:p>" for p in paragrafos)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+           f"<w:body>{corpo}</w:body></w:document>")
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, "w") as z:
+        z.writestr("word/document.xml", xml)
+    return buf.getvalue()
+
+
+async def etapa_documentos():
+    print()
+    print("[documentos do treino: pdf, word, texto]")
+    await semear(agente={})
+    import ai_documentos
+
+    pdf = await rai.subir_documento("ag-1", _upload("financiamento.pdf", "application/pdf",
+                                    _pdf_com_texto("Financiamos em ate 48x com entrada de 20%")), ADMIN)
+    check("o texto do PDF e lido", pdf["caracteres"] > 20 and "48x" in pdf["previa"], pdf)
+    docx = await rai.subir_documento("ag-1", _upload("trocas.docx", "application/octet-stream",
+                                     _docx_com_texto("Politica de troca", "Aceitamos seu usado na troca.")), ADMIN)
+    check("o texto do Word e lido, paragrafo por paragrafo",
+          "Politica de troca\nAceitamos seu usado" in (await DB.ai_agents.find_one({"id": "ag-1"}))["documentos"][1]["texto"])
+    await rai.subir_documento("ag-1", _upload("horario.txt", "text/plain", "Abrimos de segunda a sabado.".encode()), ADMIN)
+
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    prompt = ai_agents.montar_instrucoes(doc)
+    check("os tres entram na base de conhecimento do prompt",
+          all(t in prompt for t in ("48x", "usado na troca", "segunda a sabado"))
+          and prompt.index("Base de conhecimento") < prompt.index("48x"), prompt[:200])
+    publico = rai._publico(doc)
+    check("a lista de agentes nao carrega o texto inteiro",
+          all("texto" not in d and "previa" in d for d in publico["documentos"]), publico["documentos"])
+
+    st, det = await erro(rai.subir_documento("ag-1", _upload("velho.doc", "application/msword", b"\xd0\xcf"), ADMIN))
+    check(".doc antigo e recusado dizendo como salvar", st == 400 and ".docx" in det, (st, det))
+    st, det = await erro(rai.subir_documento("ag-1", _upload("scan.pdf", "application/pdf", _pdf_com_texto("")), ADMIN))
+    check("PDF sem texto (escaneado) e recusado com o motivo", st == 400 and "escaneada" in det, (st, det))
+    st, det = await erro(rai.subir_documento("ag-1", _upload("grande.txt", "text/plain",
+                                             ("x" * ai_documentos.MAX_TOTAL).encode()), ADMIN))
+    check("documento que estoura o teto e recusado dizendo o tamanho", st == 400 and "caracteres" in det, (st, det))
+
+    outro = {"id": "u-b", "tenant_id": "t-outro", "role": "tenant_admin", "name": "B", "email": "b@x.com"}
+    st, _ = await erro(rai.remover_documento("ag-1", pdf["id"], outro))
+    check("outra empresa nao apaga documento alheio", st == 404, st)
+    await rai.remover_documento("ag-1", pdf["id"], ADMIN)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    check("remover tira o texto do prompt", "48x" not in ai_agents.montar_instrucoes(doc))
+
+
+async def etapa_confirmacao_inventada():
+    print()
+    print("[agente nao confirma horario que nao existe]")
+    import agenda
+    # O caso real: SDR de loja, chave da agenda ligada, nenhum servico cadastrado.
+    await semear(agente={"tipo": "sdr", "agenda_ativa": True})
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    prompt = ai_agents.montar_instrucoes(doc)
+    check("sem servico, o SDR tambem ouve que nao pode marcar", "NÃO tem acesso à agenda" in prompt)
+    check("e o prompt traz a data de hoje", "Hoje é" in prompt)
+    poderes = await rai.ver_poderes("ag-1", ADMIN)
+    check("a tela sabe que a agenda nao tem com o que trabalhar",
+          poderes["agenda_ativa"] and not poderes["agenda_pronta"] and poderes["agenda_servicos"] == 0, poderes)
+
+    IA.proxima = "Perfeito, Italo! Sua visita está confirmada para terça-feira, dia 14, às 10h."
+    await receber("pode ser terça às 10h")
+    s = await sessao()
+    check("a confirmacao inventada nao sai", not any("confirmada para" in t for _, t in ENVIADOS), ENVIADOS)
+    check("o contato recebe o aviso neutro", ENVIADOS and ENVIADOS[-1][1] == ai_agents.AVISO_CONFIRMACAO, ENVIADOS)
+    check("e a conversa vai para uma pessoa", s["status_atendimento"] == "aguardando", s["status_atendimento"])
+    check("com o texto que o agente ia mandar no historico",
+          any("ia confirmar um horário" in t and "terça-feira, dia 14" in t for t in await sistemas(s["id"])))
+
+    # Conversa que segue com o agente: pergunta normal nao e afetada.
+    await semear(agente={"tipo": "sdr"})
+    for frase in ("Quer agendar uma visita para conhecer o carro?",
+                  "Qual dia fica melhor para você?",
+                  "O Clio 2012 está disponível sim."):
+        check(f"nao trava: {frase[:30]}",
+              not await ai_agents.confirmou_sem_agenda(DB, TENANT, {"id": "c"}, frase, {"ok": False}))
+    for frase in ("Agendei sua visita para sexta.", "Fica marcado para amanhã às 9h!",
+                  "Seu horário está reservado.", "Visita confirmada, te esperamos!"):
+        check(f"trava: {frase[:30]}",
+              await ai_agents.confirmou_sem_agenda(DB, TENANT, {"id": "c"}, frase, {"ok": False}))
+
+    # Agendamento futuro ja gravado: confirmar de novo e verdade, nao trava.
+    await DB.appointments.insert_one({"id": "ap-1", "tenant_id": TENANT, "contact_id": "c",
+                                      "status": agenda.STATUS_AGENDADO, "inicio": "2099-01-01T13:00:00+00:00"})
+    check("com horario gravado para o contato, confirmar passa",
+          not await ai_agents.confirmou_sem_agenda(DB, TENANT, {"id": "c"}, "Está confirmado para terça!", {"ok": False}))
+    check("e a ferramenta agendar ter gravado agora tambem libera",
+          not await ai_agents.confirmou_sem_agenda(DB, TENANT, {"id": "x"}, "Agendei para terça.", {"ok": True}))
+
+    # Chat de teste mostra o mesmo.
+    IA.proxima = "Pronto, sua visita está agendada para amanhã às 14h."
+    r = await rai.testar_agente("ag-1", rai.TesteIn(mensagens=[{"role": "user", "content": "amanha 14h"}]), ADMIN)
+    check("o chat de teste tambem segura", r["transferiu"] and r.get("segurada") and r["texto"] == ai_agents.AVISO_CONFIRMACAO, r)
+    IA.proxima = "Claro, posso ajudar com isso."
+
+
+async def etapa_frase_ao_transferir():
+    print()
+    print("[frase antes de transferir]")
+    await semear(agente={})
+    IA.proxima = "Anotei terça às 10h, vou passar para a equipe confirmar com você. [HUMANO]"
+    await receber("quero marcar terça 10h")
+    s = await sessao()
+    check("conversa nova: a frase chega ao contato",
+          ENVIADOS and ENVIADOS[-1][1].startswith("Anotei terça") and "[HUMANO]" not in ENVIADOS[-1][1], ENVIADOS)
+    check("e a conversa vai para a fila", s["status_atendimento"] == "aguardando")
+
+    await semear(agente={})
+    IA.proxima = "Oi! Como posso ajudar?"
+    await receber("oi")
+    IA.proxima = "Vou chamar alguém da equipe. [HUMANO]"
+    await receber("quero falar do meu financiamento")
+    check("conversa existente: a frase tambem chega", ENVIADOS[-1][1] == "Vou chamar alguém da equipe.", ENVIADOS)
+    s = await sessao()
+    check("e a conversa vai para a fila", s["status_atendimento"] == "aguardando")
+    IA.proxima = "Claro, posso ajudar com isso."
+
+
 # ---------------------------------------------------------------------------
 
 def test_suite():
@@ -1035,5 +1209,8 @@ def test_suite():
         await etapa_treinamento()
         await etapa_estoque()
         await etapa_finalizar()
+        await etapa_documentos()
+        await etapa_confirmacao_inventada()
+        await etapa_frase_ao_transferir()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

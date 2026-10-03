@@ -25,7 +25,9 @@ from db import get_db
 from auth import require_tenant_admin
 import ai_agents
 import ai_client
+import agenda
 import ai_credentials
+import ai_documentos
 import ai_estoque
 import ai_runtime
 import media_store
@@ -264,6 +266,7 @@ def _publico(agente: dict) -> dict:
     provedor não muda.
     """
     a = {k: v for k, v in agente.items() if k not in ("_id", "credencial")}
+    a["documentos"] = [ai_documentos.publico(d) for d in agente.get("documentos") or []]
     credencial = agente.get("credencial") or {}
     a["mascara"] = credencial.get("mascara")
     a["tem_chave"] = bool(credencial)
@@ -380,9 +383,30 @@ async def mudar_poderes(agent_id: str, body: PoderesIn, user=Depends(require_ten
         await db.ai_agents.update_one(
             {"id": agent_id, "tenant_id": user["tenant_id"]},
             {"$set": {**mudanca, "updated_at": _now()}})
-    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    return await _poderes(db, user["tenant_id"], agent_id)
+
+
+@router.get("/agents/{agent_id}/poderes")
+async def ver_poderes(agent_id: str, user=Depends(require_tenant_admin)):
+    return await _poderes(get_db(), user["tenant_id"], agent_id)
+
+
+async def _poderes(db, tenant_id: str, agent_id: str) -> dict:
+    """Os poderes e se a agenda tem com o que trabalhar.
+
+    `agenda_pronta` existe por causa de um caso real (02/10/2026): a chave
+    estava ligada, a empresa não tinha nenhum serviço cadastrado, o agente não
+    recebeu ferramenta nenhuma e a tela não dizia nada. O cliente achou que o
+    agente marcava na agenda, e ele não marcava.
+    """
+    agente = await _agente_do_tenant(db, agent_id, tenant_id)
+    servicos = len(await agenda.servicos_ativos(db, tenant_id))
+    profissionais = len(await agenda.recursos_ativos(db, tenant_id))
     return {"agenda_ativa": bool(agente.get("agenda_ativa")),
-            "finalizar_ativo": bool(agente.get("finalizar_ativo"))}
+            "finalizar_ativo": bool(agente.get("finalizar_ativo")),
+            "agenda_servicos": servicos,
+            "agenda_profissionais": profissionais,
+            "agenda_pronta": servicos > 0 and profissionais > 0}
 
 
 class TesteIn(BaseModel):
@@ -428,6 +452,7 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     contato_teste = {"id": "teste", "nome": "Contato de teste", "numero_whatsapp": ""}
     bloco_agenda, ferramentas, executar = await ai_agents.preparar_ferramentas(
         db, user["tenant_id"], agente, contato_teste, None, simulado=True)
+    executar, marcou = ai_agents.registrar_marcacao(executar)
 
     try:
         resposta = await ai_runtime.responder_por_agente(
@@ -450,9 +475,20 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
             {"$set": {"credencial_status": "ok", "credencial_erro": None}})
 
     texto = (resposta.texto or "").strip()
+    # As mesmas duas regras do atendimento real (`ai_agents.tentar_responder`):
+    # a frase que acompanha a transferência chega ao contato, e confirmação de
+    # horário sem agendamento gravado é segurada. Sem elas aqui, o teste
+    # mostraria ao admin uma conversa diferente da que o cliente vai ter.
     if ai_agents.SENTINELA.lower() in texto.lower():
-        return {"transferiu": True, "texto": None,
+        frase = ai_agents.frase_de_transferencia(texto)
+        if frase and await ai_agents.confirmou_sem_agenda(db, user["tenant_id"], contato_teste, frase, marcou):
+            frase = ai_agents.AVISO_CONFIRMACAO
+        return {"transferiu": True, "texto": frase or None,
                 "motivo": "O agente decidiu transferir para um atendente"}
+    if await ai_agents.confirmou_sem_agenda(db, user["tenant_id"], contato_teste, texto, marcou):
+        return {"transferiu": True, "texto": ai_agents.AVISO_CONFIRMACAO, "segurada": texto,
+                "motivo": ("O agente ia confirmar um horário que não está gravado na Agenda. "
+                           "A mensagem foi segurada e a conversa iria para uma pessoa confirmar")}
     return {
         "transferiu": False,
         "texto": texto,
@@ -709,24 +745,15 @@ async def esquecer_tudo(agent_id: str, user=Depends(require_tenant_admin)):
 @router.post("/agents/{agent_id}/estoque")
 async def subir_estoque(agent_id: str, file: UploadFile = File(...),
                         user=Depends(require_tenant_admin)):
-    """Troca o estoque do agente pela planilha enviada (CSV, como o Excel salva)."""
+    """Troca o estoque do agente pela planilha enviada (Excel .xlsx ou CSV)."""
     db = get_db()
     await _agente_do_tenant(db, agent_id, user["tenant_id"])
-
-    nome = (file.filename or "").lower()
-    if nome.endswith((".xlsx", ".xls", ".ods")):
-        # Sem leitor de Excel no servidor. Dizer como resolver é melhor do que
-        # o "não tem cabeçalho" que o binário do xlsx produziria no leitor de CSV.
-        raise HTTPException(
-            status_code=400,
-            detail=("Envie a planilha em CSV. No Excel: Arquivo > Salvar como > "
-                    "CSV UTF-8 (separado por vírgulas)."))
 
     # Mesmo leitor da importação de contatos: teto de 10MB aplicado durante a
     # leitura, não depois de o arquivo inteiro já estar na memória.
     dados = await _le_upload(file)
     try:
-        colunas, linhas = ai_estoque.le_planilha(dados)
+        colunas, linhas = ai_estoque.le_planilha(dados, file.filename or "")
     except ai_estoque.EstoqueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await ai_estoque.substituir(db, user["tenant_id"], agent_id,
@@ -751,4 +778,38 @@ async def remover_estoque(agent_id: str, user=Depends(require_tenant_admin)):
     db = get_db()
     await _agente_do_tenant(db, agent_id, user["tenant_id"])
     await ai_estoque.remover(db, user["tenant_id"], agent_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Documentos do treino (ver `ai_documentos`)
+# ---------------------------------------------------------------------------
+
+@router.post("/agents/{agent_id}/documentos")
+async def subir_documento(agent_id: str, file: UploadFile = File(...),
+                          user=Depends(require_tenant_admin)):
+    """Lê o texto do PDF/Word/texto e o guarda no agente. O arquivo não é guardado."""
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    dados = await _le_upload(file)
+    try:
+        texto = ai_documentos.extrair(file.filename or "", dados)
+        doc = ai_documentos.novo(file.filename, texto, agente.get("documentos") or [])
+    except ai_documentos.DocumentoError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$push": {"documentos": doc}, "$set": {"updated_at": _now()}})
+    return ai_documentos.publico(doc)
+
+
+@router.delete("/agents/{agent_id}/documentos/{doc_id}")
+async def remover_documento(agent_id: str, doc_id: str, user=Depends(require_tenant_admin)):
+    db = get_db()
+    await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    res = await db.ai_agents.update_one(
+        {"id": agent_id, "tenant_id": user["tenant_id"]},
+        {"$pull": {"documentos": {"id": doc_id}}, "$set": {"updated_at": _now()}})
+    if res.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
     return {"ok": True}
