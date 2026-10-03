@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api, { API, formatApiErrorDetail } from "@/lib/api";
 import {
   Brain, Check, PaperPlaneRight, PencilSimple, Trash, X, ChatCircleDots,
@@ -8,6 +9,7 @@ import {
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { useAcao } from "@/hooks/useAcao";
+import Modal from "@/components/ui/Modal";
 
 // Treino do agente, numa conversa só: o que a empresa ensina, as fotos que o
 // agente pode mandar e o estoque que ele consulta.
@@ -170,6 +172,10 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const fim = useRef(null);
   const campo = useRef(null);
   const inputArquivo = useRef(null);
+  const navigate = useNavigate();
+  // Aberto quando alguém liga "Marcar horário na Agenda" sem a Agenda ter com
+  // o que trabalhar. Guarda a resposta de /poderes, que diz o que falta.
+  const [agendaVazia, setAgendaVazia] = useState(null);
 
   // O cartão só sabe se a chave está ligada. Se a Agenda tem serviço e
   // profissional para o agente trabalhar, só o servidor sabe.
@@ -316,6 +322,19 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
 
   const [alternarPoder] = useAcao(async (chave) => {
     try {
+      // Ligar a agenda sem serviço ou sem profissional não dá ferramenta
+      // nenhuma ao agente: foi assim que um cliente achou que o agente marcava
+      // visitas e ele não marcava (02/10/2026). Em vez de ligar em silêncio, a
+      // tela explica e leva ao cadastro. A consulta é feita na hora do clique,
+      // e não lida do estado: o serviço pode ter sido criado noutra aba.
+      if (chave === "agenda_ativa" && !poderes.agenda_ativa) {
+        const { data: atual } = await api.get(`/ai/agents/${agente.id}/poderes`);
+        setPoderes(atual);
+        if (!atual.agenda_pronta) {
+          setAgendaVazia(atual);
+          return;
+        }
+      }
       const { data } = await api.patch(`/ai/agents/${agente.id}/poderes`, { [chave]: !poderes[chave] });
       setPoderes(data);
       onMudou?.();
@@ -679,6 +698,54 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
 
         <input ref={inputArquivo} type="file" accept={ACEITOS} className="hidden" onChange={escolherArquivo}
           data-testid="treinar-arquivo" />
+
+        {agendaVazia && (
+          <Modal
+            titulo="A Agenda ainda não está pronta"
+            descricao={`Para ${agente.nome} marcar horários de verdade, a Agenda precisa ter o que oferecer.`}
+            testId="modal-agenda-vazia"
+            onFechar={() => setAgendaVazia(null)}
+            salvarLabel={agendaVazia.agenda_servicos === 0 ? "Cadastrar serviços" : "Cadastrar profissionais"}
+            salvandoLabel="Abrindo a Agenda…"
+            cancelarLabel="Agora não"
+            onSalvar={async () => {
+              // A permissão já fica ligada: assim que o cadastro existir, o
+              // agente passa a marcar sem ninguém precisar voltar aqui.
+              try {
+                await api.patch(`/ai/agents/${agente.id}/poderes`, { agenda_ativa: true });
+                onMudou?.();
+              } catch (ex) {
+                erroApi(ex);
+                return;
+              }
+              const aba = agendaVazia.agenda_servicos === 0 ? "servicos" : "profissionais";
+              navigate(`/app/agenda?aba=${aba}`);
+            }}
+          >
+            <p className="text-sm text-ink-2">
+              O agente consulta os horários livres e marca sozinho a partir do que está
+              cadastrado na tela <strong>Agenda</strong>. Hoje ela tem{" "}
+              <strong>{agendaVazia.agenda_servicos} {agendaVazia.agenda_servicos === 1 ? "serviço" : "serviços"}</strong> e{" "}
+              <strong>{agendaVazia.agenda_profissionais} {agendaVazia.agenda_profissionais === 1 ? "profissional" : "profissionais"}</strong>,
+              então ele não teria horário nenhum para oferecer.
+            </p>
+            <ol className="text-sm text-ink-2 space-y-2 list-decimal pl-5">
+              <li className={agendaVazia.agenda_servicos > 0 ? "text-ink-3 line-through" : ""}>
+                Cadastre o <strong>serviço</strong> que o cliente marca, com a duração. Por exemplo:
+                "Visita à loja, 60 min" ou "Avaliação, 30 min".
+              </li>
+              <li className={agendaVazia.agenda_profissionais > 0 ? "text-ink-3 line-through" : ""}>
+                Cadastre <strong>quem atende</strong> (um vendedor, um profissional, a própria loja) com os
+                dias e horários de atendimento.
+              </li>
+              <li>Volte aqui e use <strong>Testar</strong> para pedir um horário e conferir.</li>
+            </ol>
+            <p className="text-xs text-ink-3">
+              Ao continuar, a permissão já fica ligada. Enquanto a Agenda estiver vazia, o agente anota o dia e o
+              horário que o cliente quer e passa para a equipe confirmar, sem nunca dizer que está marcado.
+            </p>
+          </Modal>
+        )}
 
         {/* Dentro do painel, e não ao lado: o clique no fundo da busca não pode
             chegar ao fundo do treino, que fecharia os dois. */}

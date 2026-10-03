@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   CaretLeft, CaretRight, Plus, Robot, Sparkle, User, XCircle, CheckCircle,
@@ -34,7 +35,16 @@ const ICONE_ORIGEM = { manual: User, bot: Robot, ia: Sparkle };
 export default function AgendaPage() {
   const { user } = useAuth();
   const admin = user?.role === "tenant_admin";
-  const [aba, setAba] = useState("agenda");
+  // `?aba=servicos` abre direto numa aba de cadastro. É por onde chega quem
+  // ligou "Marcar horário na Agenda" no treino do agente sem ter serviço
+  // nenhum: cair na grade de horários e ter de achar a aba seria um passo a
+  // mais justamente para quem ainda não conhece a tela. Aba de admin pedida
+  // por quem não é admin é ignorada, como o botão que nem aparece para ele.
+  const [params] = useSearchParams();
+  const [aba, setAba] = useState(() => {
+    const pedida = params.get("aba");
+    return admin && ABAS_ADMIN.some(([id]) => id === pedida) ? pedida : "agenda";
+  });
   const [config, setConfig] = useState(null);
   const [servicos, setServicos] = useState([]);
   const [recursos, setRecursos] = useState([]);
