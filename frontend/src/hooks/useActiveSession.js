@@ -14,9 +14,23 @@ import api from "@/lib/api";
 // array anterior quando nada mudou também evita re-renderizar o chat à toa.
 function mergeById(prev, incoming) {
   if (!incoming.length) return prev;
-  const seen = new Set(prev.map((m) => m.id));
-  const added = incoming.filter((m) => !seen.has(m.id));
-  return added.length ? [...prev, ...added] : prev;
+  // Mensagem já em tela que voltou diferente é substituída: o `meta` muda
+  // depois de gravado (a transcrição do áudio chega segundos depois, o status
+  // de entrega também). Igual, fica o objeto antigo, para não redesenhar a
+  // conversa a cada ciclo de polling.
+  const porId = new Map(incoming.map((m) => [m.id, m]));
+  let mudou = false;
+  const atualizadas = prev.map((m) => {
+    const nova = porId.get(m.id);
+    if (!nova) return m;
+    porId.delete(m.id);
+    if (JSON.stringify(nova) === JSON.stringify(m)) return m;
+    mudou = true;
+    return nova;
+  });
+  const added = [...porId.values()];
+  if (!added.length && !mudou) return prev;
+  return [...atualizadas, ...added];
 }
 
 export function useActiveSession(activeId) {

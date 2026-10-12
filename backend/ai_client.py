@@ -74,6 +74,10 @@ class Modelo:
     cache_leitura: float    # US$/1M tokens lidos do cache
     cache_escrita: float    # US$/1M tokens gravados no cache (0 = sem custo extra)
     nota: str = ""
+    # Se o modelo enxerga imagem. `None` = não sabemos (modelo livre fora da
+    # lista): a imagem é mandada, e se o provedor recusar a conversa vai para
+    # uma pessoa com o motivo. Barrar de antemão travaria um modelo que enxerga.
+    visao: bool | None = True
 
 
 # `protocolo` decide qual caminho de chamada o provedor usa. `chat` é o Chat
@@ -136,9 +140,11 @@ PROVEDORES: dict[str, dict] = {
             # chave do plano grátis eles respondem 404. Por isso não são
             # sugeridos; quem tiver acesso os acha em "Buscar modelos".
             Modelo("openai/gpt-oss-120b", "GPT-OSS 120B", 0.15, 0.60, 0.075, 0.0,
-                   "Recomendado: modelo aberto da OpenAI, bom em seguir instruções."),
+                   "Recomendado: modelo aberto da OpenAI, bom em seguir instruções.",
+                   visao=False),
             Modelo("openai/gpt-oss-20b", "GPT-OSS 20B", 0.075, 0.30, 0.0375, 0.0,
-                   "Mais barato e mais rápido. Para triagem simples."),
+                   "Mais barato e mais rápido. Para triagem simples.",
+                   visao=False),
         ],
     },
     "gemini": {
@@ -183,7 +189,8 @@ PROVEDORES: dict[str, dict] = {
         "modelo_livre": True,
         "modelos": [
             Modelo("deepseek-chat", "DeepSeek V3", 0.28, 0.42, 0.028, 0.0,
-                   "Muito barato, boa qualidade."),
+                   "Muito barato, boa qualidade.",
+                   visao=False),
         ],
     },
     "mistral": {
@@ -271,8 +278,67 @@ def modelo_de(provedor: str, modelo_id: str) -> Modelo:
     if p.get("modelo_livre") and modelo_id and len(modelo_id) <= MAX_ID_MODELO \
             and not any(c.isspace() for c in modelo_id):
         # Preço desconhecido: o consumo é medido em tokens e o custo fica zero.
-        return Modelo(modelo_id, modelo_id, 0.0, 0.0, 0.0, 0.0)
+        return Modelo(modelo_id, modelo_id, 0.0, 0.0, 0.0, 0.0, visao=None)
     raise IAError(f"Modelo desconhecido para {provedor}: {modelo_id}")
+
+
+def aceita_imagem(provedor: str, modelo_id: str) -> bool | None:
+    """True/False quando o catálogo sabe; None para modelo livre fora da lista."""
+    try:
+        return modelo_de(provedor, modelo_id).visao
+    except IAError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Imagens no histórico
+# ---------------------------------------------------------------------------
+#
+# Quem monta o histórico (`ai_agents`) não conhece os três formatos: um turno
+# com foto chega aqui como `{"role", "content", "imagens": [{"mime", "b64"}]}`,
+# e cada protocolo o traduz para o seu bloco. Mesma razão de o laço de
+# ferramentas morar neste módulo.
+#
+# A imagem vai **antes** do texto no turno: é a ordem que os três provedores
+# recomendam, e é a ordem em que o contato mandou (a foto, e depois "quanto
+# custa esse?").
+
+def _data_uri(img: dict) -> str:
+    return f"data:{img['mime']};base64,{img['b64']}"
+
+
+def _turno_anthropic(t: dict) -> dict:
+    if not t.get("imagens"):
+        return {"role": t["role"], "content": t["content"]}
+    partes = [{"type": "image", "source": {"type": "base64", "media_type": i["mime"],
+                                           "data": i["b64"]}} for i in t["imagens"]]
+    # Bloco de texto vazio é recusado pela Anthropic: foto sem legenda vai só
+    # com a imagem.
+    if (t.get("content") or "").strip():
+        partes.append({"type": "text", "text": t["content"]})
+    return {"role": t["role"], "content": partes}
+
+
+def _turno_responses(t: dict) -> dict:
+    if not t.get("imagens"):
+        return {"role": t["role"], "content": t["content"]}
+    partes = [{"type": "input_image", "image_url": _data_uri(i)} for i in t["imagens"]]
+    if (t.get("content") or "").strip():
+        partes.append({"type": "input_text", "text": t["content"]})
+    return {"role": t["role"], "content": partes}
+
+
+def _turno_chat(t: dict) -> dict:
+    if not t.get("imagens"):
+        return {"role": t["role"], "content": t["content"]}
+    partes = [{"type": "image_url", "image_url": {"url": _data_uri(i)}} for i in t["imagens"]]
+    if (t.get("content") or "").strip():
+        partes.append({"type": "text", "text": t["content"]})
+    return {"role": t["role"], "content": partes}
+
+
+def tem_imagem(historico: list[dict]) -> bool:
+    return any(t.get("imagens") for t in historico)
 
 
 def modelo_padrao(provedor: str) -> str:
@@ -312,6 +378,7 @@ def catalogo_publico() -> list[dict]:
                     # mas não é regra (o cache do gpt-4o custa 50%), e um dia
                     # a projeção mentiria em silêncio.
                     "cache_leitura": m.cache_leitura,
+                    "visao": m.visao,
                 }
                 for m in p["modelos"]
             ],
@@ -478,7 +545,7 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
     except ImportError:
         raise IAError("SDK da Anthropic não instalado no servidor (pip install anthropic)")
 
-    mensagens = list(historico)
+    mensagens = [_turno_anthropic(t) for t in historico]
     total = Resposta(texto="", modelo=modelo_id)
     extra = {}
     if ferramentas:
@@ -546,7 +613,7 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
     except ImportError:
         raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
 
-    entrada = list(historico)
+    entrada = [_turno_responses(t) for t in historico]
     total = Resposta(texto="", modelo=modelo_id)
     extra = {}
     if ferramentas:
@@ -639,7 +706,8 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
     except ImportError:
         raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
 
-    mensagens = [{"role": "system", "content": instrucoes}, *historico]
+    mensagens = [{"role": "system", "content": instrucoes},
+                 *(_turno_chat(t) for t in historico)]
     total = Resposta(texto="", modelo=modelo_id)
     extra = {}
     if ferramentas:
@@ -729,6 +797,10 @@ def _traduz_erro(e: Exception) -> str:
     if status == 401 or "Authentication" in nome or (
             status == 400 and "api key" in str(e).lower()):
         return "Chave de API recusada pelo provedor. Confira se copiou a chave inteira e se ela não foi revogada."
+    texto_erro = str(e).lower()
+    if status == 400 and any(x in texto_erro for x in ("image", "vision", "multimodal")):
+        return ("O modelo escolhido não aceita imagens. Troque por um modelo que enxergue "
+                "(Claude, GPT-5, Gemini) ou desligue \"Entender fotos\" no agente.")
     if status == 402 or "credit" in str(e).lower() or "quota" in str(e).lower():
         return "A conta no provedor está sem saldo ou sem cota. Adicione créditos e tente de novo."
     if status == 404:
@@ -833,3 +905,79 @@ async def listar_modelos(provedor: str, chave_api: str, base_url: str | None = N
 
     ids = sorted({i for i in ids if i and not any(x in i.lower() for x in _NAO_CONVERSA)})
     return ids[:MAX_MODELOS_LISTADOS]
+
+
+
+# ---------------------------------------------------------------------------
+# Transcrição de áudio
+# ---------------------------------------------------------------------------
+#
+# Nenhum modelo de conversa do catálogo ouve áudio de forma confiável (a
+# Anthropic não aceita áudio de entrada), então o áudio vira texto antes de
+# chegar ao agente. Dois provedores, os dois com a mesma API de transcrição da
+# OpenAI: a própria OpenAI e a Groq, que roda o mesmo Whisper por uma fração
+# do preço. Preço por minuto de áudio, não por token: é assim que os dois
+# cobram, e converter para token faria a medição mentir.
+#
+# `verbose_json` porque é o formato que devolve a duração, e é dela que sai o
+# custo.
+
+@dataclass(frozen=True)
+class ModeloTranscricao:
+    id: str
+    usd_por_minuto: float
+    # A Groq cobra no mínimo 10 segundos por pedido; o "ok?" de 2 segundos
+    # custa como 10.
+    minimo_segundos: float = 0.0
+
+
+TRANSCRICAO: dict[str, ModeloTranscricao] = {
+    "groq": ModeloTranscricao("whisper-large-v3-turbo", 0.04 / 60, minimo_segundos=10),
+    "openai": ModeloTranscricao("whisper-1", 0.006),
+}
+
+
+@dataclass
+class Transcricao:
+    texto: str
+    modelo: str
+    segundos: float = 0.0
+
+    def custo_usd(self, m: ModeloTranscricao) -> float:
+        return max(self.segundos, m.minimo_segundos) / 60 * m.usd_por_minuto
+
+
+def transcreve(provedor: str) -> bool:
+    return provedor in TRANSCRICAO
+
+
+async def transcrever(provedor: str, chave_api: str, caminho, nome_arquivo: str) -> Transcricao:
+    """O áudio em `caminho` como texto, em português.
+
+    `nome_arquivo` precisa terminar na extensão certa (`.ogg` para a nota de voz
+    do WhatsApp): é por ela que o provedor reconhece o formato, e um `.bin`
+    é recusado mesmo com o conteúdo certo.
+
+    O arquivo é passado aberto, e o SDK o lê aos pedaços no multipart: nunca
+    inteiro na memória, que é a regra de mídia do projeto.
+    """
+    m = TRANSCRICAO.get(provedor)
+    if not m:
+        raise IAError(f"{provedor} não transcreve áudio")
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
+    base_url = PROVEDORES.get(provedor, {}).get("base_url")
+    async with AsyncOpenAI(api_key=chave_api, base_url=base_url, max_retries=2,
+                           timeout=120) as client:
+        try:
+            with open(caminho, "rb") as arquivo:
+                r = await client.audio.transcriptions.create(
+                    model=m.id, file=(nome_arquivo, arquivo), language="pt",
+                    response_format="verbose_json")
+        except Exception as e:
+            raise IAError(_traduz_erro(e))
+    texto = (getattr(r, "text", "") or "").strip()
+    return Transcricao(texto=texto, modelo=m.id,
+                       segundos=float(getattr(r, "duration", 0) or 0))

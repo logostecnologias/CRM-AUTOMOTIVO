@@ -263,7 +263,7 @@ function ImageBubble({ src, media }) {
 // Anexo dentro da bolha. `media.id` aponta pro nosso /api/media (cookie
 // httpOnly vai junto no <img>/<video>, então não precisa de token na URL);
 // mídia vinda do nó de fluxo não tem id, só a URL pública original.
-function MediaContent({ media }) {
+export function MediaContent({ media }) {
   const src = media.id ? `${API}/media/${media.id}` : media.url;
   // Arquivo já removido pela retenção: os metadados sobrevivem justamente pra
   // bolha antiga não virar imagem quebrada.
@@ -301,6 +301,18 @@ function MediaContent({ media }) {
   );
 }
 
+// O que o agente de IA ouviu no áudio. Fica na bolha porque é o mesmo texto
+// que o modelo leu: o atendente que recebe a conversa entende o que foi dito
+// sem dar play, e vê exatamente o que o agente entendeu.
+export function Transcricao({ texto }) {
+  return (
+    <div className="mb-1 border-l-2 border-line-strong pl-2 text-xs text-ink-2 italic whitespace-pre-wrap"
+         data-testid="transcricao-audio">
+      <span className="not-italic font-semibold text-ink-3">Transcrição: </span>{texto}
+    </div>
+  );
+}
+
 export function MessageBubble({ m }) {
   if (m.direction === "sistema" || m.type === "system") {
     return <div className="text-[11px] text-ink-3 italic text-center py-1">— {m.content} —</div>;
@@ -314,6 +326,7 @@ export function MessageBubble({ m }) {
           <div className="text-xs font-bold text-ink mb-0.5">{m.meta.agent_name}</div>
         )}
         {media && <div className="mb-1"><MediaContent media={media} /></div>}
+        {m.meta?.transcricao && <Transcricao texto={m.meta.transcricao} />}
         {m.content && <div className="whitespace-pre-wrap">{m.content}</div>}
         <div className="text-[9px] text-ink-3 mt-1 font-mono flex items-center gap-1 justify-end">
           {new Date(m.timestamp).toLocaleTimeString("pt-BR")}

@@ -29,6 +29,7 @@ import agenda
 import ai_credentials
 import ai_documentos
 import ai_estoque
+import ai_midia
 import ai_runtime
 import media_store
 from routes.contacts import _le_upload
@@ -371,6 +372,10 @@ class PoderesIn(BaseModel):
     # tem (nem deve ter) provedor, chave e tom à mão.
     agenda_ativa: bool | None = None
     finalizar_ativo: bool | None = None
+    # Entender anexo do contato. Ligados por padrão (ausente = ligado): não
+    # escrevem nada no sistema, só deixam o agente ler o que já chegou.
+    audio_ativo: bool | None = None
+    imagem_ativa: bool | None = None
 
 
 @router.patch("/agents/{agent_id}/poderes")
@@ -406,13 +411,131 @@ async def _poderes(db, tenant_id: str, agent_id: str) -> dict:
             "finalizar_ativo": bool(agente.get("finalizar_ativo")),
             "agenda_servicos": servicos,
             "agenda_profissionais": profissionais,
-            "agenda_pronta": servicos > 0 and profissionais > 0}
+            "agenda_pronta": servicos > 0 and profissionais > 0,
+            "audio_ativo": ai_midia.entende_audio(agente),
+            "imagem_ativa": ai_midia.entende_imagem(agente),
+            # Se a chave ligada consegue mesmo: o modelo pode não enxergar e a
+            # conta pode não transcrever. A tela avisa em vez de deixar o
+            # cliente achar que o agente vê a foto.
+            "imagem_pronta": ai_midia.visao_do_agente({**agente, "imagem_ativa": True}) is not False,
+            "audio_pronto": _transcricao_disponivel(agente)}
+
+
+def _transcricao_disponivel(agente: dict) -> bool:
+    if (agente.get("credencial") and agente.get("credencial_status") != "erro"
+            and ai_client.transcreve(agente.get("provedor"))):
+        return True
+    return ai_runtime._transcricao_plataforma() is not None
 
 
 class TesteIn(BaseModel):
     # A conversa do teste, no mesmo formato do histórico real. A última
-    # mensagem é a que o agente vai responder.
+    # mensagem é a que o agente vai responder. Mensagem do contato pode levar
+    # `anexo: {id, transcricao?}`, o que `/test/anexo` devolveu.
     mensagens: list[dict]
+
+
+async def _historico_de_teste(db, tenant_id: str, agente: dict, mensagens: list[dict],
+                              visao) -> tuple[list[dict], str | None]:
+    """O histórico do chat de teste, com os anexos lidos como no real
+    (`ai_agents.montar_historico`): mesmo texto de aviso, mesmas últimas
+    `MAX_IMAGENS` fotos como imagem. Devolve também o motivo de transferência
+    quando a última mensagem é um anexo sem legenda que o agente não lê."""
+    linhas = []
+    for m in mensagens:
+        papel = "assistant" if m.get("role") == "assistant" else "user"
+        if m.get("role") not in ("assistant", "user", None):
+            continue  # avisos de sistema e erros da tela
+        anexo = m.get("anexo") if papel == "user" and isinstance(m.get("anexo"), dict) else None
+        doc = await ai_midia.midia_utilizavel(db, tenant_id, (anexo or {}).get("id"))
+        linhas.append((papel, str(m.get("content") or "").strip(), anexo, doc))
+
+    # As últimas fotos, contadas do fim.
+    com_imagem = set()
+    if visao is not False:
+        for i in range(len(linhas) - 1, -1, -1):
+            if linhas[i][3] and linhas[i][3].get("kind") == "image":
+                com_imagem.add(i)
+                if len(com_imagem) >= ai_midia.MAX_IMAGENS:
+                    break
+
+    historico: list[dict] = []
+    for i, (papel, conteudo, anexo, doc) in enumerate(linhas):
+        img = await ai_midia.imagem_para_modelo(doc) if i in com_imagem else None
+        if doc:
+            conteudo = ai_midia.texto_do_anexo(
+                doc.get("kind"), conteudo, transcricao=(anexo or {}).get("transcricao"),
+                nome=doc.get("filename"), imagem_vai=bool(img))
+        if not conteudo and not img:
+            continue
+        if historico and historico[-1]["role"] == papel:
+            historico[-1]["content"] = (historico[-1]["content"] + "\n" + conteudo).strip()
+            if img:
+                historico[-1].setdefault("imagens", []).append(img)
+        else:
+            historico.append({"role": papel, "content": conteudo, **({"imagens": [img]} if img else {})})
+
+    ilegivel = None
+    if linhas and linhas[-1][0] == "user" and linhas[-1][2] and not linhas[-1][1]:
+        _, _, anexo, doc = linhas[-1]
+        kind = (doc or {}).get("kind")
+        if not doc:
+            ilegivel = "O anexo não está mais disponível"
+        elif kind == "audio" and not ai_midia.entende_audio(agente):
+            ilegivel = "O agente está configurado para não ouvir áudios"
+        elif kind == "audio" and not anexo.get("transcricao"):
+            ilegivel = "O áudio não foi transcrito, então o agente não sabe o que foi dito"
+        elif kind == "audio" and ai_agents.pediu_humano(anexo["transcricao"]):
+            ilegivel = "O contato pediu (em áudio) para falar com uma pessoa"
+        elif kind == "image" and not ai_midia.entende_imagem(agente):
+            ilegivel = "O agente está configurado para não ver fotos"
+        elif kind == "image" and visao is False:
+            ilegivel = "O modelo deste agente não enxerga imagens"
+        elif kind not in ("audio", "image"):
+            ilegivel = "O agente não analisa vídeos nem arquivos"
+    return historico, ilegivel
+
+
+@router.post("/agents/{agent_id}/test/anexo")
+async def anexo_de_teste(agent_id: str, file: UploadFile = File(...),
+                         user=Depends(require_tenant_admin)):
+    """Foto ou áudio para o chat de teste.
+
+    O áudio é transcrito aqui, na hora, pelo mesmo caminho do atendimento real
+    (mesma conta, mesma cota, mesma medição): a transcrição volta para a tela,
+    que a mostra embaixo do áudio e a manda de volta junto da conversa.
+    """
+    db = get_db()
+    agente = await _agente_do_tenant(db, agent_id, user["tenant_id"])
+    mime = media_store.sanitize_mime(file.content_type, file.filename)
+    # O navegador grava em webm e o Windows chama wav de audio/wav, e nenhum
+    # dos dois está na lista de áudio que a Cloud API toca. Para transcrever
+    # servem, então aqui vale o prefixo.
+    kind = "audio" if mime.startswith("audio/") else media_store.classify(mime, file.filename)
+    if kind not in ("audio", "image"):
+        raise HTTPException(status_code=400, detail=(
+            "No teste dá para mandar foto ou áudio. Vídeo e documento o agente não lê: "
+            "numa conversa real eles vão para um atendente."))
+    try:
+        doc = await media_store.store_stream(
+            db, user["tenant_id"], None, user["id"], file.filename, mime, file.read, kind=kind)
+    except media_store.MediaError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    resposta = {"id": doc["id"], "kind": kind, "filename": doc.get("filename"),
+                "mime": doc.get("mime")}
+    if kind == "audio":
+        if not ai_midia.entende_audio(agente):
+            resposta["transcricao_erro"] = "O agente está configurado para não ouvir áudios"
+        else:
+            try:
+                resposta["transcricao"] = await ai_midia.transcrever_doc(
+                    db, user["tenant_id"], agente, doc)
+            except ai_client.IAError as e:
+                resposta["transcricao_erro"] = str(e)
+            except HTTPException as e:
+                resposta["transcricao_erro"] = str(e.detail)
+    return resposta
 
 
 @router.post("/agents/{agent_id}/test")
@@ -430,15 +553,17 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     if not agente:
         raise HTTPException(status_code=404, detail="Agente não encontrado")
 
-    historico = [
-        {"role": "assistant" if m.get("role") == "assistant" else "user",
-         "content": str(m.get("content") or "").strip()}
-        for m in body.mensagens if str(m.get("content") or "").strip()
-    ]
+    visao = ai_midia.visao_do_agente(agente)
+    historico, ilegivel = await _historico_de_teste(
+        db, user["tenant_id"], agente, body.mensagens, visao)
     while historico and historico[0]["role"] != "user":
         historico.pop(0)
     if not historico:
         raise HTTPException(status_code=400, detail="Envie ao menos uma mensagem do contato")
+    if ilegivel:
+        # Mesma regra do atendimento real: anexo sem legenda que o agente não
+        # consegue ler vai para uma pessoa, sem chamar o provedor.
+        return {"transferiu": True, "texto": None, "motivo": ilegivel}
 
     ultima = historico[-1]["content"] if historico[-1]["role"] == "user" else ""
     if ultima and ai_agents.pediu_humano(ultima):
@@ -463,7 +588,9 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
         # A chave pode ter sido revogada no console depois de salva. Marcar aqui
         # é o que faz o cartão mostrar o problema em vez de o agente falhar em
         # silêncio na próxima mensagem de um contato real.
-        if agente.get("credencial"):
+        # Modelo que recusa a foto não é chave quebrada: marcar faria o agente
+        # parar de usar uma chave que funciona para todo o resto.
+        if agente.get("credencial") and "não aceita imagens" not in str(e):
             await db.ai_agents.update_one(
                 {"id": agent_id, "tenant_id": user["tenant_id"]},
                 {"$set": {"credencial_status": "erro", "credencial_erro": str(e)}})

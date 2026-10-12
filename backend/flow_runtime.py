@@ -404,7 +404,7 @@ async def _agente_ia(db, tenant_id, conn, session, contact, text, media, outputs
     if exigir_primeiro and agente.get("modo") != ai_agents.MODO_PRIMEIRO:
         return False
     resultado = await ai_agents.tentar_responder(
-        db, agente, session, contact, text, bool(media), outputs)
+        db, agente, session, contact, text, (media or {}).get("kind") or bool(media), outputs)
     if resultado == ai_agents.RESPONDEU:
         session["ia_agente_id"] = agente["id"]
         return True

@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import {
   Plus, PencilSimple, Trash, ChatCircleDots, Robot, PaperPlaneRight, Code,
-  DotsThree, MagnifyingGlass, PlugsConnected, Warning, Brain,
+  DotsThree, MagnifyingGlass, PlugsConnected, Warning, Brain, Paperclip, Microphone,
+  Stop, X,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import AgenteWizard from "./AgenteWizard";
 import TreinarAgente from "./TreinarAgente";
+import { MediaContent, Transcricao } from "@/components/atendimento/shared";
+import { useAcao } from "@/hooks/useAcao";
 
 const MODO_ROTULO = {
   fallback: "Entra quando nenhum robô atende",
@@ -25,20 +28,87 @@ function ChatTeste({ agente, onFechar }) {
   const [mensagens, setMensagens] = useState([]);
   const [texto, setTexto] = useState("");
   const [pensando, setPensando] = useState(false);
+  // Foto ou áudio já enviado ao servidor, esperando o "enviar". O áudio volta
+  // transcrito: é o mesmo texto que o agente vai ler.
+  const [anexo, setAnexo] = useState(null);
+  const [gravando, setGravando] = useState(false);
+  const gravador = useRef(null);
+  const inputArquivo = useRef(null);
   const fim = useRef(null);
 
   useEffect(() => { fim.current?.scrollIntoView({ behavior: "smooth" }); }, [mensagens, pensando]);
+  // Fechar o teste no meio de uma gravação não pode deixar o microfone aberto.
+  useEffect(() => () => gravador.current?.stream?.getTracks().forEach((t) => t.stop()), []);
+
+  const [subirAnexo, subindo] = useAcao(async (arquivo, nome) => {
+    const form = new FormData();
+    form.append("file", arquivo, nome || arquivo.name);
+    try {
+      const { data } = await api.post(`/ai/agents/${agente.id}/test/anexo`, form);
+      setAnexo(data);
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  });
+
+  // O seletor não tem `accept`: arquivo fora da lista apareceria apagado no
+  // seletor do sistema, sem explicação. O servidor recusa dizendo por quê.
+  const escolherArquivo = (e) => {
+    const arquivo = e.target.files?.[0];
+    e.target.value = "";
+    if (arquivo) subirAnexo(arquivo);
+  };
+
+  const colar = (e) => {
+    const arquivo = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith("image/"));
+    if (arquivo) {
+      e.preventDefault();
+      subirAnexo(arquivo, arquivo.name || "colada.png");
+    }
+  };
+
+  // Gravar pelo microfone é o jeito de testar áudio sem ter um arquivo à mão,
+  // e é o mais parecido com a nota de voz do WhatsApp.
+  const alternarGravacao = async () => {
+    if (gravando) {
+      gravador.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const pedacos = [];
+      rec.ondataavailable = (ev) => { if (ev.data.size) pedacos.push(ev.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setGravando(false);
+        const tipo = (rec.mimeType || "audio/webm").split(";")[0];
+        const ext = tipo.includes("ogg") ? "ogg" : tipo.includes("mp4") ? "m4a" : "webm";
+        if (pedacos.length) subirAnexo(new Blob(pedacos, { type: tipo }), `gravacao.${ext}`);
+      };
+      gravador.current = rec;
+      rec.start();
+      setGravando(true);
+    } catch {
+      toast.error("O navegador não liberou o microfone. Permita o acesso ou anexe um arquivo de áudio.");
+    }
+  };
 
   const enviar = async (e) => {
     e.preventDefault();
     const conteudo = texto.trim();
-    if (!conteudo || pensando) return;
-    const proximas = [...mensagens, { role: "user", content: conteudo }];
+    if ((!conteudo && !anexo) || pensando || subindo || gravando) return;
+    const proximas = [...mensagens, { role: "user", content: conteudo, ...(anexo ? { anexo } : {}) }];
     setMensagens(proximas);
     setTexto("");
+    setAnexo(null);
     setPensando(true);
     try {
-      const { data } = await api.post(`/ai/agents/${agente.id}/test`, { mensagens: proximas });
+      // Avisos e erros da tela não são conversa: mandá-los faria o agente ler
+      // "Transferido para atendimento humano" como fala do contato.
+      const { data } = await api.post(`/ai/agents/${agente.id}/test`, {
+        mensagens: proximas.filter((m) => m.role === "user" || m.role === "assistant"),
+      });
       setMensagens([
         ...proximas,
         // Ao transferir, o agente pode deixar uma frase para o contato; e quando
@@ -90,7 +160,8 @@ function ChatTeste({ agente, onFechar }) {
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-2">
           {mensagens.length === 0 && (
             <div className="text-xs text-ink-3 text-center py-10">
-              Escreva como se fosse um cliente e veja o que o agente responde.
+              Escreva como se fosse um cliente e veja o que o agente responde. Dá para mandar
+              foto e áudio também, pelo clipe ou pelo microfone.
             </div>
           )}
           {mensagens.map((m, i) => (
@@ -104,6 +175,7 @@ function ChatTeste({ agente, onFechar }) {
                       ? "bg-warning-soft border border-warning/40 text-warning text-xs"
                       : "bg-danger-soft border border-danger/40 text-danger text-xs"
               }`}>
+                {m.anexo && <AnexoTeste anexo={m.anexo} />}
                 {m.content}
               </div>
             </div>
@@ -112,15 +184,62 @@ function ChatTeste({ agente, onFechar }) {
           <div ref={fim} />
         </div>
 
+        {anexo && (
+          <div className="border-t border-line px-3 pt-3 flex items-start gap-2" data-testid="agente-chat-anexo">
+            <div className="flex-1 min-w-0 rounded-xl border border-line bg-surface-2 p-2">
+              <AnexoTeste anexo={anexo} />
+            </div>
+            <button type="button" className="zz-btn zz-btn-secondary text-xs py-1.5 shrink-0"
+              onClick={() => setAnexo(null)} aria-label="Tirar anexo">
+              <X size={12} weight="bold" />
+            </button>
+          </div>
+        )}
+
         <form onSubmit={enviar} className="border-t border-line p-3 flex gap-2">
-          <input className="zz-input" autoFocus placeholder="Escreva como um cliente…"
-            value={texto} onChange={(e) => setTexto(e.target.value)}
+          <input ref={inputArquivo} type="file" className="hidden" onChange={escolherArquivo} />
+          <button type="button" className="zz-btn zz-btn-secondary shrink-0" title="Anexar foto ou áudio"
+            disabled={subindo || gravando || pensando} onClick={() => inputArquivo.current?.click()}
+            data-testid="agente-chat-anexar">
+            <Paperclip size={14} weight="bold" />
+          </button>
+          <button type="button" title={gravando ? "Parar e anexar" : "Gravar áudio"}
+            className={`zz-btn shrink-0 ${gravando ? "bg-danger-solid text-danger-fg" : "zz-btn-secondary"}`}
+            disabled={subindo || pensando} onClick={alternarGravacao} aria-pressed={gravando}
+            data-testid="agente-chat-gravar">
+            {gravando ? <Stop size={14} weight="fill" /> : <Microphone size={14} weight="bold" />}
+          </button>
+          <input className="zz-input" autoFocus
+            placeholder={gravando ? "Gravando… toque em parar" : subindo ? "Enviando anexo…" : "Escreva como um cliente…"}
+            value={texto} onChange={(e) => setTexto(e.target.value)} onPaste={colar}
             data-testid="agente-chat-input" />
-          <button type="submit" className="zz-btn shrink-0" disabled={pensando || !texto.trim()}>
+          <button type="submit" className="zz-btn shrink-0"
+            disabled={pensando || subindo || gravando || (!texto.trim() && !anexo)}>
             <PaperPlaneRight size={14} weight="bold" />
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** Foto ou áudio do chat de teste, com o que o agente vai ler do áudio. */
+function AnexoTeste({ anexo }) {
+  return (
+    <div className="mb-1 space-y-1">
+      <div className="rounded-lg overflow-hidden bg-surface text-ink">
+        <MediaContent media={{ id: anexo.id, kind: anexo.kind, filename: anexo.filename }} />
+      </div>
+      {anexo.transcricao && (
+        <div className="rounded-lg bg-surface text-ink px-2 py-1">
+          <Transcricao texto={anexo.transcricao} />
+        </div>
+      )}
+      {anexo.transcricao_erro && (
+        <div className="text-[11px] rounded-lg bg-warning-soft text-warning px-2 py-1">
+          Não transcrito: {anexo.transcricao_erro}
+        </div>
+      )}
     </div>
   );
 }

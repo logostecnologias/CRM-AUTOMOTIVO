@@ -229,3 +229,82 @@ async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str
     await registrar_uso(db, tenant_id, cred["origem"], cred["provedor"],
                         cred["modelo"], resposta, agente.get("id"))
     return resposta
+
+
+def modelo_em_uso(agente: dict) -> tuple[str, str] | None:
+    """(provedor, modelo) que vai responder por este agente, sem decifrar chave
+    nem checar cota. Mesma escolha de `resolver_credencial`: é ela que decide se
+    a foto do contato vai como imagem ou como aviso de texto."""
+    if agente.get("credencial") and agente.get("credencial_status") != "erro":
+        return agente.get("provedor"), agente.get("modelo")
+    p = _credencial_plataforma()
+    return (p["provedor"], p["modelo"]) if p else None
+
+
+# ---------------------------------------------------------------------------
+# Transcrição de áudio
+# ---------------------------------------------------------------------------
+
+def _transcricao_plataforma() -> dict | None:
+    """Chave de transcrição da plataforma. Separada da chave de conversa porque
+    a plataforma pode responder com a Anthropic, que não transcreve; sem a
+    separada, vale a de conversa quando o provedor dela transcreve."""
+    chave = os.environ.get("AI_TRANSCRICAO_KEY")
+    provedor = os.environ.get("AI_TRANSCRICAO_PROVIDER", "groq")
+    if not chave:
+        chave = os.environ.get("AI_PLATFORM_KEY")
+        provedor = os.environ.get("AI_PLATFORM_PROVIDER", "openai")
+    if not chave or not ai_client.transcreve(provedor):
+        return None
+    return {"provedor": provedor, "chave": chave, "origem": ORIGEM_PLATAFORMA}
+
+
+async def resolver_transcricao(db, tenant_id: str, agente: dict) -> dict:
+    """Qual conta paga a transcrição. A do agente vem primeiro, quando o
+    provedor dela transcreve (OpenAI e Groq); senão a da plataforma, com a mesma
+    cota do plano que a conversa.
+
+    Levanta `ai_client.IAError` com texto para o histórico quando não há conta
+    nenhuma: é o motivo que o atendente lê ao receber a conversa.
+    """
+    if (agente.get("credencial") and agente.get("credencial_status") != "erro"
+            and ai_client.transcreve(agente.get("provedor"))):
+        return {"provedor": agente["provedor"],
+                "chave": ai_credentials.decifrar(agente["credencial"]),
+                "origem": ORIGEM_CLIENTE}
+    plataforma = _transcricao_plataforma()
+    if plataforma is None:
+        raise ai_client.IAError(
+            "nenhuma conta de transcrição configurada (a chave do agente precisa "
+            "ser da OpenAI ou da Groq)")
+    await _checar_cota(db, tenant_id)
+    return plataforma
+
+
+async def transcrever_audio(db, tenant_id: str, agente: dict, caminho,
+                            nome_arquivo: str) -> str:
+    """O áudio como texto, medido. Levanta `IAError`/`HTTPException` (cota)."""
+    cred = await resolver_transcricao(db, tenant_id, agente)
+    t = await ai_client.transcrever(cred["provedor"], cred["chave"], caminho, nome_arquivo)
+    await registrar_transcricao(db, tenant_id, cred["origem"], cred["provedor"], t,
+                                agente.get("id"))
+    return t.texto
+
+
+async def registrar_transcricao(db, tenant_id: str, origem: str, provedor: str,
+                                t: ai_client.Transcricao, agente_id: str | None = None):
+    """Mesmo acumulado diário de `registrar_uso`, em segundos de áudio e não em
+    tokens: é a unidade que o provedor cobra. Entra no custo do mês, que é o
+    número que a tela de consumo mostra. Nunca levanta."""
+    try:
+        m = ai_client.TRANSCRICAO[provedor]
+        await db.ai_usage.update_one(
+            {"tenant_id": tenant_id, "dia": _hoje(), "provedor": provedor,
+             "modelo": t.modelo, "origem": origem, "agente_id": agente_id},
+            {"$inc": {"chamadas": 1, "segundos_audio": round(t.segundos, 1),
+                      "custo_usd": t.custo_usd(m)},
+             "$setOnInsert": {"mes": _mes_atual()}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning("Falha ao registrar transcrição do tenant %s: %s", tenant_id, e)

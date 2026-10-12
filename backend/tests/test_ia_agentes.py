@@ -420,10 +420,12 @@ async def etapa_anexo_sem_legenda():
     await semear(agente={})
     await receber("", media={"kind": "image"})
     s = await sessao()
-    check("nao tenta responder imagem", len(IA.chamadas) == 0, IA.chamadas)
+    # Sem `media_id` o download nao acontece: a imagem nao chegou a ser nossa,
+    # e o agente nao tem o que ver. (Anexo baixado e lido: test_ia_anexos.py.)
+    check("nao tenta responder imagem que nao baixou", len(IA.chamadas) == 0, IA.chamadas)
     check("vai para a fila", s["status_atendimento"] == "aguardando")
-    check("dizendo que nao analisa arquivo",
-          any("nao analisa" in m or "não analisa" in m for m in await sistemas(s["id"])),
+    check("dizendo que nao foi possivel baixar",
+          any("baixá-lo" in m for m in await sistemas(s["id"])),
           await sistemas(s["id"]))
 
 

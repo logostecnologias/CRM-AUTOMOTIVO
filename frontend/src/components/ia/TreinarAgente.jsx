@@ -4,7 +4,7 @@ import api, { API, formatApiErrorDetail } from "@/lib/api";
 import {
   Brain, Check, PaperPlaneRight, PencilSimple, Trash, X, ChatCircleDots,
   ImageSquare, Table, MagnifyingGlass, ArrowsClockwise, CalendarCheck, CheckCircle,
-  Paperclip, FileText, Warning, UploadSimple,
+  Paperclip, FileText, Warning, UploadSimple, Microphone, Eye,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -168,6 +168,9 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const [poderes, setPoderes] = useState(() => ({
     agenda_ativa: !!agente.agenda_ativa,
     finalizar_ativo: !!agente.finalizar_ativo,
+    // Ligados por padrão: só deixam o agente ler o que o contato já mandou.
+    audio_ativo: agente.audio_ativo !== false,
+    imagem_ativa: agente.imagem_ativa !== false,
   }));
   const fim = useRef(null);
   const campo = useRef(null);
@@ -501,6 +504,10 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               nota: "Consulta os horários livres, marca e cancela de verdade. Os serviços e a grade vêm da tela Agenda." },
             { chave: "finalizar_ativo", Icone: CheckCircle, rotulo: "Finalizar o atendimento",
               nota: "Encerra a conversa quando o assunto se resolve, com um resumo no histórico." },
+            { chave: "audio_ativo", Icone: Microphone, rotulo: "Entender áudios",
+              nota: "Transcreve a nota de voz do cliente e responde a ela. A transcrição aparece embaixo do áudio na Central." },
+            { chave: "imagem_ativa", Icone: Eye, rotulo: "Entender fotos",
+              nota: "Vê a foto que o cliente manda (as três mais recentes da conversa) e responde sobre ela." },
           ].map(({ chave, Icone, rotulo, nota }) => {
             const ligado = poderes[chave];
             return (
@@ -520,6 +527,28 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           <span className="text-[11px] text-ink-3" title="Sempre ligado: é a saída de qualquer dúvida do agente.">
             · transferir para uma pessoa, sempre
           </span>
+          {poderes.audio_ativo && poderes.audio_pronto === false && (
+            <div className="w-full flex items-start gap-2 rounded-lg border border-warning/40 bg-warning-soft p-2.5 text-[11px] text-warning"
+              data-testid="audio-sem-transcricao">
+              <Warning size={14} weight="bold" className="shrink-0 mt-px" />
+              <span>
+                A chave deste agente <strong>não transcreve áudio</strong> (só as da OpenAI e da Groq transcrevem),
+                então quem mandar áudio vai para um atendente. Para o agente ouvir, use uma chave da OpenAI ou da
+                Groq no agente.
+              </span>
+            </div>
+          )}
+          {poderes.imagem_ativa && poderes.imagem_pronta === false && (
+            <div className="w-full flex items-start gap-2 rounded-lg border border-warning/40 bg-warning-soft p-2.5 text-[11px] text-warning"
+              data-testid="imagem-sem-visao">
+              <Warning size={14} weight="bold" className="shrink-0 mt-px" />
+              <span>
+                O modelo escolhido para este agente <strong>não enxerga imagens</strong>, então foto sem texto vai
+                para um atendente. Para o agente ver fotos, troque por um modelo que enxergue (Claude, GPT-5 ou
+                Gemini) na configuração do agente.
+              </span>
+            </div>
+          )}
           {poderes.agenda_ativa && poderes.agenda_pronta === false && (
             <div className="w-full flex items-start gap-2 rounded-lg border border-warning/40 bg-warning-soft p-2.5 text-[11px] text-warning"
               data-testid="agenda-sem-servico">
