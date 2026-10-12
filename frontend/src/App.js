@@ -16,6 +16,7 @@ import AgendaPage from "@/pages/tenant/AgendaPage";
 import RelatoriosPage from "@/pages/tenant/RelatoriosPage";
 import InboxPage from "@/pages/tenant/InboxPage";
 import WhatsAppPage from "@/pages/tenant/WhatsAppPage";
+import TelefonePage from "@/pages/tenant/TelefonePage";
 import SettingsPage from "@/pages/tenant/SettingsPage";
 import AtendimentoPage from "@/pages/tenant/AtendimentoPage";
 import DepartamentosPage from "@/pages/tenant/DepartamentosPage";
@@ -64,6 +65,7 @@ function App() {
             <Route path="bots" element={<ProtectedRoute roles={ADMIN_ONLY}><BotsPage /></ProtectedRoute>} />
             <Route path="ai-agents" element={<ProtectedRoute roles={ADMIN_ONLY}><AIAgentsPage /></ProtectedRoute>} />
             <Route path="whatsapp" element={<ProtectedRoute roles={ADMIN_ONLY}><WhatsAppPage /></ProtectedRoute>} />
+            <Route path="telefone" element={<ProtectedRoute roles={ADMIN_ONLY}><TelefonePage /></ProtectedRoute>} />
             <Route path="departments" element={<ProtectedRoute roles={ADMIN_ONLY}><DepartamentosPage /></ProtectedRoute>} />
             <Route path="users" element={<ProtectedRoute roles={ADMIN_ONLY}><UsersPage /></ProtectedRoute>} />
             <Route path="contacts" element={<ProtectedRoute roles={ADMIN_ONLY}><ContactsPage /></ProtectedRoute>} />

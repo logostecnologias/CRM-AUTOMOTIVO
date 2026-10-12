@@ -32,6 +32,7 @@ from routes.reports import router as reports_router
 from routes.ai import router as ai_router
 from routes.settings import router as settings_router
 from routes.scheduling import router as scheduling_router
+from routes.voz import router as voz_router
 import agenda_worker
 import campaign_runner
 import health_monitor
@@ -130,6 +131,8 @@ app.include_router(reports_router)
 app.include_router(ai_router)
 app.include_router(settings_router)
 app.include_router(scheduling_router)
+# Webhook de voz do Twilio e a tela de Telefone (ver `ligacoes.py`).
+app.include_router(voz_router)
 
 
 @app.get("/api/health")
@@ -352,6 +355,20 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("resources", [("tenant_id", 1), ("ativo", 1), ("nome", 1)], {}),
     ("resources", [("id", 1)], {}),
     ("scheduling_settings", [("tenant_id", 1)], {}),
+
+    # Telefone. O número chamado é a chave de roteamento de **toda** ligação
+    # que chega ao webhook de voz, de todas as empresas: mesmo papel do
+    # `phone_number_id` das conexões de WhatsApp.
+    ("voz_config", [("numero", 1)], {"sparse": True}),
+    ("voz_config", [("tenant_id", 1)], {}),
+    # O Twilio busca a gravação por este token, sem login.
+    ("voz_config", [("audio_token", 1)], {"sparse": True}),
+    # A tecla volta pelo CallSid; a lista da tela e o resumo são por período.
+    ("ligacoes", [("tenant_id", 1), ("call_sid", 1)], {}),
+    ("ligacoes", [("tenant_id", 1), ("created_at", -1), ("_id", -1)], {}),
+    # "Este número já recebeu a mensagem há pouco?", a cada tecla 1.
+    ("ligacoes", [("tenant_id", 1), ("numero", 1), ("status", 1), ("created_at", -1)], {}),
+    ("ligacoes", [("id", 1)], {}),
 ]
 
 # Um índice já existente com as mesmas chaves e opções diferentes faz o Mongo

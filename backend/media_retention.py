@@ -110,7 +110,11 @@ async def _purge_window(db, tenant_ids: list[str], days: int) -> int:
              # foto da ficha por iniciais sem ninguém ter pedido. Quem o apaga
              # é a anonimização (`contatos._apaga_avatar`), que é onde foto de
              # pessoa tem de sair mesmo.
-             "uso": {"$ne": "avatar"}},
+             # A gravação do atendimento telefônico (`voz`) fica fora pelo
+             # mesmo motivo e com consequência pior: é configuração, e
+             # apagá-la deixaria a ligação muda depois de 90 dias. Quem a apaga
+             # é a troca de áudio na tela de Telefone.
+             "uso": {"$nin": ["avatar", "voz"]}},
             {"_id": 0},
         ).limit(BATCH).to_list(BATCH)
         if not batch:

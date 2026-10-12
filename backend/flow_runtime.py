@@ -630,6 +630,13 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
     if session and session.get("campanha_id"):
         await camp.mark_reply(db, session)
 
+    # Mesma ideia para a mensagem mandada a quem ligou e apertou 1: a resposta
+    # é o que diz se a ligação virou conversa. Tardio pelo ciclo de import
+    # (`ligacoes` puxa `outbound`, que puxa este módulo).
+    if session and session.get("ligacao_id"):
+        import ligacoes
+        await ligacoes.marcar_resposta(db, tenant_id, session)
+
     # Descadastro. Vale para qualquer mensagem, não só resposta de disparo: o
     # contato pode pedir para sair quando quiser, e a palavra é a mesma.
     # Sinaliza e segue — quem não quer campanha continua sendo atendido
@@ -721,7 +728,14 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             # CONFIRMAR/CANCELAR ("posso remarcar?"). Dizer "bot indisponível"
             # descreveria um defeito onde não há nenhum: mesmo raciocínio da
             # resposta de campanha, logo acima.
-            if primeira_resposta_campanha:
+            # A conversa aberta depois de uma ligação também nasce sem bot, e no
+            # modo "fila" a fila é a configuração escolhida na tela de Telefone.
+            # Vem antes da campanha porque usa a mesma marca de primeira
+            # resposta, e "resposta a uma campanha" descreveria outra coisa.
+            if session.get("origem") == "ligacao":
+                motivo = ("Resposta à mensagem enviada depois de uma ligação: "
+                          "encaminhada para atendimento humano")
+            elif primeira_resposta_campanha:
                 motivo = "Resposta a uma campanha: encaminhada para atendimento humano"
             elif session.get("origem") == "agenda":
                 motivo = ("Resposta a um aviso de agendamento: encaminhada "

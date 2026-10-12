@@ -7,7 +7,7 @@ import {
   ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
   ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
-  CalendarCheck,
+  CalendarCheck, Phone,
 } from "@phosphor-icons/react";
 
 // A barra lateral e uma lista de grupos, nao uma lista de itens: com 15 telas
@@ -67,6 +67,7 @@ function tenantNav(role) {
       titulo: "Configuração",
       itens: [
         { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
+        { to: "/app/telefone", icon: Phone, label: "Telefone" },
         { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
         { to: "/app/users", icon: Users, label: "Usuários" },
         { to: "/app/settings", icon: Gear, label: "Ajustes" },

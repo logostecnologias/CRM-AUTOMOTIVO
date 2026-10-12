@@ -26,6 +26,7 @@ uma: conversas, negócios, atividades, notas e disparos passam para a que fica.
 import logging
 from datetime import datetime, timezone
 
+import contatos_csv
 import media_store
 
 logger = logging.getLogger("zappzen.contatos")
@@ -105,6 +106,16 @@ async def _apaga_midia(db, session_ids: list[str]) -> int:
     return total
 
 
+def _filtro_ligacoes(tenant_id: str, contact: dict) -> dict:
+    """As ligações desta pessoa: as ligadas à ficha e as que ficaram só com o
+    número (quem ligou e não apertou nada nunca ganhou `contact_id`)."""
+    numero = contact.get("numero_whatsapp") or ""
+    ou: list[dict] = [{"contact_id": contact["id"]}]
+    if numero and not numero.startswith("anon-"):
+        ou.append({"numero": {"$in": contatos_csv.variantes_br(numero)}})
+    return {"tenant_id": tenant_id, "$or": ou}
+
+
 async def anonimizar(db, tenant_id: str, contact: dict) -> dict:
     """Remove o dado pessoal e preserva o registro do que aconteceu."""
     contact_id = contact["id"]
@@ -137,6 +148,14 @@ async def anonimizar(db, tenant_id: str, contact: dict) -> dict:
 
     notas = await db.contact_notes.delete_many(
         {"tenant_id": tenant_id, "contact_id": contact_id}
+    )
+
+    # O registro de ligação guarda o número de quem ligou, e o número é o dado
+    # pessoal por excelência. A ligação continua contando no resumo; só deixa
+    # de dizer de quem era.
+    await db.ligacoes.update_many(
+        _filtro_ligacoes(tenant_id, contact),
+        {"$set": {"numero": None, "anonimizado_em": agora}},
     )
 
     campos = {
@@ -208,6 +227,7 @@ async def apagar(db, tenant_id: str, contact: dict) -> dict:
     disparos = await db.campaign_recipients.delete_many(
         {"tenant_id": tenant_id, "contact_id": contact_id}
     )
+    await db.ligacoes.delete_many(_filtro_ligacoes(tenant_id, contact))
     await db.contacts.delete_one({"id": contact_id, "tenant_id": tenant_id})
 
     return {
@@ -280,7 +300,7 @@ async def mesclar(db, tenant_id: str, principal: dict, secundario: dict) -> dict
         raise ValueError("Não é possível mesclar um contato com ele mesmo")
 
     movidos = {}
-    for colecao in ("conversation_sessions", "deals", "activities", "contact_notes"):
+    for colecao in ("conversation_sessions", "deals", "activities", "contact_notes", "ligacoes"):
         r = await db[colecao].update_many(
             {"tenant_id": tenant_id, "contact_id": origem},
             {"$set": {"contact_id": destino}},

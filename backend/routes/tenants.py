@@ -204,6 +204,10 @@ COLECOES_DA_EMPRESA = (
     "ai_agents",
     "ai_usage",
     "ai_estoque",
+    # Telefone: a conta Twilio (com o Auth Token cifrado) e o registro das
+    # ligações, que guarda o número de quem ligou.
+    "voz_config",
+    "ligacoes",
 )
 
 
