@@ -340,6 +340,10 @@ class Colecao:
                             alvo[saida] = alvo.get(saida, 0) + inc
                         elif "$push" in expr:
                             alvo.setdefault(saida, []).append(_expr(d, expr["$push"]))
+                        elif "$max" in expr:
+                            val = _expr(d, expr["$max"])
+                            if val is not None and (alvo.get(saida) is None or val > alvo[saida]):
+                                alvo[saida] = val
                         elif "$avg" in expr:
                             val = _get(d, expr["$avg"].lstrip("$"))
                             if val is not None:

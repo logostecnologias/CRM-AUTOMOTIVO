@@ -8,7 +8,7 @@ import {
   House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
   ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
-  CalendarCheck, Phone,
+  CalendarCheck, Phone, ClipboardText,
 } from "@phosphor-icons/react";
 
 // A barra lateral e uma lista de grupos, nao uma lista de itens: com 15 telas
@@ -58,6 +58,8 @@ function tenantNav(role) {
         { to: "/app/funil", icon: Funnel, label: "Funil" },
         { to: "/app/atividades", icon: CheckSquareOffset, label: "Atividades" },
         { to: "/app/campanhas", icon: Megaphone, label: "Campanhas" },
+        // Perto de Campanhas: as duas são sobre de onde vem o lead.
+        { to: "/app/formularios", icon: ClipboardText, label: "Formulários" },
       ],
     },
     {

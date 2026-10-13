@@ -157,6 +157,14 @@ async def anonimizar(db, tenant_id: str, contact: dict) -> dict:
         _filtro_ligacoes(tenant_id, contact),
         {"$set": {"numero": None, "anonimizado_em": agora}},
     )
+    # A resposta de formulário guarda tudo o que a pessoa digitou no site. A
+    # origem (UTM, página) não é dado pessoal e continua contando para a
+    # campanha; o resto sai.
+    await db.formulario_respostas.update_many(
+        {"tenant_id": tenant_id, "contact_id": contact_id},
+        {"$set": {"dados": {}, "nome": None, "numero": None, "email": None,
+                  "referrer": None, "anonimizado_em": agora}},
+    )
 
     campos = {
         "nome": NOME_ANONIMO,
@@ -228,6 +236,7 @@ async def apagar(db, tenant_id: str, contact: dict) -> dict:
         {"tenant_id": tenant_id, "contact_id": contact_id}
     )
     await db.ligacoes.delete_many(_filtro_ligacoes(tenant_id, contact))
+    await db.formulario_respostas.delete_many({"tenant_id": tenant_id, "contact_id": contact_id})
     await db.contacts.delete_one({"id": contact_id, "tenant_id": tenant_id})
 
     return {
@@ -300,7 +309,8 @@ async def mesclar(db, tenant_id: str, principal: dict, secundario: dict) -> dict
         raise ValueError("Não é possível mesclar um contato com ele mesmo")
 
     movidos = {}
-    for colecao in ("conversation_sessions", "deals", "activities", "contact_notes", "ligacoes"):
+    for colecao in ("conversation_sessions", "deals", "activities", "contact_notes", "ligacoes",
+                    "formulario_respostas"):
         r = await db[colecao].update_many(
             {"tenant_id": tenant_id, "contact_id": origem},
             {"$set": {"contact_id": destino}},

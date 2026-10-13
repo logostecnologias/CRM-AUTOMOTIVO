@@ -220,6 +220,9 @@ COLECOES_DA_EMPRESA = (
     # ligações, que guarda o número de quem ligou.
     "voz_config",
     "ligacoes",
+    # Formulários de site e cada envio recebido, com o que a pessoa digitou.
+    "formularios",
+    "formulario_respostas",
 )
 
 

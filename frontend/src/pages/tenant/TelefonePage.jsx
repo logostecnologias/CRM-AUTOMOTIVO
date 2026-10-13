@@ -5,6 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import api, { API, formatApiErrorDetail } from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
+import EscolhaDeModelo from "@/components/whatsapp/EscolhaDeModelo";
 
 // Ligação não atendida que vira conversa de WhatsApp.
 //
@@ -237,7 +238,8 @@ export default function TelefonePage() {
                 </select>
               </Campo>
               <EscolhaDeModelo conexao={conexaoEfetiva} template={form.template}
-                onChange={(t) => set({ template: t })} />
+                onChange={(t) => set({ template: t })} primeiraVariavel="{empresa}"
+                dica="Aceita {empresa} e {numero}." testId="voz-modelo" />
               <Campo label="Texto da mensagem" className="sm:col-span-2"
                 nota="Vai como texto livre quando a janela de 24h está aberta, e é o que aparece no histórico da conversa. Use {empresa} e {numero}. Com modelo, escreva aqui o mesmo texto dele.">
                 <textarea rows={3} className="zz-input" value={form.mensagem}
@@ -422,79 +424,6 @@ function Gravacao({ tipo, titulo, config, onMudou, texto, padrao, onTexto, dica 
           </p>
         </>
       )}
-    </div>
-  );
-}
-
-// Os modelos aprovados da conta da Meta. Na conexão não oficial não existe
-// modelo, e a mensagem sai sempre como texto livre.
-function EscolhaDeModelo({ conexao, template, onChange }) {
-  const [modelos, setModelos] = useState(null);
-  const [erro, setErro] = useState(null);
-  const conexaoId = conexao?.id;
-  const oficial = (conexao?.canal || "cloud_api") === "cloud_api";
-
-  useEffect(() => {
-    setModelos(null);
-    setErro(null);
-    if (!conexaoId || !oficial) return;
-    api.get(`/whatsapp/connections/${conexaoId}/templates`)
-      .then((r) => setModelos(r.data))
-      .catch((e) => setErro(formatApiErrorDetail(e.response?.data?.detail) || "Não foi possível listar os modelos"));
-  }, [conexaoId, oficial]);
-
-  if (!conexao) {
-    return (
-      <div className="text-sm text-ink-2 border border-dashed border-line rounded-lg p-3">
-        Conecte um número de WhatsApp primeiro.
-      </div>
-    );
-  }
-  if (!oficial) {
-    return (
-      <div className="text-sm text-ink-2 border border-dashed border-line rounded-lg p-3">
-        Nesta conexão não há modelo: a mensagem sai sempre como texto.
-      </div>
-    );
-  }
-
-  const escolher = (chave) => {
-    const m = (modelos || []).find((x) => `${x.nome}|${x.idioma}` === chave);
-    if (!m) return onChange({ nome: "", idioma: "pt_BR", variaveis: [] });
-    onChange({
-      nome: m.nome, idioma: m.idioma,
-      variaveis: Array.from({ length: m.variaveis }, (_, i) => (i === 0 ? "{empresa}" : "")),
-    });
-  };
-  const escolhido = (modelos || []).find((m) => m.nome === template.nome && m.idioma === template.idioma);
-
-  return (
-    <div className="space-y-3">
-      <Campo label="Modelo aprovado"
-        nota={erro || "Cadastrado no painel da Meta. Prefira a categoria Utilidade: Marketing custa cerca de 8 vezes mais."}>
-        <select className="zz-input" data-testid="voz-modelo"
-          value={template.nome ? `${template.nome}|${template.idioma}` : ""}
-          onChange={(e) => escolher(e.target.value)}>
-          <option value="">{modelos === null && !erro ? "Carregando…" : "Nenhum (só texto livre)"}</option>
-          {(modelos || []).map((m) => (
-            <option key={`${m.nome}|${m.idioma}`} value={`${m.nome}|${m.idioma}`}>
-              {m.nome} ({m.idioma}) · {String(m.categoria || "").toLowerCase()}
-            </option>
-          ))}
-        </select>
-      </Campo>
-      {escolhido?.corpo && (
-        <div className="text-xs text-ink-2 bg-surface-2 rounded-lg p-3 whitespace-pre-wrap">{escolhido.corpo}</div>
-      )}
-      {(template.variaveis || []).map((v, i) => (
-        <Campo key={i} label={`Variável {{${i + 1}}}`} nota={i === 0 ? "Aceita {empresa} e {numero}." : null}>
-          <input className="zz-input font-mono text-xs" value={v}
-            onChange={(e) => onChange({
-              ...template,
-              variaveis: template.variaveis.map((x, k) => (k === i ? e.target.value : x)),
-            })} />
-        </Campo>
-      ))}
     </div>
   );
 }

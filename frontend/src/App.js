@@ -17,6 +17,7 @@ import RelatoriosPage from "@/pages/tenant/RelatoriosPage";
 import InboxPage from "@/pages/tenant/InboxPage";
 import WhatsAppPage from "@/pages/tenant/WhatsAppPage";
 import TelefonePage from "@/pages/tenant/TelefonePage";
+import FormulariosPage from "@/pages/tenant/FormulariosPage";
 import SettingsPage from "@/pages/tenant/SettingsPage";
 import AtendimentoPage from "@/pages/tenant/AtendimentoPage";
 import DepartamentosPage from "@/pages/tenant/DepartamentosPage";
@@ -70,6 +71,7 @@ function App() {
             <Route path="users" element={<ProtectedRoute roles={ADMIN_ONLY}><UsersPage /></ProtectedRoute>} />
             <Route path="contacts" element={<ProtectedRoute roles={ADMIN_ONLY}><ContactsPage /></ProtectedRoute>} />
             <Route path="campanhas" element={<ProtectedRoute roles={ADMIN_ONLY}><CampanhasPage /></ProtectedRoute>} />
+            <Route path="formularios" element={<ProtectedRoute roles={ADMIN_ONLY}><FormulariosPage /></ProtectedRoute>} />
             <Route path="funil" element={<ProtectedRoute roles={ADMIN_ONLY}><FunilPage /></ProtectedRoute>} />
             <Route path="atividades" element={<ProtectedRoute roles={ADMIN_ONLY}><AtividadesPage /></ProtectedRoute>} />
             <Route path="relatorios" element={<ProtectedRoute roles={ADMIN_ONLY}><RelatoriosPage /></ProtectedRoute>} />

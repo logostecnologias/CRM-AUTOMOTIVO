@@ -6,7 +6,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from pymongo.errors import OperationFailure
 from starlette.middleware.cors import CORSMiddleware
 
@@ -33,6 +33,7 @@ from routes.ai import router as ai_router
 from routes.settings import router as settings_router
 from routes.scheduling import router as scheduling_router
 from routes.voz import router as voz_router
+from routes.formularios import router as formularios_router
 import agenda_worker
 import campaign_runner
 import health_monitor
@@ -105,6 +106,37 @@ async def _carimbar_seguranca(request, call_next):
         )
     return resp
 
+
+# CORS aberto só para o envio de formulário de site (`/api/f/...`). O resto da
+# API aceita apenas a origem do painel, com cookie; este endereço é chamado do
+# site do cliente, que pode ser qualquer domínio, e não leva credencial nenhuma
+# (quem identifica o formulário é a chave no caminho). Fica por fora do
+# CORSMiddleware, que recusaria o preflight de uma origem fora da lista antes de
+# o pedido chegar à rota.
+_CORS_PUBLICO = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+}
+
+
+@app.middleware("http")
+async def _cors_formularios(request, call_next):
+    if not request.url.path.startswith("/api/f/"):
+        return await call_next(request)
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_CORS_PUBLICO)
+    resp = await call_next(request)
+    # Se a origem for a do painel, o CORSMiddleware já pôs a dele com
+    # credencial; `*` com credencial é inválido, então a credencial sai.
+    if "access-control-allow-credentials" in resp.headers:
+        del resp.headers["access-control-allow-credentials"]
+    for chave, valor in _CORS_PUBLICO.items():
+        resp.headers[chave] = valor
+    return resp
+
+
 app.include_router(auth_router)
 app.include_router(tenants_router)
 app.include_router(bots_router)
@@ -133,6 +165,8 @@ app.include_router(settings_router)
 app.include_router(scheduling_router)
 # Webhook de voz do Twilio e a tela de Telefone (ver `ligacoes.py`).
 app.include_router(voz_router)
+# Formulário de site: o endereço público que recebe o lead e a configuração.
+app.include_router(formularios_router)
 
 
 @app.get("/api/health")
@@ -369,6 +403,20 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # "Este número já recebeu a mensagem há pouco?", a cada tecla 1.
     ("ligacoes", [("tenant_id", 1), ("numero", 1), ("status", 1), ("created_at", -1)], {}),
     ("ligacoes", [("id", 1)], {}),
+
+    # Formulários de site. A chave chega em **todo** envio público, de todas
+    # as empresas, e é por ela que se acha o formulário: única, porque duas
+    # empresas com a mesma chave receberiam o lead uma da outra.
+    ("formularios", [("chave", 1)], {"unique": True}),
+    ("formularios", [("tenant_id", 1), ("created_at", 1)], {}),
+    ("formularios", [("id", 1)], {}),
+    # Lista da tela e resumo por período; a contagem da grade agrupa por formulário.
+    ("formulario_respostas", [("tenant_id", 1), ("formulario_id", 1), ("created_at", -1), ("_id", -1)], {}),
+    ("formulario_respostas", [("tenant_id", 1), ("created_at", -1)], {}),
+    # "Este número já mandou há pouco?" (clique duplo e WhatsApp repetido), e
+    # a LGPD, que acha as respostas da pessoa pela ficha.
+    ("formulario_respostas", [("tenant_id", 1), ("contact_id", 1), ("created_at", -1)], {}),
+    ("formulario_respostas", [("id", 1)], {}),
 ]
 
 # Um índice já existente com as mesmas chaves e opções diferentes faz o Mongo

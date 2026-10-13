@@ -640,6 +640,10 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
     if session and session.get("ligacao_id"):
         import ligacoes
         await ligacoes.marcar_resposta(db, tenant_id, session)
+    # E para a mensagem mandada a quem preencheu um formulário do site.
+    if session and session.get("formulario_resposta_id"):
+        import formularios
+        await formularios.marcar_resposta(db, tenant_id, session)
 
     # Descadastro. Vale para qualquer mensagem, não só resposta de disparo: o
     # contato pode pedir para sair quando quiser, e a palavra é a mesma.
@@ -739,6 +743,9 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             if session.get("origem") == "ligacao":
                 motivo = ("Resposta à mensagem enviada depois de uma ligação: "
                           "encaminhada para atendimento humano")
+            elif session.get("origem") == "formulario":
+                motivo = ("Resposta à mensagem enviada a quem preencheu o formulário "
+                          "do site: encaminhada para atendimento humano")
             elif primeira_resposta_campanha:
                 motivo = "Resposta a uma campanha: encaminhada para atendimento humano"
             elif session.get("origem") == "agenda":
