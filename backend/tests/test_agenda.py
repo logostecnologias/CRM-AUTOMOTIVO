@@ -532,6 +532,50 @@ async def etapa_lembrete(ctx):
     ctx["lembrado"] = doc
     ctx["longe"] = longe
 
+    # Marcado dentro da janela (criado agora para daqui a 10h): o contato acabou
+    # de combinar o horário, e o lembrete não sai. Um marcado com antecedência
+    # (criado há 2 dias para daqui a 10h) sai normalmente.
+    await DB.scheduling_settings.update_one(
+        {"tenant_id": TENANT}, {"$set": {"lembrete_ativo": True, "lembrete_horas": 24}},
+        upsert=True)
+    recente = await dominio.agendar(DB, TENANT, recurso=ctx["ana"], servico=ctx["corte"],
+                                    contato=contato,
+                                    inicio=dominio._iso(perto + timedelta(hours=2)),
+                                    config=config, forcar=True)
+    antigo = await dominio.agendar(DB, TENANT, recurso=ctx["ana"], servico=ctx["corte"],
+                                   contato=contato,
+                                   inicio=dominio._iso(perto + timedelta(hours=4)),
+                                   config=config, forcar=True)
+    await DB.appointments.update_one(
+        {"id": antigo["id"]},
+        {"$set": {"created_at": dominio._iso(dominio._agora() - timedelta(days=2))}})
+
+    avisados = []
+    original = agenda_worker.avisar
+
+    async def _fake_avisar(db, tenant_id, agendamento, tipo, config=None, marcar_espera=False):
+        avisados.append(agendamento["id"])
+        return True
+
+    agenda_worker.avisar = _fake_avisar
+    try:
+        await agenda_worker._varrer()
+    finally:
+        agenda_worker.avisar = original
+    check("marcado com antecedência recebe o lembrete", antigo["id"] in avisados, avisados)
+    check("marcado dentro da janela não recebe lembrete minutos depois",
+          recente["id"] not in avisados, avisados)
+    atual = await DB.appointments.find_one({"id": recente["id"]})
+    check("a dispensa fica gravada à parte, sem contar como lembrado",
+          atual.get("lembrete_dispensado_em") and not atual.get("lembrete_enviado_em"), atual)
+    pendentes = await agenda_worker._pendentes(DB, dominio._agora())
+    check("e o dispensado sai da varredura seguinte",
+          recente["id"] not in [a["id"] for a in pendentes])
+    for a in (recente, antigo):
+        await dominio.cancelar(DB, TENANT, a["id"], por="teste")
+    await DB.scheduling_settings.update_one(
+        {"tenant_id": TENANT}, {"$set": {"lembrete_ativo": False}})
+
 
 async def etapa_resposta_do_lembrete(ctx):
     _conectar_fake()
@@ -567,6 +611,8 @@ async def etapa_resposta_do_lembrete(ctx):
         sessao = await DB.conversation_sessions.find_one({"id": "sess-1"})
         check("a espera é limpa depois de respondida",
               sessao.get("agenda_aguardando") is None)
+        check("conversa reaproveitada pelo lembrete não é encerrada",
+              sessao.get("status_atendimento") != "finalizado", sessao)
 
         # Sem a marca na conversa, "sim" não pode cancelar nada: é justamente o
         # contexto que torna a palavra curta segura.
@@ -574,14 +620,20 @@ async def etapa_resposta_do_lembrete(ctx):
             DB, TENANT, {"id": "sess-1", "tenant_id": TENANT}, "sim")
         check("sem lembrete pendente, 'sim' não faz nada", r is None, r)
 
+        # Conversa aberta pelo próprio lembrete: termina com a resposta.
         session2 = {"id": "sess-2", "tenant_id": TENANT, "contact_id": "c-1",
-                    "agenda_aguardando": ctx["longe"]["id"]}
+                    "origem": "agenda", "status": "ativa", "status_atendimento": "bot",
+                    "atendente_id": None, "agenda_aguardando": ctx["longe"]["id"]}
         await DB.conversation_sessions.insert_one(dict(session2))
         r = await agenda_worker.responder_lembrete(DB, TENANT, dict(session2), "cancelar")
         check("CANCELAR cancela o horário", r == "cancelado", r)
         atual = await DB.appointments.find_one({"id": ctx["longe"]["id"]})
         check("e o horário volta a ficar livre para outra pessoa",
               atual["status"] == "cancelado")
+        sessao2 = await DB.conversation_sessions.find_one({"id": "sess-2"})
+        check("a conversa aberta pelo lembrete é finalizada depois da resposta",
+              sessao2["status_atendimento"] == "finalizado" and sessao2["finalizado_em"],
+              sessao2)
     finally:
         flow_runtime.send_human_message = original
 

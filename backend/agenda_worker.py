@@ -327,6 +327,24 @@ async def responder_lembrete(db, tenant_id: str, session: dict, texto: str) -> s
                     "Se quiser remarcar, é só me dizer.")
 
     await flow_runtime.send_human_message(tenant_id, session["id"], resposta)
+
+    # A conversa que o próprio lembrete abriu termina aqui: a pergunta foi
+    # respondida, e deixá-la aberta a manteria na Central como conversa do bot
+    # para sempre. Conversa reaproveitada (alguém atendendo, agente no meio de
+    # um assunto) não é tocada: o lembrete só pegou carona nela.
+    if (session.get("origem") == "agenda" and not session.get("atendente_id")
+            and session.get("status_atendimento") == "bot"):
+        agora = _now()
+        mudanca = {"status": "finalizada", "status_atendimento": "finalizado",
+                   "finalizado_em": agora}
+        session.update(mudanca)
+        await db.conversation_sessions.update_one(
+            {"id": session["id"], "tenant_id": tenant_id},
+            {"$set": {**mudanca, "updated_at": agora}})
+        await flow_runtime.log_message(
+            db, session["id"], tenant_id, "sistema",
+            f"Conversa finalizada: o contato respondeu ao lembrete ({acao}).",
+            mtype="system")
     return acao
 
 
@@ -346,6 +364,7 @@ async def _pendentes(db, agora: datetime) -> list:
     cursor = db.appointments.find(
         {"status": {"$in": [agenda.STATUS_AGENDADO, agenda.STATUS_CONFIRMADO]},
          "lembrete_enviado_em": None,
+         "lembrete_dispensado_em": None,
          "inicio": {"$gt": agenda._iso(agora), "$lt": limite}},
         {"_id": 0},
     ).sort([("inicio", 1), ("_id", 1)])
@@ -371,6 +390,21 @@ async def _varrer():
         horas = float(config.get("lembrete_horas") or 24)
         if a["inicio"] > agenda._iso(agora + timedelta(hours=horas)):
             continue  # ainda cedo para esta empresa
+
+        # Marcado já dentro da janela: o contato acabou de combinar o horário, e
+        # "passando para lembrar" minutos depois de marcar é ruído, não lembrete
+        # (caso real: a visita marcada às 15h para as 14h30 do dia seguinte
+        # recebeu o aviso logo depois de o atendimento terminar). A dispensa é
+        # gravada à parte, e não como `lembrete_enviado_em`, para o relatório não
+        # contar como lembrado quem nunca recebeu aviso.
+        inicio = datetime.fromisoformat(a["inicio"])
+        criado = datetime.fromisoformat(a.get("created_at") or a["inicio"])
+        if criado >= inicio - timedelta(hours=horas):
+            await db.appointments.update_one(
+                {"id": a["id"], "tenant_id": tenant_id, "lembrete_enviado_em": None},
+                {"$set": {"lembrete_dispensado_em": _now(), "updated_at": _now()}},
+            )
+            continue
 
         # A marca é gravada **antes** do envio. Um envio que falhe no meio e
         # deixasse a marca em branco faria a passada seguinte tentar de novo, e
