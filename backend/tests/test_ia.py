@@ -158,6 +158,12 @@ async def etapa_salvar():
     check("chave da openai no campo da anthropic e recusada", st == 400, (st, det))
     check("sem gastar chamada no provedor", VALIDAR.chamadas == [], VALIDAR.chamadas)
 
+    # Caso real de 13/10/2026: token da conta Anthropic que não é chave de API.
+    st, det = await erro(rai.criar_agente(
+        rai.AgenteIn(nome="X", provedor="anthropic", chave_api="sk-ant-usr-" + "K" * 40), ADMIN_A))
+    check("sk-ant-usr- e recusada antes da chamada", st == 400 and "sk-ant-api" in str(det)
+          and VALIDAR.chamadas == [], (st, det))
+
     # Caminho feliz: valida antes de gravar.
     VALIDAR.chamadas.clear()
     agente = await rai.criar_agente(rai.AgenteIn(

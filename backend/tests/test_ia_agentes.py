@@ -611,13 +611,13 @@ async def etapa_credencial_por_agente():
     try:
         suporte = await rai.criar_agente(rai.AgenteIn(
             nome="Suporte", tipo="suporte", provedor="anthropic",
-            modelo="claude-haiku-4-5", chave_api="sk-ant-CHAVE-DO-SUPORTE"), ADMIN)
+            modelo="claude-haiku-4-5", chave_api="sk-ant-api03-CHAVE-DO-SUPORTE"), ADMIN)
         vendas = await rai.criar_agente(rai.AgenteIn(
             nome="Vendas", tipo="vendas", provedor="openai",
             modelo="gpt-5-mini", chave_api="sk-CHAVE-DE-VENDAS"), ADMIN)
 
         check("cada agente foi validado com a propria chave e modelo",
-              validados == [("anthropic", "sk-ant-CHAVE-DO-SUPORTE", "claude-haiku-4-5"),
+              validados == [("anthropic", "sk-ant-api03-CHAVE-DO-SUPORTE", "claude-haiku-4-5"),
                             ("openai", "sk-CHAVE-DE-VENDAS", "gpt-5-mini")], validados)
         check("dois provedores diferentes convivem na mesma empresa",
               (suporte["provedor"], vendas["provedor"]) == ("anthropic", "openai"))
@@ -634,10 +634,10 @@ async def etapa_credencial_por_agente():
         # No banco, cifrada — e decifravel de volta.
         doc = await DB.ai_agents.find_one({"id": suporte["id"]})
         check("no banco fica cifrada",
-              "sk-ant-CHAVE-DO-SUPORTE" not in str(doc["credencial"]), doc["credencial"])
+              "sk-ant-api03-CHAVE-DO-SUPORTE" not in str(doc["credencial"]), doc["credencial"])
         import ai_credentials
         check("e volta identica ao decifrar",
-              ai_credentials.decifrar(doc["credencial"]) == "sk-ant-CHAVE-DO-SUPORTE")
+              ai_credentials.decifrar(doc["credencial"]) == "sk-ant-api03-CHAVE-DO-SUPORTE")
 
         # Editar sem reenviar a chave reaproveita a guardada (o cliente nao a tem).
         validados.clear()
@@ -645,7 +645,7 @@ async def etapa_credencial_por_agente():
             nome="Suporte", tipo="suporte", provedor="anthropic",
             modelo="claude-sonnet-5"), ADMIN)
         check("trocar so o modelo reusa a chave guardada",
-              validados == [("anthropic", "sk-ant-CHAVE-DO-SUPORTE", "claude-sonnet-5")], validados)
+              validados == [("anthropic", "sk-ant-api03-CHAVE-DO-SUPORTE", "claude-sonnet-5")], validados)
 
         # Trocar de provedor sem chave nova nao tem como funcionar.
         st, det = await erro(rai.atualizar_agente(suporte["id"], rai.AgenteIn(
@@ -669,7 +669,7 @@ async def etapa_credencial_por_agente():
     doc_suporte = await DB.ai_agents.find_one({"id": suporte["id"]}, {"_id": 0})
     cred = await ai_runtime.resolver_credencial(DB, TENANT, doc_suporte)
     check("o atendimento usa a chave do proprio agente",
-          cred["chave"] == "sk-ant-CHAVE-DO-SUPORTE" and cred["origem"] == "cliente", cred["origem"])
+          cred["chave"] == "sk-ant-api03-CHAVE-DO-SUPORTE" and cred["origem"] == "cliente", cred["origem"])
 
     doc_vendas = await DB.ai_agents.find_one({"id": vendas["id"]}, {"_id": 0})
     cred = await ai_runtime.resolver_credencial(DB, TENANT, doc_vendas)

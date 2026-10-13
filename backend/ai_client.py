@@ -102,7 +102,11 @@ PROVEDORES: dict[str, dict] = {
         # Link direto para a página de chaves — é o "abrir console" da tela de
         # conexão. Levar o cliente à home do provedor faria ele se perder.
         "console_url": "https://console.anthropic.com/settings/keys",
-        "prefixo_chave": "sk-ant-",
+        # `sk-ant-api`, não só `sk-ant-`: a conta da Anthropic tem outros
+        # tokens com o mesmo começo (`sk-ant-usr-`, `sk-ant-oat01-`, `sk-ant-admin01-`)
+        # que não chamam a API de mensagens. Aceitá-los aqui só adiava a recusa
+        # para um "chave recusada" que manda o cliente recopiar a chave errada.
+        "prefixo_chave": "sk-ant-api",
         "modelos": [
             Modelo("claude-haiku-4-5", "Haiku 4.5", 1.00, 5.00, 0.10, 1.25,
                    "Recomendado para atendimento: rápido e barato."),

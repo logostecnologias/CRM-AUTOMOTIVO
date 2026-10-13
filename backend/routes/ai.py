@@ -218,11 +218,13 @@ async def _resolver_credencial(body: AgenteIn, atual: dict | None) -> dict:
         if prefixo and not chave.startswith(prefixo):
             # Conferido antes de gastar uma chamada: o engano comum é colar a
             # chave de um provedor no campo do outro.
+            console = provedor.get("console_url")
             raise HTTPException(
                 status_code=400,
-                detail=(f"Esta não parece uma chave de "
+                detail=(f"Esta não parece uma chave de API de "
                         f"{ai_client.PROVEDORES[body.provedor]['rotulo']} "
-                        f"(deveria começar com \"{prefixo}\")."),
+                        f"(deveria começar com \"{prefixo}\")."
+                        + (f" Crie uma em {console}." if console else "")),
             )
     elif (atual and atual.get("credencial") and atual.get("provedor") == body.provedor
           # Trocar o endereço exige a chave de novo: reaproveitar a guardada
