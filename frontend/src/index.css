@@ -127,6 +127,79 @@
   --sombra-2: rgba(0, 0, 0, 0.55);
 }
 
+/* ===========================================================================
+   Marca R3
+   ---------------------------------------------------------------------------
+   O sistema é revendido por mais de um parceiro, e o cliente final vê a marca
+   de quem vendeu (`tenants.marca`, aplicada em `lib/marca.js`). A marca troca
+   só a família de cor: superfície, texto, linha, o sólido de marca e o azul de
+   foco/seleção. Perigo, sucesso e aviso não mudam, porque vermelho tem de
+   continuar querendo dizer erro em qualquer marca. As séries de gráfico também
+   ficam: foram validadas como par, e trocar uma delas exigiria validar de novo.
+
+   Paleta do manual da R3: petróleo #00333D, lima #D6E30F, gelo #F1EEEE. No
+   claro o sólido é o petróleo com texto lima, como na logo (9,6:1); no escuro
+   inverte, lima com texto petróleo, pelo mesmo motivo do azul da ZappZen: bloco
+   escuro sobre fundo escuro não se destaca. Os tons de texto são o petróleo
+   dessaturado, conferidos contra a superfície de cada tema no mesmo patamar dos
+   tokens da ZappZen (texto 13,6:1 / 11,8:1; secundário 8,4:1 / 9,1:1).
+
+   `html[data-marca]` pesa (0,1,1) e ganha de `:root` e de `.dark` (0,1,0); o
+   escuro da marca, `html.dark[data-marca]`, pesa (0,2,1) e ganha dos três.
+   =========================================================================== */
+html[data-marca="r3"] {
+  --bg: #F1EEEE;
+  --surface: #FFFFFF;
+  --surface-2: #F8F6F6;
+  --surface-3: #E9E4E4;
+
+  --line: #E2DCDC;
+  --line-strong: #CCC4C4;
+
+  --text: #00333D;
+  --text-2: #2F535B;
+  --text-3: #506E75;
+  --text-4: #6B8389;
+
+  --brand: #00333D;
+  --brand-fg: #D6E30F;
+  --brand-soft: #E3ECEC;
+
+  --info: #0A6A7B;
+  --info-soft: #E3F1F3;
+
+  --sombra-1: rgba(0, 51, 61, 0.07);
+  --sombra-2: rgba(0, 51, 61, 0.20);
+}
+
+html.dark[data-marca="r3"] {
+  --bg: #00262E;
+  --surface: #00333D;
+  --surface-2: #063D48;
+  --surface-3: #0E4A56;
+
+  --line: #1A5561;
+  --line-strong: #2C6874;
+
+  --text: #F1EEEE;
+  --text-2: #C7D6D8;
+  --text-3: #9DB4B8;
+  --text-4: #86A0A5;
+
+  --brand: #D6E30F;
+  --brand-fg: #00333D;
+  --brand-soft: #1F4A3C;
+
+  --info: #7CCFDC;
+  --info-soft: #0C4752;
+
+  --grade: #1A5561;
+  --eixo: #6B8C92;
+
+  --sombra-1: rgba(0, 0, 0, 0.30);
+  --sombra-2: rgba(0, 0, 0, 0.55);
+}
+
 body {
   margin: 0;
   font-family: var(--font-body);
@@ -490,5 +563,32 @@ textarea.zz-input { line-height: 1.55; }
     --accent-foreground: 216 44% 94%;
     --destructive: 0 74% 60%;
     --destructive-foreground: 0 0% 100%;
+  }
+
+  /* Marca R3: os mesmos papéis dos tokens acima, em HSL. */
+  html[data-marca="r3"] {
+    --background: 0 0% 100%;
+    --foreground: 190 100% 12%;
+    --primary: 190 100% 12%;
+    --primary-foreground: 63 88% 47%;
+    --ring: 189 85% 26%;
+    --border: 0 9% 88%;
+    --input: 0 9% 88%;
+    --card-foreground: 190 100% 12%;
+    --popover-foreground: 190 100% 12%;
+  }
+
+  html.dark[data-marca="r3"] {
+    --background: 190 100% 9%;
+    --foreground: 0 10% 94%;
+    --primary: 63 88% 47%;
+    --primary-foreground: 190 100% 12%;
+    --ring: 188 57% 68%;
+    --border: 190 58% 22%;
+    --input: 190 58% 22%;
+    --card: 190 100% 12%;
+    --card-foreground: 0 10% 94%;
+    --popover: 190 100% 12%;
+    --popover-foreground: 0 10% 94%;
   }
 }

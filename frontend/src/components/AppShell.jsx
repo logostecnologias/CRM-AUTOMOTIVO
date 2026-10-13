@@ -3,8 +3,9 @@ import { useAuth } from "@/context/AuthContext";
 import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import { useAtividadesAtrasadas } from "@/hooks/useAtividadesAtrasadas";
 import BotaoTema from "@/components/BotaoTema";
+import LogoMarca from "@/components/LogoMarca";
 import {
-  ChatCircleDots, House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
+  House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
   ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
   CalendarCheck, Phone,
@@ -77,7 +78,7 @@ function tenantNav(role) {
 }
 
 export default function AppShell({ variant = "tenant" }) {
-  const { user, logout, impersonatedFrom, exitImpersonation } = useAuth();
+  const { user, logout, impersonatedFrom, exitImpersonation, marca } = useAuth();
   const navigate = useNavigate();
   const nav = variant === "admin" ? adminNav : tenantNav(user?.role);
   const { aguardando } = useUnreadNotifier(variant === "tenant");
@@ -109,17 +110,10 @@ export default function AppShell({ variant = "tenant" }) {
       <div className="flex flex-1 min-h-0">
         <aside className="w-60 border-r border-line bg-surface flex flex-col" data-testid="sidebar">
           <div className="px-5 py-6 border-b border-line">
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 bg-brand text-brand-fg rounded-xl flex items-center justify-center shrink-0">
-                <ChatCircleDots size={20} weight="bold" />
-              </div>
-              <div>
-                <div className="font-heading font-black text-lg leading-none tracking-tighter">ZappZen</div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-ink-3 font-bold mt-0.5">
-                  {variant === "admin" ? "Super Admin" : (user?.role === "agent" ? "Atendente" : "Admin")}
-                </div>
-              </div>
-            </div>
+            <LogoMarca
+              marca={marca}
+              legenda={variant === "admin" ? "Super Admin" : (user?.role === "agent" ? "Atendente" : "Admin")}
+            />
           </div>
 
           <nav className="flex-1 py-3 overflow-y-auto">

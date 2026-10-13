@@ -8,6 +8,7 @@ import { formatBRL } from "@/lib/currency";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import NovaEmpresa from "@/components/superadmin/NovaEmpresa";
+import { MARCAS, PADRAO as MARCA_PADRAO } from "@/lib/marca";
 
 export default function TenantsPage() {
   const [tenants, setTenants] = useState([]);
@@ -45,6 +46,17 @@ export default function TenantsPage() {
       load();
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Erro ao atualizar plano");
+    }
+  };
+
+  const changeMarca = async (t, marca) => {
+    if (marca === (t.marca || MARCA_PADRAO)) return;
+    try {
+      await api.patch(`/admin/tenants/${t.id}`, { marca });
+      toast.success(`${t.name} agora vê o painel ${MARCAS[marca].nome}. Vale no próximo carregamento de quem estiver dentro.`);
+      load();
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Erro ao trocar a marca");
     }
   };
 
@@ -94,8 +106,9 @@ export default function TenantsPage() {
       <div className="border border-line bg-surface rounded-lg">
         <div className="grid grid-cols-12 px-4 py-2 border-b border-line text-[10px] font-bold uppercase tracking-wider text-ink-3">
           <div className="col-span-3">Nome</div>
-          <div className="col-span-3">Plano</div>
-          <div className="col-span-2">Status</div>
+          <div className="col-span-2">Plano</div>
+          <div className="col-span-2">Marca</div>
+          <div className="col-span-1">Status</div>
           <div className="col-span-1">Robôs</div>
           <div className="col-span-2">Criado em</div>
           <div className="col-span-1 text-right">Ações</div>
@@ -104,7 +117,7 @@ export default function TenantsPage() {
         {tenants.map((t) => (
           <div key={t.id} className="grid grid-cols-12 px-4 py-3 border-b border-line items-center hover:bg-surface-2" data-testid={`tenant-row-${t.id}`}>
             <div className="col-span-3 font-semibold">{t.name}</div>
-            <div className="col-span-3 pr-3">
+            <div className="col-span-2 pr-3">
               {plans.length === 0 ? (
                 <span className="text-xs italic text-ink-4">nenhum plano cadastrado</span>
               ) : (
@@ -121,7 +134,19 @@ export default function TenantsPage() {
                 </select>
               )}
             </div>
-            <div className="col-span-2">
+            <div className="col-span-2 pr-3">
+              <select
+                className="zz-input text-xs py-1"
+                data-testid={`tenant-marca-${t.id}`}
+                value={t.marca || MARCA_PADRAO}
+                onChange={(e) => changeMarca(t, e.target.value)}
+              >
+                {Object.values(MARCAS).map((m) => (
+                  <option key={m.id} value={m.id}>{m.nome}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-1">
               <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 border rounded-full ${t.status === "active" ? "bg-success-soft border-success text-success" : "bg-danger-soft border-danger text-danger"}`}>{t.status === "active" ? "ativa" : "suspensa"}</span>
             </div>
             <div className="col-span-1 font-mono text-sm">{t.bots_count}</div>

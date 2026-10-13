@@ -190,7 +190,7 @@ export default function TelefonePage() {
             <div className="mt-4 text-sm flex items-center gap-2">
               {config.numero_configurado ? (
                 <><CheckCircle size={16} weight="fill" className="text-success" />
-                  <span>Número {config.numero} conectado: as ligações chegam ao ZappZen.</span></>
+                  <span>Número {config.numero} conectado: as ligações chegam aqui.</span></>
               ) : (
                 <><WarningCircle size={16} weight="fill" className="text-warning" />
                   <span className="text-ink-2">Nenhum número conectado ainda.</span></>

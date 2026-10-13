@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
 from pymongo.errors import DuplicateKeyError
@@ -25,6 +25,15 @@ SENHA_MIN = 8
 # nome de dois caracteres, e a empresa nasceria sem nome legível na lista.
 Nome = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
 
+# A marca que o cliente da empresa vê: cores, logo e nome no painel. O sistema
+# é um só e é revendido por mais de um parceiro, cada um para a própria
+# carteira, e o cliente final enxerga a marca de quem vendeu. `zappzen` é o
+# padrão, e empresa sem o campo gravado (anterior a ele) também é ZappZen.
+# Marca nova entra aqui e em `frontend/src/lib/marca.js`, junto com os tokens
+# dela em `index.css`.
+Marca = Literal["zappzen", "r3"]
+MARCA_PADRAO = "zappzen"
+
 
 class TenantCreate(BaseModel):
     name: Nome
@@ -32,12 +41,14 @@ class TenantCreate(BaseModel):
     admin_name: Nome
     admin_email: EmailStr
     admin_password: str = Field(min_length=SENHA_MIN, max_length=128)
+    marca: Marca = MARCA_PADRAO
 
 
 class TenantUpdate(BaseModel):
     name: str | None = None
     plan_id: str | None = None
     status: str | None = None
+    marca: Marca | None = None
 
 
 async def _enrich_plan(db, tenants: list[dict]):
@@ -97,6 +108,7 @@ async def create_tenant(body: TenantCreate, _=Depends(require_super_admin)):
         "id": tenant_id,
         "name": body.name,
         "plan_id": body.plan_id,
+        "marca": body.marca,
         "status": "active",
         "created_at": now,
     }
@@ -147,7 +159,7 @@ async def update_tenant(tenant_id: str, body: TenantUpdate, admin=Depends(requir
         tenant["plan_warnings"] = await plan_excess(db, tenant_id, novo_plano)
     # Suspender/reativar uma empresa e trocar o plano são decisões do Super
     # Admin que precisam de rastro (ZZ-21).
-    if "status" in update or "plan_id" in update:
+    if update.keys() & {"status", "plan_id", "marca"}:
         await audit.registrar(db, ator=admin, acao="tenant.update",
                               tenant_id=tenant_id, meta=update)
     return tenant

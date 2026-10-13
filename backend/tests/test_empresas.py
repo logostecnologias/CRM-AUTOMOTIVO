@@ -49,6 +49,7 @@ def _conectar_fake():
     modulos de teste no mesmo processo e `get_db` e atributo de modulo."""
     db_mod.get_db = lambda: DB
     rt.get_db = lambda: DB
+    auth.get_db = lambda: DB
 
 
 PLANO = "p-pro"
@@ -160,6 +161,44 @@ async def etapa_criar():
 
     st, det = await erro(rt.create_tenant(corpo(admin_email="nova@x.com", plan_id="nao-existe")))
     check("plano inexistente e recusado", st == 400, (st, det))
+
+    await DB.tenants.delete_many({})
+    await DB.users.delete_many({})
+
+
+async def etapa_marca():
+    """A marca e o que o cliente final ve no painel, e o erro que importa aqui e
+    silencioso: o cliente da R3 abrindo o painel com a marca da ZappZen, ou o
+    contrario. Ninguem ve erro, so a marca de outro parceiro."""
+    print("\n[marca]")
+    t = await rt.create_tenant(corpo(name="Sem escolha"))
+    check("sem escolha a empresa nasce ZappZen", t["marca"] == "zappzen", t)
+
+    t2 = await rt.create_tenant(corpo(name="Cliente R3", admin_email="r3@x.com", marca="r3"))
+    check("a escolhida fica gravada", (await DB.tenants.find_one({"id": t2["id"]}))["marca"] == "r3")
+
+    try:
+        corpo(marca="qualquer")
+        check("marca desconhecida recusada", False, "passou")
+    except ValidationError:
+        check("marca desconhecida recusada", True)
+
+    dono = await DB.users.find_one({"tenant_id": t2["id"]})
+    me = await auth.me({**dono, "role": "tenant_admin"})
+    check("quem e da empresa R3 recebe a marca R3", me["marca"] == "r3", me)
+    me = await auth.me({"id": "sa", "email": "sa@x", "name": "SA", "role": "super_admin"})
+    check("super admin fora do modo suporte ve a padrao", me["marca"] == "zappzen", me)
+    me = await auth.me({"id": "sa", "email": "sa@x", "name": "SA", "role": "tenant_admin",
+                        "tenant_id": t2["id"], "impersonation_id": "imp"})
+    check("no modo suporte ve a marca da empresa visitada", me["marca"] == "r3", me)
+
+    # Empresa anterior ao campo nao tem `marca` gravada, e e ZappZen.
+    await DB.tenants.update_one({"id": t["id"]}, {"$unset": {"marca": ""}})
+    dono = await DB.users.find_one({"tenant_id": t["id"]})
+    check("empresa sem o campo e ZappZen", (await auth.me(dono))["marca"] == "zappzen")
+
+    novo = await rt.update_tenant(t["id"], rt.TenantUpdate(marca="r3"), {"id": "sa"})
+    check("a marca troca depois de criada", novo["marca"] == "r3", novo)
 
     await DB.tenants.delete_many({})
     await DB.users.delete_many({})
@@ -301,6 +340,7 @@ def test_suite():
         await etapa_semear()
         await etapa_senha_curta()
         await etapa_criar()
+        await etapa_marca()
         await etapa_rollback_do_admin()
         await etapa_excluir()
         await etapa_lista_nao_defasada()

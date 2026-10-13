@@ -423,7 +423,7 @@ function FormWuzapi({ conn, onSalvar, onFechar }) {
         A ponte só a aceita na criação, e não há como consultá-la depois — se ela não
         bater, o número pareia, envia e as respostas dos contatos são recusadas sem
         aparecer em lugar nenhum. Se você não tem essa chave, exclua esta conexão e crie
-        outra: aí o ZappZen provisiona a instância e a chave sozinho.
+        outra: aí o sistema provisiona a instância e a chave sozinho.
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>

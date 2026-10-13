@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import api from "@/lib/api";
+import { aplicar as aplicarMarca, guardada as marcaGuardada } from "@/lib/marca";
 
 const AuthContext = createContext(null);
 
@@ -12,12 +13,18 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [impersonatedFrom, setImpersonatedFrom] = useState(null); // "super_admin" if active
+  // Começa na marca guardada no navegador (já pintada em `index.js`) e é
+  // corrigida pela que o servidor devolve. No logout ela fica: a próxima tela
+  // é o login, e quem usa este navegador é cliente da mesma marca.
+  const [marca, setMarca] = useState(marcaGuardada);
+  const trocarMarca = (m) => setMarca(aplicarMarca(m).id);
 
   const refresh = () => {
     return api
       .get("/auth/me")
       .then((r) => {
         setUser(r.data);
+        trocarMarca(r.data.marca);
         setImpersonatedFrom(readCookie("impersonated_role"));
       })
       .catch(() => setUser(false));
@@ -30,6 +37,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
     setUser(data);
+    trocarMarca(data.marca);
     setImpersonatedFrom(null);
     return data;
   };
@@ -47,7 +55,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh, exitImpersonation, impersonatedFrom }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refresh, exitImpersonation, impersonatedFrom, marca }}>
       {children}
     </AuthContext.Provider>
   );

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import { formatBRL } from "@/lib/currency";
+import { MARCAS, PADRAO as MARCA_PADRAO } from "@/lib/marca";
 import { toast } from "sonner";
 import {
   ArrowsClockwise, Buildings, CheckCircle, Copy, Eye, EyeSlash,
@@ -87,6 +88,7 @@ function limitesDoPlano(plano) {
 export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
   const [form, setForm] = useState({
     name: "", plan_id: "", admin_name: "", admin_email: "", admin_password: "",
+    marca: MARCA_PADRAO,
   });
   const [verSenha, setVerSenha] = useState(false);
   const [erroEmail, setErroEmail] = useState("");
@@ -171,6 +173,15 @@ export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
             : <ResumoPlano plano={plano} />}
 
           <div>
+            <Titulo>Marca do painel</Titulo>
+            <p className="text-xs text-ink-3 mb-3">
+              É o que o cliente vê ao entrar: cores, logo e nome na aba do navegador. Dá para
+              trocar depois, na lista de empresas.
+            </p>
+            <SeletorMarca valor={form.marca} onChange={(marca) => setForm({ ...form, marca })} />
+          </div>
+
+          <div>
             <Titulo>Admin da empresa</Titulo>
             <p className="text-xs text-ink-3 mb-3">
               É esta pessoa que entra no painel e configura o resto. Ela pode criar os outros
@@ -229,6 +240,36 @@ export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
         </div>
       </form>
     </Moldura>
+  );
+}
+
+// Um cartão por marca, com a amostra das cores: o nome sozinho ("r3") não diz
+// ao super admin o que o cliente vai ver.
+function SeletorMarca({ valor, onChange }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" data-testid="tenant-marca">
+      {Object.values(MARCAS).map((m) => {
+        const ativo = valor === m.id;
+        return (
+          <button key={m.id} type="button" role="radio" aria-checked={ativo}
+            data-testid={`tenant-marca-${m.id}`} onClick={() => onChange(m.id)}
+            className={`text-left rounded-lg border px-4 py-3 transition-colors ${
+              ativo ? "border-info ring-1 ring-info bg-info-soft" : "border-line hover:border-line-strong"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-semibold text-sm">{m.nome}</span>
+              <span className="flex gap-1">
+                {m.amostra.map((cor) => (
+                  // A amostra é a cor da marca em si, e é o único lugar em que
+                  // um hex no `style` é o dado, não decoração do tema.
+                  <span key={cor} className="w-4 h-4 rounded-md border border-line" style={{ background: cor }} />
+                ))}
+              </span>
+            </div>
+            <div className="text-xs text-ink-3 mt-1">{m.descricao}</div>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -295,6 +336,7 @@ function Acesso({ dados, onFechar, onEntrar }) {
           <Linha rotulo="Plano" valor={tenant.plan
             ? `${tenant.plan.nome} · ${formatBRL(tenant.plan.preco_mensal)}/mês`
             : "sem plano vinculado"} />
+          <Linha rotulo="Marca" valor={MARCAS[tenant.marca]?.nome || MARCAS[MARCA_PADRAO].nome} />
           <Linha rotulo="Endereço" valor={endereco} />
           <Linha rotulo="E-mail" valor={dados.admin_email} mono />
           <Linha rotulo="Senha" valor={dados.admin_password} mono destaque />

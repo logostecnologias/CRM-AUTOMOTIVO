@@ -3,10 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { formatApiErrorDetail } from "@/lib/api";
 import {
-  ChatCircleDots, ArrowRight, Headset, Sparkle, Robot,
+  ArrowRight, Headset, Sparkle, Robot,
   UsersThree, CalendarCheck, Megaphone,
 } from "@phosphor-icons/react";
 import BotaoTema from "@/components/BotaoTema";
+import LogoMarca from "@/components/LogoMarca";
 
 const RECURSOS = [
   { icone: Headset, titulo: "Central de Atendimento", linha: "Fila, times e histórico de cada conversa" },
@@ -18,7 +19,7 @@ const RECURSOS = [
 ];
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, marca } = useAuth();
   const nav = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,12 +43,7 @@ export default function LoginPage() {
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
       {/* Left brand panel */}
       <div className="hidden lg:flex flex-col justify-between p-12 border-r border-line bg-surface">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-brand text-brand-fg rounded-2xl flex items-center justify-center">
-            <ChatCircleDots size={26} weight="bold" />
-          </div>
-          <div className="font-heading font-black text-2xl tracking-tighter">ZappZen</div>
-        </div>
+        <LogoMarca marca={marca} grande />
 
         <div>
           <h1 className="font-heading text-4xl xl:text-5xl font-black tracking-tighter leading-[0.95] mb-5">

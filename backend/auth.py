@@ -205,6 +205,19 @@ class LoginIn(BaseModel):
     password: str
 
 
+async def _marca(db, user: dict) -> str:
+    """A marca que esta pessoa vê no painel: a da empresa dela.
+
+    Super admin fora do modo suporte não pertence a empresa nenhuma e vê a
+    marca padrão. No modo suporte o `tenant_id` já é o da empresa visitada,
+    então ele vê o painel como o cliente vê, que é o ponto do modo suporte.
+    """
+    if not user.get("tenant_id") or user.get("role") == "super_admin":
+        return "zappzen"
+    tenant = await db.tenants.find_one({"id": user["tenant_id"]}, {"_id": 0, "marca": 1})
+    return (tenant or {}).get("marca") or "zappzen"
+
+
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "desconhecido"
 
@@ -239,6 +252,7 @@ async def login(body: LoginIn, response: Response, request: Request):
         "name": user["name"],
         "role": user["role"],
         "tenant_id": user.get("tenant_id"),
+        "marca": await _marca(db, user),
     }
 
 
@@ -302,6 +316,7 @@ async def me(user: dict = Depends(get_current_user)):
         "name": user["name"],
         "role": user["role"],
         "tenant_id": user.get("tenant_id"),
+        "marca": await _marca(get_db(), user),
     }
 
 
