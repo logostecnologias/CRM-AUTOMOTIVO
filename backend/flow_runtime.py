@@ -68,13 +68,17 @@ async def _ingest_incoming_media(db, tenant_id, session_id, cred, media: dict) -
     Falha aqui não derruba a mensagem: devolve None e o texto ou legenda ainda
     entra no histórico, só sem o anexo.
     """
-    if not cred or not media.get("media_id"):
+    if not cred:
+        logger.warning("Mídia recebida na sessão %s sem credencial da conexão para baixá-la",
+                       session_id)
         return None
     try:
-        info, pedacos = await whatsapp.baixar_midia(cred, media["media_id"])
+        # Cloud API (`media_id`) ou ponte WuzAPI (base64 no evento ou dados de
+        # download): quem sabe a diferença é o `whatsapp_client`.
+        mime, pedacos = await whatsapp.baixar_midia_recebida(cred, media)
         doc = await media_store.store_pedacos(
             db, tenant_id, session_id,
-            media.get("filename"), media.get("mime") or info.get("mime_type"), pedacos,
+            media.get("filename"), mime, pedacos,
             kind=media["kind"], limit=media_store.HARD_MAX_BYTES,
         )
         return media_store.public_payload(doc)

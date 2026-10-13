@@ -322,10 +322,66 @@ async def etapa_chat_de_teste():
           p["audio_pronto"] is False, p)
 
 
+async def etapa_audio_pela_wuzapi():
+    """O caso de producao de 13/10/2026: pela ponte nao existe `media_id`, e a
+    midia era descartada sem log antes de chegar ao agente."""
+    print("\n[audio que chega pela WuzAPI]")
+    import base64
+    import cripto
+    import wuzapi_client
+
+    await _semear(_agente())
+    await DB.whatsapp_connections.update_one(
+        {"id": base.CONN_A}, {"$set": {"canal": "wuzapi", "wuzapi_id": "inst-1",
+                                       "token_cifrado": cripto.cifrar("tok-instancia")}})
+
+    # Sem -skipmedia: o binario vem no proprio evento, as vezes como data URI.
+    dados = b"OggS-nota-pela-ponte"
+    await receber("", media={
+        "kind": "audio", "mime": "audio/ogg; codecs=opus",
+        "base64": "data:audio/ogg;base64," + base64.b64encode(dados).decode(),
+        "download": {}})
+    s = await sessao()
+    msg = (await _recebidas(s["id"]))[-1]
+    media = (msg.get("meta") or {}).get("media") or {}
+    check("o audio da ponte vira arquivo nosso", media.get("kind") == "audio", msg)
+    check("com o mime sem o parametro de codec", media.get("mime") == "audio/ogg", media)
+    check("e e transcrito e respondido pelo agente",
+          TRANSCRICOES and len(IA.chamadas) == 1
+          and "onix prata" in IA.chamadas[-1]["historico"][-1]["content"], IA.chamadas)
+
+    # Com -skipmedia: so os dados de decifragem; quem baixa e a ponte.
+    pedidos = []
+
+    async def fake_download(token, kind, info):
+        pedidos.append((token, kind, info.get("DirectPath")))
+        return b"OggS-baixado-pela-ponte"
+
+    original = wuzapi_client.download_media
+    wuzapi_client.download_media = fake_download
+    try:
+        await receber("", media={
+            "kind": "audio", "mime": "audio/ogg; codecs=opus", "base64": None,
+            "download": {"DirectPath": "/v/t62/abc", "MediaKey": "k", "Url": None}})
+    finally:
+        wuzapi_client.download_media = original
+    check("sem base64, pede a ponte com o token da instancia",
+          pedidos == [("tok-instancia", "audio", "/v/t62/abc")], pedidos)
+    msg = (await _recebidas(s["id"]))[-1]
+    check("e o arquivo baixado e gravado", (msg.get("meta") or {}).get("media"), msg)
+
+    await receber("", media={"kind": "audio", "mime": "audio/ogg", "base64": None,
+                             "download": {}})
+    s = await sessao()
+    check("sem origem nenhuma, vai para a fila dizendo que nao baixou",
+          any("baixá-lo" in m for m in await sistemas(s["id"])), await sistemas(s["id"]))
+
+
 def test_suite():
     _conectar()
 
     async def _tudo():
+        await etapa_audio_pela_wuzapi()
         await etapa_audio_transcrito()
         await etapa_audio_ilegivel()
         await etapa_foto_vista()

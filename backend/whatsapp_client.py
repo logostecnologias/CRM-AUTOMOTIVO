@@ -38,6 +38,7 @@ em repouso (ver `credencial`), com uma chave de plataforma como reserva
 (`META_PLATFORM_TOKEN`) para o número de testes da própria ZappZen.
 """
 import asyncio
+import base64
 import logging
 import os
 from pathlib import Path
@@ -638,6 +639,43 @@ async def baixar_midia(cred: Credencial, media_id: str) -> tuple[dict, AsyncIter
                 yield pedaco
 
     return info, pedacos()
+
+
+async def baixar_midia_recebida(cred: Credencial, media: dict) -> tuple[str | None, AsyncIterator[bytes]]:
+    """Os bytes de uma mídia que o contato mandou, em qualquer canal: (mime, pedaços).
+
+    Na Cloud API o evento traz um `media_id`, trocado por URL e baixado. Na
+    ponte o evento traz o próprio binário em base64 (WuzAPI sem `-skipmedia`)
+    ou os dados de decifragem do arquivo (com `-skipmedia`), e a ponte o busca.
+
+    Até 13/10/2026 só existia o primeiro caminho: quando a WuzAPI voltou, toda
+    mídia recebida por ela virava "[audio não pôde ser baixado]" sem nenhum
+    log, e o agente de IA nunca chegou a ouvir um áudio. Por isso a ausência de
+    origem levanta aqui em vez de devolver vazio: quem chama registra o motivo.
+    """
+    if cred.canal == CANAL_WUZAPI:
+        b64 = media.get("base64")
+        if b64:
+            if b64.startswith("data:"):
+                b64 = b64.split(",", 1)[-1]
+            try:
+                bruto = base64.b64decode(b64)
+            except ValueError as e:
+                raise WhatsAppError(f"Mídia da ponte com base64 inválido ({e})")
+        elif (media.get("download") or {}).get("DirectPath") or (media.get("download") or {}).get("Url"):
+            bruto = await _wuz().download_media(cred.token, media["kind"], media["download"])
+        else:
+            raise WhatsAppError("Mídia da ponte sem binário e sem dados de download")
+
+        async def pedacos_ponte() -> AsyncIterator[bytes]:
+            yield bruto
+
+        return media.get("mime"), pedacos_ponte()
+
+    if not media.get("media_id"):
+        raise WhatsAppError("Mídia da Cloud API sem media_id")
+    info, pedacos = await baixar_midia(cred, media["media_id"])
+    return media.get("mime") or info.get("mime_type"), pedacos
 
 
 # ---------------------------------------------------------------------------
