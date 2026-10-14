@@ -60,6 +60,36 @@ def etapas_padrao() -> list[dict]:
     ]
 
 
+async def funis_da_empresa(db, tenant_id: str) -> list[dict]:
+    """Funis da empresa, semeando o padrão quando ela ainda não tem nenhum.
+
+    Semear na leitura, e não no cadastro da empresa, cobre também as empresas
+    que já existiam antes de o funil existir. Dois leitores: a tela do funil e
+    o agente de IA, que precisa de um funil para mover o lead mesmo que
+    ninguém tenha aberto a tela ainda.
+    """
+    funis = await db.pipelines.find(
+        {"tenant_id": tenant_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(50)
+    if funis:
+        return funis
+    padrao = {
+        "id": str(uuid.uuid4()),
+        "tenant_id": tenant_id,
+        "nome": "Funil de Vendas",
+        "etapas": etapas_padrao(),
+        "created_at": _now(),
+        "updated_at": _now(),
+    }
+    await db.pipelines.insert_one(dict(padrao))
+    padrao.pop("_id", None)
+    return [padrao]
+
+
+def etapas_em_ordem(pipeline: dict) -> list[dict]:
+    return sorted(pipeline.get("etapas") or [], key=lambda e: e.get("ordem", 0))
+
+
 def achar_etapa(pipeline: dict, etapa_id: str) -> dict | None:
     for e in pipeline.get("etapas") or []:
         if e["id"] == etapa_id:

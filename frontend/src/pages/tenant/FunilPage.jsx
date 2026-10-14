@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import {
   Plus, SlidersHorizontal, TrendUp, MagnifyingGlass, X, Megaphone, User, Warning,
-  BellSlash,
+  BellSlash, PencilSimple,
 } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
+import { useAcao } from "@/hooks/useAcao";
 import DealPanel from "@/components/deals/DealPanel";
 import FunilConfig from "@/components/deals/FunilConfig";
 import FunilMetricas from "@/components/deals/FunilMetricas";
@@ -52,6 +53,43 @@ function Cartao({ deal, onAbrir }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Nome da etapa editável no próprio título da coluna. O modal de etapas
+// continua sendo o lugar de reordenar, trocar tipo e cor e remover; renomear e
+// criar são as edições do dia a dia, e escondê-las atrás de um botão foi o que
+// fez o cliente achar que as etapas não se editavam.
+function NomeEditavel({ valor, onSalvar, placeholder, testId, children }) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState(valor);
+  // Enter fecha o campo, e o campo saindo de foco dispara o blur logo em
+  // seguida: sem esta marca, uma etapa nova seria criada duas vezes.
+  const fechou = useRef(false);
+  useEffect(() => { if (!editando) setTexto(valor); }, [valor, editando]);
+
+  const abrir = () => { fechou.current = false; setEditando(true); };
+  const terminar = async (gravar) => {
+    if (fechou.current) return;
+    fechou.current = true;
+    const novo = texto.trim();
+    setEditando(false);
+    if (gravar && novo && novo !== valor) await onSalvar(novo);
+    else setTexto(valor);
+  };
+
+  if (!editando) {
+    return children(abrir);
+  }
+  return (
+    <input autoFocus className="zz-input h-8 text-xs font-bold" data-testid={testId}
+      placeholder={placeholder} value={texto} maxLength={60}
+      onChange={(e) => setTexto(e.target.value)}
+      onBlur={() => terminar(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); terminar(true); }
+        if (e.key === "Escape") { e.preventDefault(); terminar(false); }
+      }} />
   );
 }
 
@@ -117,6 +155,8 @@ export default function FunilPage() {
   useEffect(() => {
     const id = params.get("negocio");
     if (id) setAbertoId(id);
+    // Vindo da tela de treino do agente ("Editar as etapas").
+    if (params.get("etapas")) setConfig(true);
   }, [params]);
 
   useEffect(() => {
@@ -183,6 +223,34 @@ export default function FunilPage() {
   };
 
   const funil = quadro?.pipeline;
+
+  // Renomear e criar etapa direto no quadro. Mandam a lista inteira, como o
+  // modal: é o mesmo PATCH, e o id de cada etapa é o que mantém os negócios
+  // ligados a ela depois do rename.
+  const [gravarEtapas] = useAcao(async (etapas) => {
+    try {
+      await api.patch(`/pipelines/${funil.id}`, {
+        nome: funil.nome,
+        etapas: etapas.map(({ id, nome, cor, tipo }) => ({ id: id || null, nome, cor, tipo })),
+      });
+      api.get("/pipelines").then((r) => setFunis(r.data)).catch(() => {});
+      carregar();
+    } catch (ex) {
+      toast.error(formatApiErrorDetail(ex.response?.data?.detail));
+    }
+  });
+  const etapasDoFunil = () =>
+    [...(funil?.etapas || [])].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  const renomearEtapa = (id, nome) =>
+    gravarEtapas(etapasDoFunil().map((e) => (e.id === id ? { ...e, nome } : e)));
+  // A etapa nova entra antes de Ganho/Perdido: depois deles ela seria uma
+  // etapa em aberto no fim do funil, onde ninguém procura.
+  const criarEtapa = (nome) => {
+    const lista = etapasDoFunil();
+    const i = lista.findIndex((e) => e.tipo !== "aberta");
+    const nova = { id: null, nome, cor: "#64748B", tipo: "aberta" };
+    gravarEtapas(i < 0 ? [...lista, nova] : [...lista.slice(0, i), nova, ...lista.slice(i)]);
+  };
   const totalAberto = (quadro?.colunas || [])
     .filter((c) => c.etapa.tipo === "aberta")
     .reduce((acc, c) => acc + (c.valor || 0), 0);
@@ -209,7 +277,7 @@ export default function FunilPage() {
           </button>
           <button onClick={() => { setConfig((v) => !v); setMetricas(false); }}
             className="zz-btn zz-btn-secondary" data-testid="toggle-config">
-            <SlidersHorizontal size={14} weight="bold" /> Etapas
+            <SlidersHorizontal size={14} weight="bold" /> Editar etapas
           </button>
           <button onClick={() => setNovo({ titulo: "", valor: 0, contato: null, responsavel_id: "", previsao: "" })}
             className="zz-btn" data-testid="new-deal-btn" disabled={!funilId}>
@@ -289,10 +357,21 @@ export default function FunilPage() {
               data-testid={`funil-coluna-${coluna.etapa.id}`}>
               <div className="px-3 py-2 border-b border-line bg-surface"
                 style={{ borderTop: `3px solid ${coluna.etapa.cor}` }}>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider truncate">{coluna.etapa.nome}</span>
-                  <span className="text-[10px] font-mono text-ink-3 shrink-0">{coluna.n}</span>
-                </div>
+                <NomeEditavel valor={coluna.etapa.nome} testId={`etapa-nome-${coluna.etapa.id}`}
+                  onSalvar={(nome) => renomearEtapa(coluna.etapa.id, nome)}>
+                  {(editar) => (
+                    <div className="flex items-center justify-between gap-1 group">
+                      <button type="button" onClick={editar} title="Renomear etapa"
+                        className="flex items-center gap-1 min-w-0 text-left"
+                        data-testid={`etapa-renomear-${coluna.etapa.id}`}>
+                        <span className="text-xs font-bold uppercase tracking-wider truncate">{coluna.etapa.nome}</span>
+                        <PencilSimple size={11} weight="bold"
+                          className="shrink-0 text-ink-4 opacity-0 group-hover:opacity-100" />
+                      </button>
+                      <span className="text-[10px] font-mono text-ink-3 shrink-0">{coluna.n}</span>
+                    </div>
+                  )}
+                </NomeEditavel>
                 <div className="font-mono text-xs font-bold text-ink">
                   {formatBRL(coluna.valor)}{coluna.valor_parcial ? "+" : ""}
                 </div>
@@ -310,6 +389,17 @@ export default function FunilPage() {
               </div>
             </div>
           ))}
+          <div className="w-[200px] shrink-0">
+            <NomeEditavel valor="" placeholder="Nome da etapa" testId="nova-etapa-nome"
+              onSalvar={criarEtapa}>
+              {(editar) => (
+                <button type="button" onClick={editar} data-testid="nova-etapa"
+                  className="w-full flex items-center justify-center gap-1.5 border border-dashed border-line-strong rounded-xl py-3 text-xs font-semibold text-ink-3 hover:text-ink hover:border-info">
+                  <Plus size={13} weight="bold" /> Nova etapa
+                </button>
+              )}
+            </NomeEditavel>
+          </div>
         </div>
       )}
 

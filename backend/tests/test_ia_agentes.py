@@ -1033,6 +1033,85 @@ async def etapa_finalizar():
     IA.chamar = None
 
 
+async def etapa_funil():
+    print()
+    print("[agente conduz o lead pelo funil]")
+    await semear(agente={})
+    IA.proxima = "Perfeito, ja te passo os detalhes."
+    IA.chamar = ("atualizar_negocio", {"etapa": "Contato feito", "titulo": "Cozinha planejada",
+                                       "valor": 15000, "email": "maria@x.com"})
+
+    await receber("quero um orcamento de cozinha")
+    check("desligado, o agente nao ganha a ferramenta",
+          not IA.chamadas[-1]["ferramentas"] and await DB.deals.count_documents({}) == 0)
+
+    poderes = await rai.mudar_poderes("ag-1", rai.PoderesIn(funil_ativo=True), ADMIN)
+    check("o poder e ligado pela tela de treino, com o funil semeado",
+          poderes["funil_ativo"] is True and poderes["funil_id"]
+          and poderes["funil_etapas"] == ["Novo lead", "Contato feito", "Proposta enviada", "Negociação"],
+          poderes)
+    doc = await DB.ai_agents.find_one({"id": "ag-1"})
+    blocos, _, _ = await ai_agents.preparar_ferramentas(DB, TENANT, doc)
+    prompt = ai_agents.montar_instrucoes(doc, **blocos)
+    check("o prompt lista as etapas em aberto, sem Ganho/Perdido",
+          "atualizar_negocio" in prompt and "2. Contato feito" in prompt
+          and "\n5." not in prompt, prompt[-900:])
+
+    await receber("pode me mandar o preco?")
+    s = await sessao()
+    deal = await DB.deals.find_one({"tenant_id": TENANT})
+    funil = await DB.pipelines.find_one({"tenant_id": TENANT})
+    etapa = {e["id"]: e["nome"] for e in funil["etapas"]}
+    check("o negocio nasce na etapa pedida, com titulo e valor",
+          deal and etapa[deal["etapa_id"]] == "Contato feito" and deal["status"] == "aberto"
+          and deal["titulo"] == "Cozinha planejada" and deal["valor"] == 15000
+          and deal["origem"] == "Agente de IA" and deal["session_id"] == s["id"], deal)
+    contato = await DB.contacts.find_one({"tenant_id": TENANT, "numero_whatsapp": NUM})
+    check("o e-mail vazio da ficha e preenchido", contato.get("email") == "maria@x.com", contato)
+    check("a equipe ve o movimento na conversa",
+          any("Agente de IA no funil" in t for t in await sistemas(s["id"])))
+    check("o historico do modelo diz que ainda nao havia negocio",
+          "ainda não tem negócio" in IA.chamadas[-1]["historico"][0]["content"])
+
+    IA.chamar = ("atualizar_negocio", {"etapa": "Negociação", "email": "outro@x.com"})
+    await receber("achei caro, faz um desconto?")
+    check("o modelo sabe onde o negocio esta",
+          'etapa "Contato feito"' in IA.chamadas[-1]["historico"][0]["content"])
+    deal = await DB.deals.find_one({"tenant_id": TENANT})
+    check("avanca de etapa", etapa[deal["etapa_id"]] == "Negociação", etapa[deal["etapa_id"]])
+    contato = await DB.contacts.find_one({"tenant_id": TENANT, "numero_whatsapp": NUM})
+    check("e-mail ja preenchido nao e sobrescrito", contato["email"] == "maria@x.com")
+    eventos = [e["tipo"] for e in await DB.deal_events.find({"deal_id": deal["id"]}).to_list(10)]
+    check("cada mudanca vira evento do negocio", eventos == ["criado", "etapa"], eventos)
+
+    IA.chamar = ("atualizar_negocio", {"etapa": "Novo lead"})
+    await receber("deixa eu pensar")
+    deal = await DB.deals.find_one({"tenant_id": TENANT})
+    check("o agente nunca volta etapa", etapa[deal["etapa_id"]] == "Negociação"
+          and "não volta etapa" in IA.chamadas[-1]["resultado_ferramenta"])
+
+    IA.chamar = ("atualizar_negocio", {"etapa": "Ganho"})
+    await receber("fechado!")
+    deal = await DB.deals.find_one({"tenant_id": TENANT})
+    check("nem fecha venda", deal["status"] == "aberto"
+          and IA.chamadas[-1]["resultado_ferramenta"].startswith("ERRO"))
+    check("um negocio so por contato", await DB.deals.count_documents({}) == 1)
+
+    antes = await DB.deals.count_documents({})
+    IA.chamar = ("atualizar_negocio", {"etapa": "Proposta enviada"})
+    await rai.testar_agente("ag-1", rai.TesteIn(mensagens=[{"role": "user", "content": "oi"}]), ADMIN)
+    check("no chat de teste nada e gravado",
+          IA.chamadas[-1]["resultado_ferramenta"].startswith("Teste:")
+          and await DB.deals.count_documents({}) == antes)
+
+    outro = {"id": "u-b", "tenant_id": "t-outro", "role": "tenant_admin", "name": "B", "email": "b@x.com"}
+    st, _ = await erro(rai.mudar_poderes("ag-1", rai.PoderesIn(funil_id="p-de-outro"), ADMIN))
+    check("funil que nao e da empresa e recusado", st == 400, st)
+    st, _ = await erro(rai.mudar_poderes("ag-1", rai.PoderesIn(funil_ativo=False), outro))
+    check("outra empresa nao muda os poderes", st == 404, st)
+    IA.chamar = None
+
+
 def _pdf_com_texto(texto: str) -> bytes:
     """Um PDF minimo com uma linha de texto, montado a mao (o pypdf le, mas
     nao escreve texto). Os offsets do xref sao calculados, nao chutados."""
@@ -1211,6 +1290,7 @@ def test_suite():
         await etapa_treinamento()
         await etapa_estoque()
         await etapa_finalizar()
+        await etapa_funil()
         await etapa_documentos()
         await etapa_confirmacao_inventada()
         await etapa_frase_ao_transferir()

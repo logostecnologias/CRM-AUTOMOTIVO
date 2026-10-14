@@ -4,7 +4,7 @@ import api, { API, formatApiErrorDetail } from "@/lib/api";
 import {
   Brain, Check, PaperPlaneRight, PencilSimple, Trash, X, ChatCircleDots,
   ImageSquare, Table, MagnifyingGlass, ArrowsClockwise, CalendarCheck, CheckCircle,
-  Paperclip, FileText, Warning, UploadSimple, Microphone, Eye,
+  Paperclip, FileText, Warning, UploadSimple, Microphone, Eye, Funnel,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
@@ -23,8 +23,8 @@ import Modal from "@/components/ui/Modal";
 // de texto e não enxerga a imagem.
 //
 // Poderes: o que o agente faz no sistema além de conversar. Marcar horário na
-// Agenda e finalizar o atendimento, os dois desligados por padrão porque são o
-// agente escrevendo no sistema. Transferir para uma pessoa (aguardando) não é
+// Agenda, mover o lead no funil e finalizar o atendimento, os três desligados
+// por padrão porque são o agente escrevendo no sistema. Transferir para uma pessoa (aguardando) não é
 // poder: está sempre ligado, é a saída de qualquer dúvida.
 //
 // Estoque: uma planilha (Excel .xlsx ou CSV) por agente. Subir de novo
@@ -168,6 +168,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const [poderes, setPoderes] = useState(() => ({
     agenda_ativa: !!agente.agenda_ativa,
     finalizar_ativo: !!agente.finalizar_ativo,
+    funil_ativo: !!agente.funil_ativo,
     // Ligados por padrão: só deixam o agente ler o que o contato já mandou.
     audio_ativo: agente.audio_ativo !== false,
     imagem_ativa: agente.imagem_ativa !== false,
@@ -346,6 +347,16 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
     }
   });
 
+  const [escolherFunil] = useAcao(async (funilId) => {
+    try {
+      const { data } = await api.patch(`/ai/agents/${agente.id}/poderes`, { funil_id: funilId });
+      setPoderes(data);
+      onMudou?.();
+    } catch (ex) {
+      erroApi(ex);
+    }
+  });
+
   const [salvarEdicao, salvando] = useAcao(async () => {
     const { tipo, id, texto: novo } = editando;
     if (!novo.trim()) return;
@@ -502,6 +513,8 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           {[
             { chave: "agenda_ativa", Icone: CalendarCheck, rotulo: "Marcar horário na Agenda",
               nota: "Consulta os horários livres, marca e cancela de verdade. Os serviços e a grade vêm da tela Agenda." },
+            { chave: "funil_ativo", Icone: Funnel, rotulo: "Mover o lead no funil",
+              nota: "Cria o negócio de quem conversa com ele e avança pelas etapas em aberto. Ganho e Perdido ficam com a equipe." },
             { chave: "finalizar_ativo", Icone: CheckCircle, rotulo: "Finalizar o atendimento",
               nota: "Encerra a conversa quando o assunto se resolve, com um resumo no histórico." },
             { chave: "audio_ativo", Icone: Microphone, rotulo: "Entender áudios",
@@ -547,6 +560,35 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
                 para um atendente. Para o agente ver fotos, troque por um modelo que enxergue (Claude, GPT-5 ou
                 Gemini) na configuração do agente.
               </span>
+            </div>
+          )}
+          {poderes.funil_ativo && poderes.funil_etapas && (
+            <div className="w-full flex items-start gap-2 rounded-lg border border-line bg-surface-2 p-2.5 text-[11px] text-ink-2"
+              data-testid="funil-do-agente">
+              <Funnel size={14} weight="bold" className="shrink-0 mt-px text-info" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span>Cria o negócio de cada contato</span>
+                  {(poderes.funis || []).length > 1 ? (
+                    <>
+                      <span>no funil</span>
+                      <select className="zz-input h-8 text-xs" style={{ width: "auto" }} value={poderes.funil_id || ""}
+                        data-testid="funil-do-agente-select" onChange={(e) => escolherFunil(e.target.value)}>
+                        {poderes.funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                      </select>
+                    </>
+                  ) : <span>no funil</span>}
+                  <span>e avança por:</span>
+                  <strong className="text-ink">{poderes.funil_etapas.join(" → ")}</strong>
+                </div>
+                <div>
+                  Só para a frente, e nunca marca venda ganha nem perdida: isso fica com a equipe. Para dizer
+                  quando mover, ensine aqui mesmo, por exemplo: <em>"mova para Proposta enviada quando mandar o
+                  orçamento"</em>.{" "}
+                  <button type="button" className="underline font-semibold text-info"
+                    onClick={() => navigate("/app/funil?etapas=1")}>Editar as etapas</button>
+                </div>
+              </div>
             </div>
           )}
           {poderes.agenda_ativa && poderes.agenda_pronta === false && (

@@ -86,9 +86,9 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
               <button type="button" onClick={() => mover(i, 1)} disabled={i === etapas.length - 1}
                 className="p-0.5 hover:bg-surface-3 disabled:opacity-20"><ArrowDown size={11} weight="bold" /></button>
             </div>
-            <input required className="zz-input h-7 py-0 text-sm flex-1" value={etapa.nome}
+            <input required className="zz-input h-8 text-sm flex-1" value={etapa.nome}
               onChange={(ev) => alterar(i, { nome: ev.target.value })} />
-            <select className="zz-input h-7 py-0 text-xs w-28" value={etapa.tipo}
+            <select className="zz-input h-8 text-xs w-32" value={etapa.tipo}
               onChange={(ev) => alterar(i, { tipo: ev.target.value })}>
               {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>

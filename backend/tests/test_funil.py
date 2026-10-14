@@ -263,6 +263,23 @@ async def etapa_mexer_nas_etapas(funil):
     ainda = await DB.deals.count_documents({"etapa_id": destino, "tenant_id": TENANT})
     check("renomear etapa preserva os negocios", ainda == movidos, (ainda, movidos))
 
+    # trocar o tipo da etapa leva os negocios dela junto
+    p = await DB.pipelines.find_one({"id": funil["id"]})
+    def _com_tipo(tipo):
+        return [rd.EtapaIn(id=e["id"], nome=e["nome"], cor=e["cor"],
+                           tipo=(tipo if e["id"] == destino else e["tipo"])) for e in p["etapas"]]
+    await rd.update_pipeline(funil["id"], rd.PipelineIn(nome="Funil Comercial", etapas=_com_tipo("ganho")),
+                             user=ADMIN)
+    dali = await DB.deals.find({"etapa_id": destino, "tenant_id": TENANT}).to_list(50)
+    check("etapa virou Ganho: os negocios dela viram ganhos, com data e ciclo",
+          dali and all(d["status"] == "ganho" and d["fechado_em"] and d["ciclo_dias"] is not None
+                       for d in dali), dali)
+    await rd.update_pipeline(funil["id"], rd.PipelineIn(nome="Funil Comercial", etapas=_com_tipo("aberta")),
+                             user=ADMIN)
+    dali = await DB.deals.find({"etapa_id": destino, "tenant_id": TENANT}).to_list(50)
+    check("e voltando para aberta, reabrem", all(d["status"] == "aberto" and not d["fechado_em"]
+                                                 for d in dali), dali)
+
     st, det = await erro(rd.update_pipeline(funil["id"], rd.PipelineIn(nome="x", etapas=[]), user=ADMIN))
     check("funil sem etapa recusado", st == 400, (st, det))
 

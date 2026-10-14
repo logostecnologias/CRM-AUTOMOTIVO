@@ -96,23 +96,7 @@ async def list_pipelines(user=Depends(require_tenant_member)):
     existiam antes de o funil existir — elas abririam a tela num quadro sem
     coluna nenhuma, sem pista de que precisavam inventar as etapas.
     """
-    db = get_db()
-    funis = await db.pipelines.find(
-        {"tenant_id": user["tenant_id"]}, {"_id": 0}
-    ).sort("created_at", 1).to_list(50)
-    if not funis:
-        padrao = {
-            "id": str(uuid.uuid4()),
-            "tenant_id": user["tenant_id"],
-            "nome": "Funil de Vendas",
-            "etapas": dominio.etapas_padrao(),
-            "created_at": _now(),
-            "updated_at": _now(),
-        }
-        await db.pipelines.insert_one(dict(padrao))
-        padrao.pop("_id", None)
-        funis = [padrao]
-    return funis
+    return await dominio.funis_da_empresa(get_db(), user["tenant_id"])
 
 
 def _monta_etapas(entradas: list[EtapaIn]) -> list[dict]:
@@ -184,6 +168,25 @@ async def update_pipeline(pipeline_id: str, body: PipelineIn, mover_para: str | 
                 {"tenant_id": tenant_id, "pipeline_id": pipeline_id, "etapa_id": etapa["id"]},
                 {"$set": movidos},
             )
+
+        # Etapa que trocou de tipo leva junto os negócios que estão nela. Sem
+        # isto, transformar "Fechamento" em etapa de Ganho deixaria os cartões
+        # dali com `status = aberto`: na coluna de ganho, mas fora de todo
+        # relatório de venda. Cada negócio passa por `aplicar_etapa`, como se
+        # tivesse sido arrastado, e ganha o próprio ciclo.
+        tipos_antes = {e["id"]: e.get("tipo", "aberta") for e in atual.get("etapas") or []}
+        for etapa in novas:
+            antes = tipos_antes.get(etapa["id"])
+            if antes is None or antes == etapa["tipo"]:
+                continue
+            async for deal in db.deals.find(
+                    {"tenant_id": tenant_id, "pipeline_id": pipeline_id, "etapa_id": etapa["id"]},
+                    {"_id": 0, "id": 1, "created_at": 1}):
+                mudou = dominio.aplicar_etapa({}, etapa)
+                mudou["ciclo_dias"] = dominio.ciclo_dias({**deal, **mudou})
+                mudou["updated_at"] = _now()
+                await db.deals.update_one({"id": deal["id"], "tenant_id": tenant_id},
+                                          {"$set": mudou})
         campos["etapas"] = novas
 
     await db.pipelines.update_one({"id": pipeline_id, "tenant_id": tenant_id}, {"$set": campos})

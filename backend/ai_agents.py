@@ -42,6 +42,7 @@ import agenda
 import ai_atendimento
 import ai_documentos
 import ai_estoque
+import ai_funil
 import ai_midia
 import ai_runtime
 import ai_tools
@@ -207,7 +208,7 @@ def catalogo_publico() -> dict:
 # Prompt
 # ---------------------------------------------------------------------------
 
-def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
+def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "") -> str:
     """O bloco estável que vai para o cache de prompt.
 
     Estável é requisito, não estilo: é o prefixo idêntico entre chamadas que o
@@ -218,6 +219,7 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
     `bloco_agenda` é o catálogo de serviços e profissionais, montado por
     `ai_tools`. Chega pronto em vez de ser buscado aqui porque esta função é
     síncrona e sem banco, e é chamada também pela tela que mostra o prompt.
+    `bloco_funil` (as etapas do funil, de `ai_funil`) chega pelo mesmo motivo.
     """
     nome = (agente.get("nome") or "Assistente").strip()
     empresa = (agente.get("empresa_nome") or "").strip()
@@ -361,6 +363,8 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "") -> str:
         partes.append(ai_estoque.bloco_de_instrucoes(agente))
     if agente.get("finalizar_ativo"):
         partes.append(ai_atendimento.INSTRUCOES)
+    if bloco_funil:
+        partes.append(bloco_funil)
 
     # A agenda entra depois da base de conhecimento e antes das regras de
     # transferência, porque é ela que muda quando transferir: um agente que
@@ -617,30 +621,37 @@ async def preparar_agenda(db, tenant_id: str, agente: dict, contato: dict = None
 
 async def preparar_ferramentas(db, tenant_id: str, agente: dict, contato: dict = None,
                                session: dict = None, simulado: bool = False):
-    """Agenda, estoque e atendimento: o bloco da agenda, as ferramentas e um executor só.
+    """Agenda, funil, estoque e atendimento: os blocos do prompt, as ferramentas
+    e um executor só.
 
-    Mesmo formato de `preparar_agenda`, para quem chama não precisar saber
-    quantas fontes de ferramenta existem. Os blocos de estoque e de
-    atendimento não vêm aqui: saem do próprio documento do agente, dentro de
-    `montar_instrucoes`, que não tem banco.
+    O primeiro item são os argumentos de `montar_instrucoes` que precisam de
+    banco (`bloco_agenda`, `bloco_funil`), para quem chama fazer
+    `montar_instrucoes(agente, **blocos)` sem saber quantas fontes existem. Os
+    blocos de estoque e de atendimento não vêm aqui: saem do próprio documento
+    do agente, dentro de `montar_instrucoes`, que não tem banco.
     """
     bloco_agenda, ferr_agenda, exec_agenda = await preparar_agenda(
         db, tenant_id, agente, contato, session, simulado=simulado)
+    bloco_funil, ferr_funil, exec_funil = await ai_funil.preparar(
+        db, tenant_id, agente, contato, session, simulado=simulado)
+    blocos = {"bloco_agenda": bloco_agenda, "bloco_funil": bloco_funil}
     if contato is None:
-        return bloco_agenda, ferr_agenda, exec_agenda
+        return blocos, None, None
 
     fontes = []  # (ferramentas, executor)
     if ferr_agenda:
         fontes.append((ferr_agenda, exec_agenda))
+    if ferr_funil:
+        fontes.append((ferr_funil, exec_funil))
     if (agente.get("estoque") or {}).get("total"):
         fontes.append((ai_estoque.FERRAMENTAS, ai_estoque.executor(db, tenant_id, agente)))
     if agente.get("finalizar_ativo"):
         fontes.append((ai_atendimento.FERRAMENTAS,
                        ai_atendimento.executor(db, tenant_id, session, simulado=simulado)))
     if not fontes:
-        return bloco_agenda, None, None
+        return blocos, None, None
     if len(fontes) == 1:
-        return bloco_agenda, list(fontes[0][0]), fontes[0][1]
+        return blocos, list(fontes[0][0]), fontes[0][1]
 
     rota = {f.nome: exe for ferrs, exe in fontes for f in ferrs}
 
@@ -650,7 +661,7 @@ async def preparar_ferramentas(db, tenant_id: str, agente: dict, contato: dict =
             return f"ERRO: ferramenta desconhecida ({nome})."
         return await exe(nome, argumentos)
 
-    return bloco_agenda, [f for ferrs, _ in fontes for f in ferrs], executar
+    return blocos, [f for ferrs, _ in fontes for f in ferrs], executar
 
 
 # ---------------------------------------------------------------------------
@@ -819,13 +830,20 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
         return await escalar("Sem histórico utilizável para o agente de IA — "
                              "encaminhado para atendimento humano")
 
-    bloco_agenda, ferramentas, executar = await preparar_ferramentas(
+    blocos, ferramentas, executar = await preparar_ferramentas(
         db, tenant_id, agente, contato, session)
     executar, marcou = registrar_marcacao(executar)
+    if blocos["bloco_funil"] and contato and historico[0]["role"] == "user":
+        # Onde o negócio está vai no histórico, não no prompt: varia por
+        # contato, e no prompt quebraria o cache. Mesmo lugar do nome.
+        funil = await ai_funil.funil_do_agente(db, tenant_id, agente)
+        if funil:
+            linha = await ai_funil.contexto(db, tenant_id, funil, contato)
+            historico[0]["content"] = f"{linha}\n{historico[0]['content']}".strip()
 
     try:
         resposta = await ai_runtime.responder_por_agente(
-            db, tenant_id, agente, montar_instrucoes(agente, bloco_agenda), historico,
+            db, tenant_id, agente, montar_instrucoes(agente, **blocos), historico,
             ferramentas=ferramentas, executar=executar,
         )
     except HTTPException as e:

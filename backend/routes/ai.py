@@ -29,8 +29,10 @@ import agenda
 import ai_credentials
 import ai_documentos
 import ai_estoque
+import ai_funil
 import ai_midia
 import ai_runtime
+import deals
 import media_store
 from routes.contacts import _le_upload
 
@@ -152,6 +154,9 @@ class AgenteIn(BaseModel):
     # Deixa o agente encerrar o atendimento quando o assunto se resolve (ver
     # `ai_atendimento`). Desligado pelo mesmo motivo da agenda.
     finalizar_ativo: bool = False
+    # O funil (`funil_ativo`, `funil_id`) fica de fora, como `memoria`: só a
+    # tela de treino o liga (PATCH /poderes), e o `$set` deste formulário
+    # inteiro o desligaria a cada vez que o assistente fosse salvo.
 
     # Onde atende. Vazio = todas as conexões da empresa.
     conexoes: list[str] = []
@@ -374,6 +379,9 @@ class PoderesIn(BaseModel):
     # tem (nem deve ter) provedor, chave e tom à mão.
     agenda_ativa: bool | None = None
     finalizar_ativo: bool | None = None
+    funil_ativo: bool | None = None
+    # "" volta para o primeiro funil da empresa.
+    funil_id: str | None = None
     # Entender anexo do contato. Ligados por padrão (ausente = ligado): não
     # escrevem nada no sistema, só deixam o agente ler o que já chegou.
     audio_ativo: bool | None = None
@@ -386,6 +394,13 @@ async def mudar_poderes(agent_id: str, body: PoderesIn, user=Depends(require_ten
     db = get_db()
     await _agente_do_tenant(db, agent_id, user["tenant_id"])
     mudanca = {k: v for k, v in body.model_dump().items() if v is not None}
+    if mudanca.get("funil_id"):
+        # Id de funil de outra empresa colado no corpo seria lido pelo agente.
+        if not await db.pipelines.find_one(
+                {"id": mudanca["funil_id"], "tenant_id": user["tenant_id"]}, {"_id": 0, "id": 1}):
+            raise HTTPException(status_code=400, detail="Funil inválido")
+    elif "funil_id" in mudanca:
+        mudanca["funil_id"] = None
     if mudanca:
         await db.ai_agents.update_one(
             {"id": agent_id, "tenant_id": user["tenant_id"]},
@@ -407,10 +422,18 @@ async def _poderes(db, tenant_id: str, agent_id: str) -> dict:
     agente marcava na agenda, e ele não marcava.
     """
     agente = await _agente_do_tenant(db, agent_id, tenant_id)
+    funis = await deals.funis_da_empresa(db, tenant_id)
+    funil = await ai_funil.funil_do_agente(db, tenant_id, agente)
     servicos = len(await agenda.servicos_ativos(db, tenant_id))
     profissionais = len(await agenda.recursos_ativos(db, tenant_id))
     return {"agenda_ativa": bool(agente.get("agenda_ativa")),
             "finalizar_ativo": bool(agente.get("finalizar_ativo")),
+            "funil_ativo": bool(agente.get("funil_ativo")),
+            "funil_id": funil["id"] if funil else None,
+            # As etapas que o agente pode usar, para a tela mostrar o que ele
+            # vai fazer em vez de só "mover no funil".
+            "funil_etapas": [e["nome"] for e in ai_funil.etapas_abertas(funil)] if funil else [],
+            "funis": [{"id": f["id"], "nome": f["nome"]} for f in funis],
             "agenda_servicos": servicos,
             "agenda_profissionais": profissionais,
             "agenda_pronta": servicos > 0 and profissionais > 0,
@@ -577,14 +600,14 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     # consultam a agenda de verdade (é o que prova que a grade está certa) e não
     # gravam nada. Um teste que marcasse horário ocuparia a agenda do cliente.
     contato_teste = {"id": "teste", "nome": "Contato de teste", "numero_whatsapp": ""}
-    bloco_agenda, ferramentas, executar = await ai_agents.preparar_ferramentas(
+    blocos, ferramentas, executar = await ai_agents.preparar_ferramentas(
         db, user["tenant_id"], agente, contato_teste, None, simulado=True)
     executar, marcou = ai_agents.registrar_marcacao(executar)
 
     try:
         resposta = await ai_runtime.responder_por_agente(
             db, user["tenant_id"], agente,
-            ai_agents.montar_instrucoes(agente, bloco_agenda), historico,
+            ai_agents.montar_instrucoes(agente, **blocos), historico,
             ferramentas=ferramentas, executar=executar)
     except ai_client.IAError as e:
         # A chave pode ter sido revogada no console depois de salva. Marcar aqui
@@ -645,8 +668,8 @@ async def ver_prompt(agent_id: str, user=Depends(require_tenant_admin)):
     agente = await db.ai_agents.find_one({"id": agent_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
     if not agente:
         raise HTTPException(status_code=404, detail="Agente não encontrado")
-    bloco_agenda, _, _ = await ai_agents.preparar_agenda(db, user["tenant_id"], agente)
-    return {"instrucoes": ai_agents.montar_instrucoes(agente, bloco_agenda)}
+    blocos, _, _ = await ai_agents.preparar_ferramentas(db, user["tenant_id"], agente)
+    return {"instrucoes": ai_agents.montar_instrucoes(agente, **blocos)}
 
 
 # ---------------------------------------------------------------------------

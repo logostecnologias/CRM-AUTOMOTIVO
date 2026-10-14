@@ -519,7 +519,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
               </button>
             </div>
             {conectadas.length > 1 && (
-              <select className="zz-input h-7 py-0 text-xs mt-2" data-testid="contact-send-connection"
+              <select className="zz-input h-8 text-xs mt-2" data-testid="contact-send-connection"
                 value={conexaoEnvio} onChange={(e) => setConexaoEnvio(e.target.value)}>
                 <option value="">Número da última conversa</option>
                 {conectadas.map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}

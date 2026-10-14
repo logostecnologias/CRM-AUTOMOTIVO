@@ -160,7 +160,7 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
                 <div key={coluna} className="flex items-center gap-3 px-3 py-1.5 border-b border-line last:border-b-0">
                   <span className="text-sm font-semibold w-52 truncate" title={coluna}>{coluna}</span>
                   <ArrowRight size={12} weight="bold" className="text-ink-4 shrink-0" />
-                  <select className="zz-input h-7 py-0 text-xs max-w-[240px]"
+                  <select className="zz-input h-8 text-xs max-w-[240px]"
                     data-testid={`mapa-${coluna}`}
                     value={mapa[coluna] || ""}
                     onChange={(e) => revisar({ ...mapa, [coluna]: e.target.value })}>
