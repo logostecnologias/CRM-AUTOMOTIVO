@@ -158,11 +158,17 @@ async def etapa_salvar():
     check("chave da openai no campo da anthropic e recusada", st == 400, (st, det))
     check("sem gastar chamada no provedor", VALIDAR.chamadas == [], VALIDAR.chamadas)
 
-    # Caso real de 13/10/2026: token da conta Anthropic que não é chave de API.
-    st, det = await erro(rai.criar_agente(
-        rai.AgenteIn(nome="X", provedor="anthropic", chave_api="sk-ant-usr-" + "K" * 40), ADMIN_A))
-    check("sk-ant-usr- e recusada antes da chamada", st == 400 and "sk-ant-api" in str(det)
-          and VALIDAR.chamadas == [], (st, det))
+    # Caso real de 13/10/2026: a chave pessoal do Console (`sk-ant-usr-`) é
+    # chave de API; criada sem workspace, o 400 da Anthropic tem de dizer isso,
+    # não "chave recusada".
+    class _Erro400(Exception):
+        status_code = 400
+    texto = ai_client._traduz_erro(_Erro400(
+        "Error code: 400 - This API key is not scoped to a workspace, so this request "
+        "must include the anthropic-workspace-id header"))
+    check("chave sem workspace explica o workspace", "workspace" in texto, texto)
+    check("chave de Gemini invalida continua como chave recusada",
+          "recusada" in ai_client._traduz_erro(_Erro400("API key not valid")))
 
     # Caminho feliz: valida antes de gravar.
     VALIDAR.chamadas.clear()

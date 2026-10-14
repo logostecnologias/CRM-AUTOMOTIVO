@@ -102,11 +102,10 @@ PROVEDORES: dict[str, dict] = {
         # Link direto para a página de chaves — é o "abrir console" da tela de
         # conexão. Levar o cliente à home do provedor faria ele se perder.
         "console_url": "https://console.anthropic.com/settings/keys",
-        # `sk-ant-api`, não só `sk-ant-`: a conta da Anthropic tem outros
-        # tokens com o mesmo começo (`sk-ant-usr-`, `sk-ant-oat01-`, `sk-ant-admin01-`)
-        # que não chamam a API de mensagens. Aceitá-los aqui só adiava a recusa
-        # para um "chave recusada" que manda o cliente recopiar a chave errada.
-        "prefixo_chave": "sk-ant-api",
+        # `sk-ant-`, não `sk-ant-api`: o Console passou a emitir chave pessoal
+        # como `sk-ant-usr-…`, e ela vale para a API (ver `_traduz_erro` sobre
+        # a que nasce sem workspace).
+        "prefixo_chave": "sk-ant-",
         "modelos": [
             Modelo("claude-haiku-4-5", "Haiku 4.5", 1.00, 5.00, 0.10, 1.25,
                    "Recomendado para atendimento: rápido e barato."),
@@ -797,6 +796,15 @@ def _traduz_erro(e: Exception) -> str:
     o volume."""
     nome = type(e).__name__
     status = getattr(e, "status_code", None)
+    # Chave pessoal da Anthropic (`sk-ant-usr-…`) criada sem escolher workspace:
+    # a chave é válida, mas toda chamada volta 400 pedindo o cabeçalho
+    # `anthropic-workspace-id`. Vem antes da regra do Gemini porque o texto
+    # também contém "api key", e "chave recusada" mandava o cliente recopiar
+    # uma chave que estava certa (caso real de 13/10/2026).
+    if status == 400 and "not scoped to a workspace" in str(e).lower():
+        return ("A chave foi criada sem escolher um workspace, e assim a Anthropic não a "
+                "aceita. No Console, em API Keys, crie outra chave escolhendo o workspace "
+                "(\"Default\" serve) e cole a nova aqui.")
     # O Gemini responde chave inválida com 400 ("API key not valid"), não 401.
     if status == 401 or "Authentication" in nome or (
             status == 400 and "api key" in str(e).lower()):
