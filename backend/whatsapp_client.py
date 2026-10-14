@@ -531,6 +531,20 @@ async def send_template(cred: Credencial, numero: str, nome: str, idioma: str,
     return await _enviar(cred, {"to": numero, "type": "template", "template": modelo})
 
 
+async def digitando(cred: Credencial, numero: str, audio: bool = False) -> None:
+    """"Digitando…" na conversa, antes de uma resposta automática.
+
+    Só no canal `wuzapi`. Lá é parte do ritmo humano que reduz o risco de
+    bloqueio do número (ver `flow_runtime._ritmo_humano`); na Cloud API o
+    indicador existe, mas pendurado na leitura de uma mensagem recebida
+    (`marcar_lida(digitando=True)`), e ali não há bloqueio a evitar.
+    Nunca levanta.
+    """
+    if cred.canal != CANAL_WUZAPI:
+        return
+    await _wuz().presence(cred.token, numero, "composing", "audio" if audio else "")
+
+
 async def marcar_lida(cred: Credencial, wamid: str, digitando: bool = False) -> None:
     """Marca a mensagem como lida e, opcionalmente, mostra "digitando...".
 

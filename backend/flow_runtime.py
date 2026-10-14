@@ -4,6 +4,8 @@ real messages through the official Cloud API (see whatsapp_client).
 """
 import asyncio
 import logging
+import random
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -261,8 +263,93 @@ async def _enviar_menu(db, tenant_id, cred, number, session_id, o):
                    mtype="menu", meta={"menu": meta, "wamid": wamid})
 
 
-async def _send_outputs(db, tenant_id, cred, number, session_id, outputs):
+# ---------------------------------------------------------------------------
+# Ritmo humano das respostas automáticas
+# ---------------------------------------------------------------------------
+# No canal `wuzapi` o número é do cliente e fala um protocolo não oficial: o
+# WhatsApp não tem como saber que é um robô a não ser pelo comportamento, e o
+# comportamento de robô é responder em milissegundos, mandar três mensagens no
+# mesmo segundo e nunca aparecer "digitando…". Cada resposta automática ali
+# passa a vir depois do indicador de digitação e de uma pausa proporcional ao
+# tamanho do texto, como uma pessoa escrevendo.
+#
+# Só vale para o que `_send_outputs` manda, que é bot e agente de IA. Mensagem
+# de atendente (`send_human_message`) já é digitada por gente, e atrasá-la só
+# deixaria a Central lenta.
+#
+# A pausa acontece dentro da trava por conversa (`_uma_por_vez`), e isso é
+# desejável: se o contato manda outra mensagem enquanto o bot "digita", ela
+# espera a resposta anterior terminar, como esperaria numa conversa de verdade.
+# Conversas diferentes continuam em paralelo.
+#
+# Na Cloud API não há bloqueio a evitar, e o ritmo fica desligado.
+
+RITMO_BASE = 1.0          # segundos de "leitura" antes de começar a digitar
+RITMO_POR_CARACTERE = 0.03  # ~33 caracteres/s: rápido para gente, lento para robô
+RITMO_MAX = 5.0           # mensagem longa não pode deixar o contato esperando meio minuto
+RITMO_MIDIA = 2.0         # anexar um arquivo leva um tempo fixo, não por caractere
+RITMO_VARIACAO = (0.8, 1.25)  # intervalo exato é assinatura de robô
+
+# O nó Aguardar dorme de verdade, mas segurando a trava da conversa: uma hora
+# de espera aqui seria uma hora sem processar nada que o contato mandar.
+# Esperas longas pedem agendamento, que o nó ainda não faz.
+AGUARDAR_MAX = 60
+
+_dormir = asyncio.sleep   # trocável no teste, que não pode esperar segundos
+
+
+def _tempo_digitando(o: dict) -> float:
+    if o["type"] == "media":
+        alvo = RITMO_MIDIA
+    else:
+        texto = _menu_em_texto(o) if o["type"] == "menu" else (o.get("content") or "")
+        alvo = min(RITMO_BASE + len(texto) * RITMO_POR_CARACTERE, RITMO_MAX)
+    return alvo * random.uniform(*RITMO_VARIACAO)
+
+
+async def _ritmo_humano(cred, number, o: dict, inicio: float | None) -> None:
+    """"Digitando…" e a pausa antes de um output, no canal `wuzapi`.
+
+    `inicio` é o instante (monotônico) em que a mensagem do contato começou a
+    ser processada, e só vem para o primeiro output: o tempo que o agente de
+    IA já gastou pensando conta como tempo digitando, senão uma resposta que
+    levou 6s para ser gerada ainda esperaria mais 4s.
+    """
+    if cred.canal != whatsapp.CANAL_WUZAPI:
+        return
+    espera = _tempo_digitando(o)
+    if inicio is not None:
+        espera -= time.monotonic() - inicio
+    audio = o["type"] == "media" and (o.get("doc") or {}).get("kind", o.get("media_type")) == "audio"
+    await whatsapp.digitando(cred, number, audio=audio)
+    if espera > 0:
+        await _dormir(espera)
+
+
+async def _send_outputs(db, tenant_id, cred, number, session_id, outputs,
+                        inicio: float | None = None):
+    """Envia o que o motor (ou o agente de IA) produziu, na ordem.
+
+    `inicio` é o instante em que a mensagem do contato começou a ser
+    processada, para o ritmo humano descontar o tempo já gasto (ver
+    `_ritmo_humano`).
+    """
+    primeiro = True
     for o in outputs:
+        if o["type"] == "delay":
+            # O nó Aguardar. Antes ele era descartado aqui, e o fluxo
+            # publicado mandava tudo colado mesmo com a espera configurada.
+            segundos = min(max(float(o.get("seconds") or 0), 0), AGUARDAR_MAX)
+            if segundos:
+                await _dormir(segundos)
+            primeiro = False
+            continue
+        if o["type"] in ("text", "menu", "media"):
+            try:
+                await _ritmo_humano(cred, number, o, inicio if primeiro else None)
+            except Exception as e:
+                logger.debug("Ritmo humano falhou, enviando assim mesmo: %s", e)
+            primeiro = False
         try:
             if o["type"] == "text":
                 wamid = await whatsapp.send_text(cred, number, o["content"])
@@ -495,6 +582,7 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
     justamente nos menus mais descritivos.
     """
     db = get_db()
+    inicio = time.monotonic()
 
     # Idempotency
     if await db.processed_messages.find_one({"message_id": message_id}):
@@ -709,7 +797,8 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
                      "$inc": {"unread_count": 1}},
                 )
                 if cred and outputs:
-                    await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs)
+                    await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs,
+                                        inicio=inicio)
                 return
 
             # Sem bot e sem agente: fila humana, em vez de engolir a mensagem.
@@ -730,7 +819,8 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             # montada e descartada, e o contato ficava sem resposta até alguém
             # assumir a conversa.
             if cred and outputs:
-                await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs)
+                await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs,
+                                    inicio=inicio)
             # A conversa aberta por um aviso de agendamento também nasce sem
             # bot, e cai aqui quando o contato responde outra coisa que não
             # CONFIRMAR/CANCELAR ("posso remarcar?"). Dizer "bot indisponível"
@@ -951,7 +1041,8 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
 
     # send outputs through the Cloud API
     if cred and outputs:
-        await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs)
+        await _send_outputs(db, tenant_id, cred, from_number, session_id, outputs,
+                            inicio=inicio)
 
 
 def destino(contact: dict | None) -> str | None:

@@ -330,6 +330,14 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - **Vale dentro de um processo.** Com mais de um worker de uvicorn as duas mensagens podem cair em processos diferentes e a corrida volta. Fechar isso exige trava no Mongo (findAndModify com TTL), e é o caminho no dia em que o backend rodar replicado
 - **O teste mira o mecanismo, não uma corrida encenada.** Encenar não funciona com o Mongo falso: ele nunca suspende a execução, então duas tasks passadas ao `gather` rodam uma inteira depois da outra e a corrida jamais acontece. A primeira versão do teste passava com a trava desligada, que é o mesmo que não ter teste
 
+### Ritmo humano das respostas automáticas (14/10/2026)
+- No canal **WuzAPI** o número é do cliente e o protocolo não é oficial: o que denuncia robô é o comportamento (resposta em milissegundos, várias mensagens no mesmo segundo, nunca "digitando…"). Toda resposta de **bot e agente de IA** (`flow_runtime._send_outputs`) passa a sair depois de `whatsapp.digitando()` (`/chat/presence`, "gravando" para áudio) e de uma pausa proporcional ao texto (`_ritmo_humano`: 1s + ~33 caracteres/s, teto de 5s, variação aleatória de ±20%)
+- A pausa da **primeira** resposta desconta o tempo que ela levou para ser montada (`inicio`, marcado na entrada de `_processar_mensagem`): o agente de IA que pensou 6s não espera mais 4s
+- Mensagem de atendente **não** ganha ritmo: já é digitada por gente. Na **Cloud API** o ritmo fica desligado, porque ali não há bloqueio a evitar
+- A pausa acontece dentro da trava por conversa, de propósito: o que o contato manda enquanto o bot "digita" espera a resposta anterior. Conversas diferentes seguem em paralelo
+- `presence` é uma ida só, sem o retry de `_request`, e nunca levanta: sem o indicador a mensagem sai igual
+- **O nó Aguardar não esperava nada no envio real**: o output `delay` era descartado em `_send_outputs` e o fluxo mandava tudo colado. Agora dorme de verdade, com teto de `AGUARDAR_MAX` (60s), porque segura a trava da conversa. O editor limita o campo a 60
+
 ### Cliques repetidos e duplicatas
 - O bug que originou a regra: dois cliques em "Salvar profissional" criaram dois profissionais. Entre o clique e a resposta do servidor há centenas de milissegundos com o botão ainda clicável, e nessa janela cabe o segundo clique inteiro
 - **A trava é `useRef`, não `useState`** (`hooks/useAcao.js`). Marcar `setSalvando(true)` no começo do handler parece resolver, mas o valor só passa a valer no render seguinte: dois cliques disparados no mesmo quadro leem `false` os dois. O `ref` muda na mesma linha, antes de qualquer `await`, então o segundo clique morre na primeira condição

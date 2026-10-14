@@ -302,9 +302,10 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
 
         {node.type === "delay" && (
           <Field label="Segundos de espera">
-            <input type="number" min="0" max="3600" className="zz-input font-mono"
+            <input type="number" min="0" max="60" className="zz-input font-mono"
               value={data.seconds || 1}
-              onChange={(e) => update({ seconds: parseInt(e.target.value) || 0 })} />
+              onChange={(e) => update({ seconds: Math.min(parseInt(e.target.value) || 0, 60) })} />
+            <p className="text-xs text-ink-3 mt-1">Até 60 segundos.</p>
           </Field>
         )}
 

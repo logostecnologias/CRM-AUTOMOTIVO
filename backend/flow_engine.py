@@ -261,9 +261,11 @@ async def _process_node(node, flow, session, outputs):
         return _find_next(edges, node["id"])
 
     if ntype == "delay":
-        seconds = int(data.get("seconds", 1))
-        outputs.append({"type": "delay", "seconds": min(seconds, 3)})
-        # in test mode we do not actually sleep for long
+        seconds = max(0, int(data.get("seconds", 1) or 0))
+        # O valor configurado vai inteiro no output: é `flow_runtime` quem
+        # dorme de verdade (com teto, ver AGUARDAR_MAX), e o chat de teste só
+        # mostra quanto seria. Aqui só um respiro, para o teste não demorar.
+        outputs.append({"type": "delay", "seconds": seconds})
         await asyncio.sleep(min(seconds, 1) * 0.2)
         return _find_next(edges, node["id"])
 

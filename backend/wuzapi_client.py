@@ -450,6 +450,27 @@ async def get_avatar(token: str, phone: str) -> str | None:
     return None
 
 
+async def presence(token: str, number: str, estado: str = "composing",
+                   midia: str = "") -> None:
+    """Mostra "digitando…" (ou "gravando áudio…", com `midia="audio"`) na
+    conversa do contato. `estado` é `composing` ou `paused`.
+
+    Fora de `_request` de propósito: aquele repete três vezes com backoff, e
+    um indicador que só aparece depois de 3,5s de tentativas atrasa a resposta
+    que ele deveria anteceder. Aqui é uma ida só, curta, e falha nunca levanta:
+    sem o indicador a mensagem sai igual.
+    """
+    try:
+        r = await _get_client().post(
+            f"{_base()}/chat/presence", headers=_token_headers(token),
+            json={"Phone": number, "State": estado, "Media": midia}, timeout=5.0,
+        )
+        if r.status_code >= 400:
+            logger.debug("WuzAPI presence -> %s: %s", r.status_code, r.text[:200])
+    except httpx.HTTPError as e:
+        logger.debug("WuzAPI presence falhou: %s", e)
+
+
 async def send_text(token: str, number: str, text: str) -> dict:
     return await _request("POST", "/chat/send/text", _token_headers(token), {"Phone": number, "Body": text})
 
