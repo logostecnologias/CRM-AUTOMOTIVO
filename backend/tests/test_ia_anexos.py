@@ -171,7 +171,7 @@ async def etapa_audio_ilegivel():
     s = await sessao()
     check("chave da Anthropic nao e mandada a transcricao", len(TRANSCRICOES) == 0, TRANSCRICOES)
     check("e o motivo diz o que falta",
-          any("OpenAI ou da Groq" in m for m in await sistemas(s["id"])),
+          any("nenhuma conta de transcrição" in m for m in await sistemas(s["id"])),
           await sistemas(s["id"]))
 
     print("\n[chave de transcricao da plataforma]")
@@ -184,6 +184,14 @@ async def etapa_audio_ilegivel():
     uso = await DB.ai_usage.find({"tenant_id": TENANT, "modelo": "whisper-large-v3-turbo"}).to_list(5)
     check("medida como consumo da plataforma",
           uso and uso[0]["origem"] == ai_runtime.ORIGEM_PLATAFORMA, uso)
+
+    # Com a chave dedicada, ela transcreve para todo mundo, inclusive para o
+    # agente que tem chave própria da Groq (16/10/2026).
+    await _semear(_agente())
+    os.environ["AI_TRANSCRICAO_KEY"] = "gsk_PLATAFORMA"
+    await mandar("audio", "audio/ogg", b"OggS")
+    check("a chave dedicada da plataforma vale mesmo com chave da groq no agente",
+          TRANSCRICOES and TRANSCRICOES[-1]["chave"] == "gsk_PLATAFORMA", TRANSCRICOES)
 
     print("\n[audio desligado no agente]")
     await _semear(_agente(audio_ativo=False))

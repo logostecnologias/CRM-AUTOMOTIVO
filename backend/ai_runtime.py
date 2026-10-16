@@ -265,13 +265,28 @@ def _transcricao_plataforma() -> dict | None:
 
 
 async def resolver_transcricao(db, tenant_id: str, agente: dict) -> dict:
-    """Qual conta paga a transcrição. A do agente vem primeiro, quando o
-    provedor dela transcreve (OpenAI e Groq); senão a da plataforma, com a mesma
-    cota do plano que a conversa.
+    """Qual conta paga a transcrição.
+
+    Com `AI_TRANSCRICAO_KEY` configurada, é ela para todo mundo (16/10/2026):
+    a transcrição passou a ser um serviço da plataforma, que não depende de o
+    cliente ter uma chave da Groq ou da OpenAI no agente. Custa ~US$ 0,04 por
+    hora de áudio, e por isso não passa pela cota de tokens do plano: barrar a
+    nota de voz de um contato por um teto de outra unidade mandaria para a
+    fila uma mensagem que a plataforma sabe ler.
+
+    Sem ela, vale a chave do agente quando o provedor dela transcreve, e por
+    último a chave de conversa da plataforma, com a cota do plano.
 
     Levanta `ai_client.IAError` com texto para o histórico quando não há conta
     nenhuma: é o motivo que o atendente lê ao receber a conversa.
     """
+    dedicada = os.environ.get("AI_TRANSCRICAO_KEY")
+    if dedicada:
+        provedor = os.environ.get("AI_TRANSCRICAO_PROVIDER", "groq")
+        if not ai_client.transcreve(provedor):
+            raise ai_client.IAError(
+                f"AI_TRANSCRICAO_PROVIDER inválido no servidor ({provedor})")
+        return {"provedor": provedor, "chave": dedicada, "origem": ORIGEM_PLATAFORMA}
     if (agente.get("credencial") and agente.get("credencial_status") != "erro"
             and ai_client.transcreve(agente.get("provedor"))):
         return {"provedor": agente["provedor"],
@@ -287,9 +302,7 @@ async def resolver_transcricao(db, tenant_id: str, agente: dict) -> dict:
             f"({agente.get('credencial_erro') or 'sem detalhe'}); "
             "teste o agente ou salve a chave de novo")
     if plataforma is None:
-        raise ai_client.IAError(
-            "nenhuma conta de transcrição configurada (a chave do agente precisa "
-            "ser da OpenAI ou da Groq)")
+        raise ai_client.IAError("nenhuma conta de transcrição configurada no servidor")
     await _checar_cota(db, tenant_id)
     return plataforma
 
