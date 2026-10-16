@@ -471,6 +471,27 @@ async def presence(token: str, number: str, estado: str = "composing",
         logger.debug("WuzAPI presence falhou: %s", e)
 
 
+async def mark_read(token: str, ids: list[str], number: str) -> None:
+    """Os dois tiques azuis nas mensagens `ids` da conversa com `number`.
+
+    Formato conferido contra a ponte instalada (16/10/2026): `Id` é lista e o
+    número vai em `ChatPhone`. O `swagger` dela marca `Chat` como obrigatório,
+    mas o handler recusa sem `ChatPhone` ("missing ChatPhone in Payload").
+
+    Uma ida só, como `presence`: é sinal de cortesia, e repeti-lo com backoff
+    atrasaria a resposta. Nunca levanta.
+    """
+    try:
+        r = await _get_client().post(
+            f"{_base()}/chat/markread", headers=_token_headers(token),
+            json={"Id": ids, "ChatPhone": number}, timeout=5.0,
+        )
+        if r.status_code >= 400:
+            logger.debug("WuzAPI markread -> %s: %s", r.status_code, r.text[:200])
+    except httpx.HTTPError as e:
+        logger.debug("WuzAPI markread falhou: %s", e)
+
+
 async def send_text(token: str, number: str, text: str) -> dict:
     return await _request("POST", "/chat/send/text", _token_headers(token), {"Phone": number, "Body": text})
 

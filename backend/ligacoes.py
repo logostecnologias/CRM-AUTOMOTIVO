@@ -38,6 +38,7 @@ Decisões, e o motivo de cada uma:
     por `normaliza_numero` seria pior que inútil: um número estrangeiro de 11
     dígitos ganharia um 55 na frente e a mensagem iria para outra pessoa.
 """
+import aquecimento
 import logging
 import re
 import uuid
@@ -291,6 +292,9 @@ async def enviar_whatsapp(db, tenant_id: str, ligacao_id: str) -> str:
         corpo = montar(texto(config, "mensagem"), valores)
         modelo = config.get("template") or {}
 
+        # No canal não oficial, envios ativos da mesma conexão saem espaçados:
+        # uma rajada de leads (ou de ligações) não vira uma rajada de mensagens.
+        await aquecimento.espacar(conn)
         if flow_runtime.janela_aberta(session, conn.get("canal")):
             await flow_runtime.send_human_message(tenant_id, session["id"], corpo)
             return await fim(ENVIADA, mensagem_tipo="texto")

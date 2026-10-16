@@ -78,12 +78,41 @@ async def limpar_conexoes_da_api_antiga(db) -> int:
 
     Idempotente: na segunda subida o filtro não casa mais nada.
     """
+    # O canal `wuzapi` voltou depois desta migração, e as conexões dele também
+    # não têm `phone_number_id`: sem excluí-lo, todo reinício do servidor as
+    # marcava como desconectadas, e lembrete, formulário, ligação e campanha
+    # paravam de sair até o próximo evento da ponte (16/10/2026).
     res = await db.whatsapp_connections.update_many(
-        {"phone_number_id": None},
+        {"phone_number_id": None, "canal": {"$ne": "wuzapi"}},
         {"$set": {"status": "desconectado"},
          "$unset": {"wuzapi_token": "", "wuzapi_user_id": "", "qrcode_atual": ""}},
     )
     return res.modified_count
+
+
+async def iniciar_aquecimento(db) -> int:
+    """Conexão WuzAPI anterior ao aquecimento ganha a data em que foi criada.
+
+    É a melhor estimativa da idade do número que existe no banco. Uma conexão
+    criada há uma semana entra no meio do aquecimento, e não no começo: ela já
+    vinha conversando.
+
+    Idempotente: na segunda subida o filtro não casa mais nada.
+    """
+    n = 0
+    async for c in db.whatsapp_connections.find(
+            {"canal": "wuzapi", "aquecimento_desde": None},
+            {"_id": 0, "id": 1, "created_at": 1}):
+        res = await db.whatsapp_connections.update_one(
+            {"id": c["id"], "aquecimento_desde": None},
+            {"$set": {"aquecimento_desde": c.get("created_at") or _agora_iso()}})
+        n += res.modified_count
+    return n
+
+
+def _agora_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 async def desmarcar_chaves_de_ia(db) -> int:
@@ -114,6 +143,9 @@ async def _run():
     limpas = await limpar_conexoes_da_api_antiga(db)
     if limpas:
         logger.info("Conexões sem número da Cloud API marcadas como desconectadas: %d", limpas)
+    aquecendo = await iniciar_aquecimento(db)
+    if aquecendo:
+        logger.info("Conexões WuzAPI com início de aquecimento preenchido: %d", aquecendo)
     chaves = await desmarcar_chaves_de_ia(db)
     if chaves:
         logger.info("Chaves de IA desmarcadas (erro que não era da chave): %d", chaves)

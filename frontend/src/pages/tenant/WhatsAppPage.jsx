@@ -332,6 +332,21 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
         </div>
       )}
 
+      {naoOficial && conn.aquecimento && (
+        <div className="mt-4 text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg flex gap-2"
+          data-testid={`conn-aquecimento-${conn.id}`}>
+          <WarningCircle size={16} weight="bold" className="shrink-0 mt-px" />
+          <div>
+            <strong>Número em aquecimento: dia {conn.aquecimento.dia} de {conn.aquecimento.dias}.</strong>{" "}
+            Número novo que já começa disparando é o que mais leva a bloqueio. Até{" "}
+            {new Date(conn.aquecimento.termina_em).toLocaleDateString("pt-BR")}, as campanhas
+            por este número saem no máximo {conn.aquecimento.limite_24h} mensagens a cada 24 horas,
+            e o limite sobe sozinho com os dias. Responder quem escreve não tem limite: é o que
+            aquece o número.
+          </div>
+        </div>
+      )}
+
       {cadastrado && conn.webhook_assinado === false && (
         <div className="mt-4 text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg">
           {naoOficial ? (

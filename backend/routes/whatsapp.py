@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+import aquecimento
 import cripto
 import whatsapp_client as whatsapp
 import wuzapi_client as wuzapi
@@ -75,6 +76,9 @@ def _serialize(conn: dict | None, is_admin: bool) -> dict | None:
     if not conn:
         return conn
     saida = {k: v for k, v in conn.items() if k not in _CAMPOS_OCULTOS}
+    # Em que dia do aquecimento o número está, para a tela avisar. Nulo fora
+    # do canal não oficial e depois do último dia.
+    saida["aquecimento"] = aquecimento.situacao(conn)
     if not is_admin:
         saida.pop("phone_number_id", None)
         saida.pop("waba_id", None)
@@ -565,6 +569,8 @@ async def salvar_wuzapi(conn_id: str, body: WuzapiIn, user=Depends(require_tenan
         "ultimo_erro": None,
         "updated_at": _now(),
     }})
+    if estado.get("loggedIn"):
+        await aquecimento.marcar_inicio(db, conn_id)
     saida = _serialize(await db.whatsapp_connections.find_one({"id": conn_id}), True)
     if aviso:
         saida["aviso"] = aviso
@@ -652,6 +658,7 @@ async def qr_wuzapi(conn_id: str, user=Depends(require_tenant_admin)):
             "numero_exibicao": f"+{numero}" if numero else None,
             "updated_at": _now(),
         }})
+        await aquecimento.marcar_inicio(db, conn_id)
         return {"status": "conectado", "qr": None, "numero": numero}
     return {"status": conn.get("status") or "pareando", "qr": qr}
 

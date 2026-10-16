@@ -50,6 +50,7 @@ Decisões, e o motivo de cada uma:
     a mensagem é o pedido que a pessoa fez ao preencher, o mesmo raciocínio da
     tecla 1 do telefone.
 """
+import aquecimento
 import asyncio
 import json
 import logging
@@ -743,6 +744,9 @@ async def enviar_whatsapp(db, tenant_id: str, resposta_id: str) -> str:
             corpo = re.sub(r"[ \t]+([,!?.])", r"\1", corpo).replace(",!", "!")
         modelo = cfg.get("template") or {}
 
+        # No canal não oficial, envios ativos da mesma conexão saem espaçados:
+        # uma rajada de leads (ou de ligações) não vira uma rajada de mensagens.
+        await aquecimento.espacar(conn)
         if flow_runtime.janela_aberta(session, conn.get("canal")):
             await flow_runtime.send_human_message(tenant_id, session["id"], corpo)
             return await fim(WPP_ENVIADA)

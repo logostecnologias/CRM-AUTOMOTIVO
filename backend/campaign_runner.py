@@ -33,6 +33,7 @@ from datetime import datetime, timezone, timedelta
 
 from pymongo import ReturnDocument
 
+import aquecimento
 import campaigns
 import whatsapp_client as whatsapp
 from db import get_db
@@ -46,7 +47,11 @@ JITTER = (0.75, 1.4)        # multiplicador aleatório do intervalo entre envios
 # morreu no meio do envio. Generoso de propósito: o envio de um vídeo grande
 # leva tempo, e reenviar por impaciência manda a mensagem duas vezes.
 CLAIM_STALE_MIN = 15
+# De quanto em quanto tempo a campanha parada pelo aquecimento confere se a
+# janela de 24h já liberou mais um envio.
+ESPERA_AQUECIMENTO = 10 * 60
 
+_dormir = asyncio.sleep   # trocável no teste
 _task: asyncio.Task | None = None
 _runners: dict[str, asyncio.Task] = {}
 
@@ -115,13 +120,13 @@ async def _credencial_da_conexao(db, campaign: dict):
         {"_id": 0},
     )
     if not conn:
-        return None, "Conexão de WhatsApp não existe mais"
+        return None, None, "Conexão de WhatsApp não existe mais"
     if conn.get("status") != "conectado":
-        return None, f"Conexão '{conn.get('nome') or conn['id']}' está {conn.get('status')}"
+        return None, None, f"Conexão '{conn.get('nome') or conn['id']}' está {conn.get('status')}"
     cred = whatsapp.credencial(conn)
     if not cred:
-        return None, "Conexão sem credencial da Cloud API cadastrada"
-    return cred, None
+        return None, None, "Conexão sem credencial da Cloud API cadastrada"
+    return cred, conn, None
 
 
 async def _finalizar(db, campaign_id: str):
@@ -148,10 +153,26 @@ async def _run_campaign(campaign_id: str):
             # não acontece.
             return
 
-        cred, motivo = await _credencial_da_conexao(db, campaign)
+        cred, conn, motivo = await _credencial_da_conexao(db, campaign)
         if not cred:
             await _pausar(db, campaign_id, motivo)
             return
+
+        # Número novo no canal não oficial: o limite de 24h do aquecimento
+        # segura a campanha **sem pausá-la**. Pausar exigiria alguém voltar à
+        # tela todo dia para retomar; esperando, ela continua sozinha quando a
+        # janela libera, e o motivo fica na campanha para a tela mostrar.
+        espera = await aquecimento.motivo_para_esperar(db, conn)
+        if espera:
+            if campaign.get("aguardando_aquecimento") != espera:
+                await db.campaigns.update_one(
+                    {"id": campaign_id},
+                    {"$set": {"aguardando_aquecimento": espera, "updated_at": _now()}})
+            await _dormir(ESPERA_AQUECIMENTO)
+            continue
+        if campaign.get("aguardando_aquecimento"):
+            await db.campaigns.update_one(
+                {"id": campaign_id}, {"$set": {"aguardando_aquecimento": None}})
 
         recipient = await _claim(db, campaign_id)
         if not recipient:
@@ -169,7 +190,7 @@ async def _run_campaign(campaign_id: str):
             {"$inc": {f"totais.{campo}": 1}, "$set": {"updated_at": _now()}},
         )
 
-        await asyncio.sleep(_intervalo(campaign) * random.uniform(*JITTER))
+        await _dormir(_intervalo(campaign) * random.uniform(*JITTER))
 
 
 async def _promover_agendadas(db):

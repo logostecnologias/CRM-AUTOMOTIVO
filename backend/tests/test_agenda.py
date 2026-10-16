@@ -553,7 +553,8 @@ async def etapa_lembrete(ctx):
     avisados = []
     original = agenda_worker.avisar
 
-    async def _fake_avisar(db, tenant_id, agendamento, tipo, config=None, marcar_espera=False):
+    async def _fake_avisar(db, tenant_id, agendamento, tipo, config=None, marcar_espera=False,
+                           espacar=False):
         avisados.append(agendamento["id"])
         return True
 

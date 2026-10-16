@@ -45,14 +45,14 @@ def _campanhas():
 # preenche mais, e a Central mostra as iniciais do contato.
 
 
-async def _marcar_lida_bg(cred, wamid: str):
+async def _marcar_lida_bg(cred, wamid: str, numero: str | None = None):
     """Confirmação de leitura, sem atrapalhar a resposta.
 
     Em tarefa própria de propósito: é uma ida à rede que não muda nada do
     atendimento, e esperá-la atrasaria a resposta do bot em uma volta inteira.
     """
     try:
-        await whatsapp.marcar_lida(cred, wamid)
+        await whatsapp.marcar_lida(cred, wamid, numero=numero)
     except Exception as e:
         logger.debug("Não foi possível marcar %s como lida: %s", wamid, e)
 
@@ -711,7 +711,7 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
     # lida mesmo depois de o bot responder, o que na conversa parece empresa
     # que não leu. Best-effort: falhar aqui não pode atrapalhar a resposta.
     if cred:
-        asyncio.create_task(_marcar_lida_bg(cred, message_id))
+        asyncio.create_task(_marcar_lida_bg(cred, message_id, from_number))
 
     camp = _campanhas()
 

@@ -259,6 +259,11 @@ function Detalhe({ campanha }) {
         {campanha.motivo_pausa && (
           <span className="ml-3 text-warning"><Warning size={12} weight="bold" className="inline" /> {campanha.motivo_pausa}</span>
         )}
+        {campanha.status === "enviando" && campanha.aguardando_aquecimento && (
+          <span className="ml-3 text-warning" data-testid={`campanha-aquecimento-${campanha.id}`}>
+            <Warning size={12} weight="bold" className="inline" /> {campanha.aguardando_aquecimento}
+          </span>
+        )}
       </div>
       {falhas.length > 0 && (
         <div className="border border-line bg-surface rounded-lg">

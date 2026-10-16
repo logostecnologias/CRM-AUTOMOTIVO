@@ -32,6 +32,7 @@ import unicodedata
 from datetime import datetime, timedelta, timezone
 
 import agenda
+import aquecimento
 from db import get_db
 
 logger = logging.getLogger("zappzen.agenda")
@@ -178,7 +179,7 @@ async def _conexao(db, tenant_id: str, agendamento: dict) -> dict:
 
 
 async def avisar(db, tenant_id: str, agendamento: dict, tipo: str, config: dict = None,
-                 marcar_espera: bool = False) -> bool:
+                 marcar_espera: bool = False, espacar: bool = False) -> bool:
     """Manda um aviso de agenda para o contato. Devolve se saiu.
 
     A conversa sai de `outbound.ensure_session`, nunca montada aqui: é a regra
@@ -187,6 +188,11 @@ async def avisar(db, tenant_id: str, agendamento: dict, tipo: str, config: dict 
 
     Nunca levanta. Um lembrete que não sai é ruim; uma varredura que morre no
     primeiro contato sem conexão deixaria todos os outros sem lembrete nenhum.
+
+    `espacar` é para a varredura de lembretes: no canal não oficial, quarenta
+    lembretes no mesmo segundo são o padrão de disparo que derruba o número.
+    As rotas (confirmação ao marcar, aviso de cancelamento) não espaçam: a
+    espera seguraria a tela de quem clicou, e ali sai uma mensagem por clique.
     """
     # Tardios: `outbound` puxa `flow_runtime`, que puxa `flow_engine`, que
     # importa `agenda`. No topo, o ciclo fecha e o backend não sobe.
@@ -219,6 +225,8 @@ async def avisar(db, tenant_id: str, agendamento: dict, tipo: str, config: dict 
         )
         texto = texto_de(tipo, agendamento, config)
         modelo = template_de(tipo, agendamento, config)
+        if espacar:
+            await aquecimento.espacar(conn)
 
         # Texto livre só chega enquanto a janela de 24h estiver aberta, e para
         # aviso de agenda ela quase sempre está fechada. Quando há modelo
@@ -415,7 +423,7 @@ async def _varrer():
             {"id": a["id"], "tenant_id": tenant_id, "lembrete_enviado_em": None},
             {"$set": {"lembrete_enviado_em": _now(), "updated_at": _now()}},
         )
-        await avisar(db, tenant_id, a, "lembrete", config, marcar_espera=True)
+        await avisar(db, tenant_id, a, "lembrete", config, marcar_espera=True, espacar=True)
         enviados += 1
 
     if enviados:

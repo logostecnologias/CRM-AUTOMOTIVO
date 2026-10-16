@@ -545,7 +545,8 @@ async def digitando(cred: Credencial, numero: str, audio: bool = False) -> None:
     await _wuz().presence(cred.token, numero, "composing", "audio" if audio else "")
 
 
-async def marcar_lida(cred: Credencial, wamid: str, digitando: bool = False) -> None:
+async def marcar_lida(cred: Credencial, wamid: str, digitando: bool = False,
+                      numero: str | None = None) -> None:
     """Marca a mensagem como lida e, opcionalmente, mostra "digitando...".
 
     Não é enfeite: sem isto o contato vê a mensagem dele sem os dois tiques
@@ -553,19 +554,15 @@ async def marcar_lida(cred: Credencial, wamid: str, digitando: bool = False) -> 
     empresa que não leu. O indicador cai sozinho em 25 segundos ou quando a
     resposta sai.
 
+    No canal `wuzapi` é também proteção do número: um robô que responde a
+    mensagens que continuam "não lidas" é sinal de automação. Ali a ponte
+    precisa do número da conversa (`numero`), não só do id da mensagem.
+
     Falha aqui nunca derruba o atendimento: quem chama engole o erro.
     """
     if cred.canal == CANAL_WUZAPI:
-        # A WuzAPI tem um endpoint de marcar lida, mas o cliente nunca o
-        # implementou (na arquitetura antiga isso nem existia) e o formato dele
-        # muda entre versões e forks — a mesma razão que obrigou a redundância
-        # de grafia em send_buttons/send_list. Chamar às cegas daria erro em
-        # **toda** mensagem recebida, e o custo de não chamar é o contato não
-        # ver os dois tiques.
-        #
-        # Sai como não-operação de propósito, e não como exceção: quem chama
-        # engole erro aqui, então levantar só encheria o log sem mudar nada.
-        logger.debug("marcar_lida ignorada: canal wuzapi não expõe leitura")
+        if wamid and numero:
+            await _wuz().mark_read(cred.token, [wamid], numero)
         return
     corpo: dict = {"messaging_product": "whatsapp", "status": "read", "message_id": wamid}
     if digitando:

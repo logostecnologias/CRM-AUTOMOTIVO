@@ -31,6 +31,7 @@ import logging
 from datetime import datetime, timezone
 
 from db import get_db
+import aquecimento
 import whatsapp_client as whatsapp
 
 logger = logging.getLogger("zappzen.health")
@@ -82,11 +83,50 @@ async def _probe(row: dict):
     )
 
 
+async def _probe_wuzapi(row: dict):
+    """O estado da sessão na ponte, gravado na conexão.
+
+    A ponte avisa por webhook quando conecta e desconecta, mas um evento
+    perdido (servidor reiniciando, túnel fora) deixava o status errado até o
+    evento seguinte, que pode nunca vir. Com o status em "desconectado", tudo
+    que envia sozinho para (lembrete, formulário, ligação, campanha).
+
+    Só muda o status quando a ponte respondeu: falha de rede não diz nada
+    sobre o número, e marcá-lo desconectado por isso pararia os envios.
+    """
+    db = get_db()
+    cred = whatsapp.credencial(row)
+    if not cred:
+        return
+    from wuzapi_client import connection_state, WuzapiError
+    try:
+        estado = await connection_state(cred.token)
+    except WuzapiError as e:
+        logger.warning("Ponte não respondeu pela conexão %s: %s", row["id"], e)
+        return
+    ligado = bool(estado.get("connected") and estado.get("loggedIn"))
+    novo = "conectado" if ligado else "desconectado"
+    # Durante o pareamento a sessão ainda não existe, e "desconectado" apagaria
+    # o QR da tela de quem está escaneando.
+    pareando = row.get("status") == "pareando" and not ligado
+    if not pareando and row.get("status") != novo:
+        logger.info("Conexão %s: %s -> %s", row["id"], row.get("status"), novo)
+        await db.whatsapp_connections.update_one(
+            {"id": row["id"]}, {"$set": {"status": novo, "updated_at": _now()}})
+    if ligado:
+        await aquecimento.marcar_inicio(db, row["id"])
+
+
 async def _sweep():
     db = get_db()
     async for row in db.whatsapp_connections.find({"phone_number_id": {"$ne": None}}):
         try:
             await _probe(row)
+        except Exception as e:
+            logger.exception("Probe falhou para a conexão %s: %s", row.get("id"), e)
+    async for row in db.whatsapp_connections.find({"canal": "wuzapi"}):
+        try:
+            await _probe_wuzapi(row)
         except Exception as e:
             logger.exception("Probe falhou para a conexão %s: %s", row.get("id"), e)
 

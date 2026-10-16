@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
+import aquecimento
 from db import get_db
 from flow_runtime import handle_incoming_message
 from whatsapp_client import CANAL_WUZAPI
@@ -351,6 +352,7 @@ async def _processar_evento(tenant_id: str, connection_id: str, payload: dict,
                       "numero": numero, "numero_exibicao": f"+{numero}" if numero else None,
                       "updated_at": _now()}},
         )
+        await aquecimento.marcar_inicio(db, connection_id)
         return {"ok": True}
 
     if tipo == "Connected":
@@ -358,6 +360,7 @@ async def _processar_evento(tenant_id: str, connection_id: str, payload: dict,
             {"id": connection_id},
             {"$set": {"status": "conectado", "updated_at": _now()}},
         )
+        await aquecimento.marcar_inicio(db, connection_id)
         return {"ok": True}
 
     if tipo in ("Disconnected", "LoggedOut"):
