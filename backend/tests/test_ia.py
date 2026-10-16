@@ -231,7 +231,11 @@ async def etapa_teste_de_conexao():
         return ai_client.Resposta(texto="ok", modelo="claude-haiku-4-5")
 
     async def responder_morto(db, tenant_id, agente, instrucoes, historico, **kw):
-        raise ai_client.IAError("A conta no provedor esta sem saldo.")
+        raise ai_client.IAError("A conta no provedor esta sem saldo.", credencial=True)
+
+    async def responder_limitado(db, tenant_id, agente, instrucoes, historico, **kw):
+        assert kw.get("propria") is True
+        raise ai_client.IAError("A conversa ficou maior que o limite de tokens por minuto")
 
     original = ai_runtime.responder_por_agente
     rai.ai_runtime.responder_por_agente = responder_ok
@@ -239,6 +243,12 @@ async def etapa_teste_de_conexao():
         msg = rai.TesteIn(mensagens=[{"role": "user", "content": "oi"}])
         r = await rai.testar_agente(AGENTE_A["id"], msg, ADMIN_A)
         check("teste responde quando a chave funciona", r["texto"] == "ok", r)
+
+        rai.ai_runtime.responder_por_agente = responder_limitado
+        st, det = await erro(rai.testar_agente(AGENTE_A["id"], msg, ADMIN_A))
+        doc = await DB.ai_agents.find_one({"id": AGENTE_A["id"]})
+        check("limite por minuto nao marca a chave como quebrada",
+              st == 400 and doc.get("credencial_status") != "erro", (st, doc.get("credencial_status")))
 
         rai.ai_runtime.responder_por_agente = responder_morto
         st, det = await erro(rai.testar_agente(AGENTE_A["id"], msg, ADMIN_A))
@@ -561,6 +571,89 @@ async def etapa_laco_chat_completions():
     check("modelo livre e medido em tokens", doc and doc["tokens"] == 220, doc)
 
 
+
+class _ClienteChatVazio(_ClienteChatFalso):
+    """Caso real de 16/10/2026 (GPT-OSS na Groq): depois da ferramenta, a volta
+    seguinte vem em branco com "stop". A terceira responde."""
+
+    sempre_vazio = False
+
+    async def _create(self, **kw):
+        import copy
+        self.pedidos.append(copy.deepcopy(kw))
+        uso = _Obj(prompt_tokens=100, completion_tokens=10,
+                   prompt_tokens_details=_Obj(cached_tokens=0))
+        n = len(self.pedidos)
+        if n == 1:
+            chamada = _Obj(id="call_1", function=_Obj(name="consultar", arguments="{}"))
+            msg = _Obj(content=None, tool_calls=[chamada])
+        elif n == 2 or _ClienteChatVazio.sempre_vazio:
+            msg = _Obj(content="", tool_calls=None)
+        else:
+            msg = _Obj(content="Tem as 14h.", tool_calls=None)
+        return _Obj(usage=uso, choices=[_Obj(message=msg, finish_reason="stop")])
+
+
+async def etapa_resposta_vazia_e_limite():
+    print("\n[resposta vazia e limite por minuto]")
+    import openai
+    original = openai.AsyncOpenAI
+    openai.AsyncOpenAI = _ClienteChatVazio
+
+    async def executar(nome, args):
+        return "14:00 livre"
+
+    ferramentas = [ai_client.Ferramenta("consultar", "Consulta", {"type": "object"})]
+    try:
+        _ClienteChatVazio.sempre_vazio = False
+        r = await ai_client.responder(
+            "groq", CHAVE_GROQ, "openai/gpt-oss-120b", "Instrucoes",
+            [{"role": "user", "content": "tem horario?"}],
+            ferramentas=ferramentas, executar=executar)
+        cli = _ClienteChatVazio.ultimo
+        check("resposta vazia e pedida de novo", r.texto == "Tem as 14h." and len(cli.pedidos) == 3,
+              (r.texto, len(cli.pedidos)))
+        check("e a nova volta e so de texto", cli.pedidos[2].get("tool_choice") == "none",
+              cli.pedidos[2].get("tool_choice"))
+        check("gpt-oss na groq raciocina em low",
+              cli.pedidos[0].get("reasoning_effort") == "low", cli.pedidos[0])
+
+        _ClienteChatVazio.sempre_vazio = True
+        try:
+            await ai_client.responder(
+                "groq", CHAVE_GROQ, "openai/gpt-oss-120b", "Instrucoes",
+                [{"role": "user", "content": "tem horario?"}],
+                ferramentas=ferramentas, executar=executar)
+            check("vazia de novo desiste", False)
+        except ai_client.IAError as e:
+            check("vazia de novo desiste com o motivo", "vazio" in str(e), str(e))
+            check("so uma nova tentativa", len(_ClienteChatVazio.ultimo.pedidos) == 3,
+                  len(_ClienteChatVazio.ultimo.pedidos))
+    finally:
+        openai.AsyncOpenAI = original
+        _ClienteChatVazio.sempre_vazio = False
+
+    class _Erro413(Exception):
+        status_code = 413
+    e413 = _Erro413("Error code: 413 - Request too large for model `openai/gpt-oss-120b` "
+                    "on tokens per minute (TPM): Limit 8000, Requested 9512, please reduce "
+                    "your message size and try again.")
+    err = ai_client._erro_do_provedor(e413)
+    check("413 da groq explica o limite por minuto",
+          "limite 8000" in str(err) and "9512" in str(err), str(err))
+    check("e nao culpa a chave", err.credencial is False)
+
+    class _Erro401(Exception):
+        status_code = 401
+    check("401 culpa a chave", ai_client._erro_do_provedor(_Erro401("bad key")).credencial is True)
+
+    class _Erro418(Exception):
+        status_code = 418
+        body = {"error": {"message": "algo estranho"}}
+    texto = ai_client._traduz_erro(_Erro418("x"))
+    check("erro nao mapeado diz o codigo e o texto do provedor",
+          "418" in texto and "algo estranho" in texto, texto)
+
 async def etapa_buscar_modelos():
     print("\n[buscar modelos da conta]")
     import openai
@@ -632,6 +725,7 @@ def test_suite():
         await etapa_catalogo()
         await etapa_provedores_compativeis()
         await etapa_laco_chat_completions()
+        await etapa_resposta_vazia_e_limite()
         await etapa_buscar_modelos()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

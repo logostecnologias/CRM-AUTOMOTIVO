@@ -66,7 +66,8 @@ def _credencial_plataforma() -> dict | None:
             "base_url": os.environ.get("AI_PLATFORM_BASE_URL")}
 
 
-async def resolver_credencial(db, tenant_id: str, agente: dict) -> dict:
+async def resolver_credencial(db, tenant_id: str, agente: dict,
+                              propria: bool = False) -> dict:
     """Qual conta paga a resposta deste agente. A dele vem primeiro.
 
     Levanta 400/403 com texto que a tela pode mostrar — quem chama não precisa
@@ -75,8 +76,12 @@ async def resolver_credencial(db, tenant_id: str, agente: dict) -> dict:
     Credencial marcada como `erro` **não** é usada: já se sabe que ela não
     funciona, e insistir só produz a mesma falha mais devagar. Cai na chave da
     plataforma, que é o comportamento útil enquanto o cliente não conserta.
+
+    `propria` usa a chave do agente mesmo marcada: é o chat de teste, e é ele
+    quem desmarca quando ela volta a funcionar. Sem isso o teste rodava na
+    chave da plataforma e a marca nunca mais saía.
     """
-    if agente.get("credencial") and agente.get("credencial_status") != "erro":
+    if agente.get("credencial") and (propria or agente.get("credencial_status") != "erro"):
         return {
             "provedor": agente["provedor"],
             "chave": ai_credentials.decifrar(agente["credencial"]),
@@ -210,7 +215,7 @@ async def consumo_do_mes(db, tenant_id: str, mes: str | None = None) -> dict:
 
 async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str,
                                historico: list[dict], ferramentas: list = None,
-                               executar=None) -> ai_client.Resposta:
+                               executar=None, propria: bool = False) -> ai_client.Resposta:
     """Resolve a credencial do agente, chama o provedor e mede — nesta ordem.
 
     É por aqui que o atendimento, o chat de teste e (futuramente) o nó de fluxo
@@ -221,7 +226,7 @@ async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str
     voltas antes de devolver, senão a cota do plano contaria menos do que a
     fatura cobra.
     """
-    cred = await resolver_credencial(db, tenant_id, agente)
+    cred = await resolver_credencial(db, tenant_id, agente, propria)
     resposta = await ai_client.responder(
         cred["provedor"], cred["chave"], cred["modelo"], instrucoes, historico,
         ferramentas=ferramentas, executar=executar, base_url=cred.get("base_url"),
@@ -273,6 +278,14 @@ async def resolver_transcricao(db, tenant_id: str, agente: dict) -> dict:
                 "chave": ai_credentials.decifrar(agente["credencial"]),
                 "origem": ORIGEM_CLIENTE}
     plataforma = _transcricao_plataforma()
+    if plataforma is None and agente.get("credencial") and ai_client.transcreve(agente.get("provedor")):
+        # A chave é da Groq/OpenAI mas está marcada como quebrada. Dizer "a chave
+        # precisa ser da Groq" a quem colou uma chave da Groq mandava procurar o
+        # problema no lugar errado.
+        raise ai_client.IAError(
+            "a chave do agente está marcada com erro "
+            f"({agente.get('credencial_erro') or 'sem detalhe'}); "
+            "teste o agente ou salve a chave de novo")
     if plataforma is None:
         raise ai_client.IAError(
             "nenhuma conta de transcrição configurada (a chave do agente precisa "

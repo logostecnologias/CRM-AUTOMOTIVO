@@ -52,7 +52,16 @@ PROVEDOR_COMPATIVEL = "compativel"
 
 class IAError(Exception):
     """Falha ao falar com o provedor. A mensagem é exibida ao cliente, então
-    não carrega credencial nem corpo bruto de resposta."""
+    não carrega credencial nem corpo bruto de resposta.
+
+    `credencial` diz se o problema é da chave (recusada, sem saldo): só nesse
+    caso o chat de teste a marca como quebrada. Limite por minuto, provedor
+    fora do ar e resposta vazia passam sozinhos, e marcar a chave por eles a
+    tirava de uso, inclusive da transcrição (caso real de 16/10/2026)."""
+
+    def __init__(self, mensagem: str, credencial: bool = False):
+        super().__init__(mensagem)
+        self.credencial = credencial
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +421,12 @@ class Ferramenta:
 # cada volta é uma chamada paga, e o contato fica sem resposta enquanto isso.
 MAX_RODADAS_FERRAMENTA = 4
 
+# Quantas vezes uma resposta em branco é pedida de novo antes de desistir.
+# O modelo que devolve vazio (quase sempre logo depois de usar uma ferramenta)
+# costuma responder na volta seguinte; sem a nova tentativa a conversa ia para
+# a fila com "O modelo respondeu vazio", e o cliente via isso constantemente.
+MAX_VAZIAS = 1
+
 
 @dataclass
 class Resposta:
@@ -556,7 +571,8 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
                            "input_schema": f.parametros} for f in ferramentas]
 
     async with AsyncAnthropic(api_key=chave_api, max_retries=2) as client:
-        for _ in range(MAX_RODADAS_FERRAMENTA):
+        vazias = 0
+        for _ in range(MAX_RODADAS_FERRAMENTA + MAX_VAZIAS):
             try:
                 r = await client.messages.create(
                     model=modelo_id,
@@ -575,7 +591,7 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
                     **extra,
                 )
             except Exception as e:
-                raise IAError(_traduz_erro(e))
+                raise _erro_do_provedor(e)
 
             u = r.usage
             total.somar(Resposta(
@@ -592,6 +608,10 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
                 # impede um KeyError se o modelo passar a devolver outro.
                 total.texto = "".join(
                     b.text for b in r.content if getattr(b, "type", None) == "text").strip()
+                if not total.texto and vazias < MAX_VAZIAS:
+                    vazias += 1
+                    logger.info("Resposta vazia de %s, pedindo de novo", modelo_id)
+                    continue
                 break
 
             mensagens.append({"role": "assistant",
@@ -625,7 +645,8 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
                           for f in ferramentas]
 
     async with AsyncOpenAI(api_key=chave_api, max_retries=2) as client:
-        for _ in range(MAX_RODADAS_FERRAMENTA):
+        vazias = 0
+        for _ in range(MAX_RODADAS_FERRAMENTA + MAX_VAZIAS):
             try:
                 r = await client.responses.create(
                     model=modelo_id,
@@ -644,7 +665,7 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
                     **extra,
                 )
             except Exception as e:
-                raise IAError(_traduz_erro(e))
+                raise _erro_do_provedor(e)
 
             u = getattr(r, "usage", None)
             cacheados = getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0
@@ -668,6 +689,10 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
                         if getattr(o, "type", None) == "function_call"]
             if not chamadas:
                 total.texto = (getattr(r, "output_text", "") or "").strip()
+                if not total.texto and vazias < MAX_VAZIAS:
+                    vazias += 1
+                    logger.info("Resposta vazia de %s, pedindo de novo", modelo_id)
+                    continue
                 break
 
             # A volta seguinte manda **só** os resultados, referenciando a
@@ -718,14 +743,21 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
             "name": f.nome, "description": f.descricao, "parameters": f.parametros}}
             for f in ferramentas]
 
+    if "gpt-oss" in modelo_id.lower() and "groq.com" in (base_url or ""):
+        # O GPT-OSS raciocina em "medium" por padrão na Groq. Para atendimento
+        # é custo e latência sem retorno (mesmo `low` da Responses API), e no
+        # plano gratuito cada token de raciocínio conta no teto por minuto.
+        extra["reasoning_effort"] = "low"
+
     async with AsyncOpenAI(api_key=chave_api, base_url=base_url, max_retries=2,
                            timeout=60) as client:
-        for _ in range(MAX_RODADAS_FERRAMENTA):
+        vazias = 0
+        for _ in range(MAX_RODADAS_FERRAMENTA + MAX_VAZIAS):
             try:
                 r = await client.chat.completions.create(
                     model=modelo_id, messages=mensagens, max_tokens=MAX_SAIDA, **extra)
             except Exception as e:
-                raise IAError(_traduz_erro(e))
+                raise _erro_do_provedor(e)
 
             u = getattr(r, "usage", None)
             cacheados = getattr(getattr(u, "prompt_tokens_details", None),
@@ -748,6 +780,17 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
                 texto = _PENSAMENTO.sub("", getattr(msg, "content", None) or "").strip()
                 if not texto and getattr(escolhas[0], "finish_reason", None) == "length":
                     raise IAError("Resposta truncada pelo provedor (length)")
+                if not texto and vazias < MAX_VAZIAS:
+                    # Resposta em branco com "stop", quase sempre logo depois de
+                    # uma ferramenta: o GPT-OSS da Groq deixa a resposta no
+                    # canal de raciocínio. Pedir de novo resolve, e depois de
+                    # uma ferramenta já usada a nova volta é só de texto, para
+                    # ele não tentar outra chamada no lugar de responder.
+                    vazias += 1
+                    logger.info("Resposta vazia de %s, pedindo de novo", modelo_id)
+                    if ferramentas and total.ferramentas_usadas:
+                        extra["tool_choice"] = "none"
+                    continue
                 total.texto = texto
                 break
 
@@ -813,6 +856,25 @@ def _traduz_erro(e: Exception) -> str:
     if status == 400 and any(x in texto_erro for x in ("image", "vision", "multimodal")):
         return ("O modelo escolhido não aceita imagens. Troque por um modelo que enxergue "
                 "(Claude, GPT-5, Gemini) ou desligue \"Entender fotos\" no agente.")
+    # Pedido maior que o teto de tokens por minuto da conta. A Groq responde
+    # 413 (o SDK não tem classe para ele e o erro chegava como um
+    # "APIStatusError" sem explicação, caso real de 16/10/2026). No plano
+    # gratuito o teto é de poucos milhares de tokens, e instruções + base +
+    # documentos + histórico passam dele: conversa curta funciona e a longa
+    # falha sempre, então "tente de novo" seria a orientação errada. (O 429
+    # de tokens por minuto é outro caso: a soma de vários pedidos passou, e
+    # esse passa sozinho.)
+    if status == 413 or "request too large" in texto_erro:
+        numeros = re.search(r"limit\D*(\d+)\D+requested\D*(\d+)", texto_erro)
+        detalhe = (f" (limite {numeros.group(1)} tokens por minuto, o pedido tinha "
+                   f"{numeros.group(2)})") if numeros else ""
+        return ("A conversa ficou maior que o limite de tokens por minuto da conta no "
+                f"provedor{detalhe}. No plano gratuito da Groq esse teto é baixo: ative o "
+                "plano pago (Dev Tier) no console da Groq, encurte a base de conhecimento "
+                "e os documentos do agente, ou use outro provedor.")
+    if "tokens per day" in texto_erro or "requests per day" in texto_erro:
+        return ("A conta no provedor atingiu o limite diário do plano gratuito. Volta a "
+                "funcionar amanhã; para não parar, ative o plano pago no provedor.")
     if status == 402 or "credit" in str(e).lower() or "quota" in str(e).lower():
         return "A conta no provedor está sem saldo ou sem cota. Adicione créditos e tente de novo."
     if status == 404:
@@ -826,7 +888,35 @@ def _traduz_erro(e: Exception) -> str:
     if status and status >= 500:
         return "O provedor está fora do ar no momento. Tente novamente em instantes."
     logger.warning("Erro não mapeado do provedor de IA: %s: %s", nome, e)
-    return f"Falha ao falar com o provedor de IA ({nome})."
+    # O código e o começo do texto do provedor vão junto: só o nome da classe
+    # ("APIStatusError") não dizia nada a ninguém.
+    detalhe = f" {status}" if status else ""
+    texto_bruto = _texto_do_provedor(e)
+    return (f"Falha ao falar com o provedor de IA ({nome}{detalhe})"
+            + (f": {texto_bruto}" if texto_bruto else "."))
+
+
+def _texto_do_provedor(e: Exception) -> str:
+    """A mensagem que o provedor escreveu, curta. Vem do corpo de erro, que
+    não carrega a chave (os SDKs não ecoam o cabeçalho de autorização)."""
+    corpo = getattr(e, "body", None)
+    msg = None
+    if isinstance(corpo, dict):
+        err = corpo.get("error")
+        msg = err.get("message") if isinstance(err, dict) else (err if isinstance(err, str) else None)
+        msg = msg or corpo.get("message")
+    msg = (msg or getattr(e, "message", None) or "").strip()
+    return msg[:200]
+
+
+def _erro_do_provedor(e: Exception) -> IAError:
+    """O `IAError` para a exceção do SDK, dizendo se a culpa é da chave."""
+    status = getattr(e, "status_code", None)
+    texto = str(e).lower()
+    credencial = (status in (401, 402, 403) or "Authentication" in type(e).__name__
+                  or (status == 400 and ("api key" in texto or "not scoped to a workspace" in texto))
+                  or "credit" in texto or "insufficient_quota" in texto)
+    return IAError(_traduz_erro(e), credencial=credencial)
 
 
 # ---------------------------------------------------------------------------
@@ -913,7 +1003,7 @@ async def listar_modelos(provedor: str, chave_api: str, base_url: str | None = N
     except ImportError:
         raise IAError("SDK da OpenAI não instalado no servidor (pip install openai)")
     except Exception as e:
-        raise IAError(_traduz_erro(e))
+        raise _erro_do_provedor(e)
 
     ids = sorted({i for i in ids if i and not any(x in i.lower() for x in _NAO_CONVERSA)})
     return ids[:MAX_MODELOS_LISTADOS]
@@ -989,7 +1079,7 @@ async def transcrever(provedor: str, chave_api: str, caminho, nome_arquivo: str)
                     model=m.id, file=(nome_arquivo, arquivo), language="pt",
                     response_format="verbose_json")
         except Exception as e:
-            raise IAError(_traduz_erro(e))
+            raise _erro_do_provedor(e)
     texto = (getattr(r, "text", "") or "").strip()
     return Transcricao(texto=texto, modelo=m.id,
                        segundos=float(getattr(r, "duration", 0) or 0))

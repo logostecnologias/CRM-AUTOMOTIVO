@@ -86,6 +86,25 @@ async def limpar_conexoes_da_api_antiga(db) -> int:
     return res.modified_count
 
 
+async def desmarcar_chaves_de_ia(db) -> int:
+    """Chave de IA marcada como quebrada por um erro que não era dela.
+
+    Até 16/10/2026 o chat de teste marcava a chave em qualquer falha: limite
+    por minuto da Groq, provedor fora do ar, resposta vazia. Marcada, ela sai de
+    uso no atendimento real e na transcrição, e o agente parecia "sem chave".
+    Hoje só recusa e falta de saldo marcam; as marcas antigas por outro motivo
+    são desfeitas aqui.
+
+    Idempotente: na segunda subida o filtro não casa mais nada.
+    """
+    res = await db.ai_agents.update_many(
+        {"credencial_status": "erro",
+         "credencial_erro": {"$not": {"$regex": "recusada|sem saldo|workspace"}}},
+        {"$set": {"credencial_status": "ok", "credencial_erro": None}},
+    )
+    return res.modified_count
+
+
 async def _run():
     await asyncio.sleep(STARTUP_DELAY)
     db = get_db()
@@ -95,6 +114,9 @@ async def _run():
     limpas = await limpar_conexoes_da_api_antiga(db)
     if limpas:
         logger.info("Conexões sem número da Cloud API marcadas como desconectadas: %d", limpas)
+    chaves = await desmarcar_chaves_de_ia(db)
+    if chaves:
+        logger.info("Chaves de IA desmarcadas (erro que não era da chave): %d", chaves)
 
 
 async def _guarded():

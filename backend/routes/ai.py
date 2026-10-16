@@ -608,14 +608,16 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
         resposta = await ai_runtime.responder_por_agente(
             db, user["tenant_id"], agente,
             ai_agents.montar_instrucoes(agente, **blocos), historico,
-            ferramentas=ferramentas, executar=executar)
+            ferramentas=ferramentas, executar=executar, propria=True)
     except ai_client.IAError as e:
         # A chave pode ter sido revogada no console depois de salva. Marcar aqui
         # é o que faz o cartão mostrar o problema em vez de o agente falhar em
         # silêncio na próxima mensagem de um contato real.
-        # Modelo que recusa a foto não é chave quebrada: marcar faria o agente
-        # parar de usar uma chave que funciona para todo o resto.
-        if agente.get("credencial") and "não aceita imagens" not in str(e):
+        # Só quando a culpa é da chave (recusada, sem saldo). Limite por minuto,
+        # provedor fora do ar, resposta vazia ou modelo que recusa a foto não
+        # são chave quebrada, e marcar tirava de uso uma chave que funciona:
+        # o atendimento real e a transcrição deixavam de usá-la (16/10/2026).
+        if agente.get("credencial") and getattr(e, "credencial", False):
             await db.ai_agents.update_one(
                 {"id": agent_id, "tenant_id": user["tenant_id"]},
                 {"$set": {"credencial_status": "erro", "credencial_erro": str(e)}})

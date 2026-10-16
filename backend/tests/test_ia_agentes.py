@@ -77,7 +77,7 @@ class _IAFalsa:
         self.chamar = None
 
     async def __call__(self, db, tenant_id, agente, instrucoes, historico,
-                       ferramentas=None, executar=None):
+                       ferramentas=None, executar=None, **kw):
         # `ferramentas`/`executar` sao aceitos e ignorados: o duble existe para
         # provar o roteamento do agente, nao o laco de ferramentas do provedor
         # (esse tem teste proprio em test_agenda.py). Sem os parametros, ligar a
