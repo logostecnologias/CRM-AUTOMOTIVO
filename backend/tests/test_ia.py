@@ -654,6 +654,79 @@ async def etapa_resposta_vazia_e_limite():
     check("erro nao mapeado diz o codigo e o texto do provedor",
           "418" in texto and "algo estranho" in texto, texto)
 
+class _ClienteAnthropicVazio:
+    """Caso real de 17/10/2026 (Haiku 4.5): a resposta vem escrita junto da
+    chamada de ferramenta, e depois do resultado o modelo encerra em branco,
+    nas duas tentativas. `com_texto=False` é o mesmo laço sem o texto junto."""
+
+    ultimo = None
+    com_texto = True
+
+    def __init__(self, **kw):
+        self.pedidos = []
+        self.messages = _Obj(create=self._create)
+        _ClienteAnthropicVazio.ultimo = self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def _create(self, **kw):
+        import copy
+        self.pedidos.append(copy.deepcopy(kw))
+        uso = _Obj(input_tokens=100, output_tokens=10,
+                   cache_read_input_tokens=0, cache_creation_input_tokens=0)
+        if len(self.pedidos) == 1:
+            blocos = [_Obj(type="tool_use", id="tu_1", name="consultar", input={})]
+            if _ClienteAnthropicVazio.com_texto:
+                blocos.insert(0, _Obj(type="text", text="Anotado! Já registrei aqui."))
+            return _Obj(usage=uso, content=blocos)
+        return _Obj(usage=uso, content=[])
+
+
+async def etapa_resposta_vazia_anthropic():
+    print("\n[resposta vazia na anthropic]")
+    import anthropic
+    original = anthropic.AsyncAnthropic
+    anthropic.AsyncAnthropic = _ClienteAnthropicVazio
+
+    async def executar(nome, args):
+        return "ok"
+
+    ferramentas = [ai_client.Ferramenta("consultar", "Consulta", {"type": "object"})]
+    try:
+        _ClienteAnthropicVazio.com_texto = True
+        r = await ai_client.responder(
+            "anthropic", CHAVE_ANTHROPIC, "claude-haiku-4-5", "Instrucoes",
+            [{"role": "user", "content": "meu nome e Ana"}],
+            ferramentas=ferramentas, executar=executar)
+        check("texto escrito junto da ferramenta vira a resposta",
+              r.texto == "Anotado! Já registrei aqui.", r.texto)
+        check("sem pedir de novo", len(_ClienteAnthropicVazio.ultimo.pedidos) == 2,
+              len(_ClienteAnthropicVazio.ultimo.pedidos))
+
+        _ClienteAnthropicVazio.com_texto = False
+        try:
+            await ai_client.responder(
+                "anthropic", CHAVE_ANTHROPIC, "claude-haiku-4-5", "Instrucoes",
+                [{"role": "user", "content": "meu nome e Ana"}],
+                ferramentas=ferramentas, executar=executar)
+            check("vazia sem texto desiste", False)
+        except ai_client.IAError as e:
+            check("vazia sem texto desiste com o motivo", "vazio" in str(e), str(e))
+        cli = _ClienteAnthropicVazio.ultimo
+        ultimo_turno = cli.pedidos[2]["messages"][-1]["content"]
+        check("a nova tentativa nao e identica: leva o lembrete depois do tool_result",
+              ultimo_turno[0]["type"] == "tool_result"
+              and ultimo_turno[-1] == {"type": "text", "text": ai_client.LEMBRETE_VAZIA},
+              ultimo_turno)
+    finally:
+        anthropic.AsyncAnthropic = original
+        _ClienteAnthropicVazio.com_texto = True
+
+
 async def etapa_buscar_modelos():
     print("\n[buscar modelos da conta]")
     import openai
@@ -726,6 +799,7 @@ def test_suite():
         await etapa_provedores_compativeis()
         await etapa_laco_chat_completions()
         await etapa_resposta_vazia_e_limite()
+        await etapa_resposta_vazia_anthropic()
         await etapa_buscar_modelos()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

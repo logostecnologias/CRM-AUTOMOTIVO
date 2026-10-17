@@ -427,6 +427,11 @@ MAX_RODADAS_FERRAMENTA = 4
 # a fila com "O modelo respondeu vazio", e o cliente via isso constantemente.
 MAX_VAZIAS = 1
 
+# Vai no fim do pedido repetido depois de uma resposta vazia. O contato não o
+# vê; é o que impede a nova tentativa de ser idêntica à que veio vazia.
+LEMBRETE_VAZIA = ("(Mensagem do sistema, não do contato: sua última resposta veio "
+                  "vazia. Escreva agora a mensagem para o contato.)")
+
 
 @dataclass
 class Resposta:
@@ -572,6 +577,7 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
 
     async with AsyncAnthropic(api_key=chave_api, max_retries=2) as client:
         vazias = 0
+        parcial = ""
         for _ in range(MAX_RODADAS_FERRAMENTA + MAX_VAZIAS):
             try:
                 r = await client.messages.create(
@@ -608,12 +614,27 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
                 # impede um KeyError se o modelo passar a devolver outro.
                 total.texto = "".join(
                     b.text for b in r.content if getattr(b, "type", None) == "text").strip()
+                if not total.texto and parcial:
+                    total.texto = parcial
                 if not total.texto and vazias < MAX_VAZIAS:
                     vazias += 1
                     logger.info("Resposta vazia de %s, pedindo de novo", modelo_id)
+                    # Repetir o pedido idêntico devolve o mesmo vazio (caso real
+                    # de 17/10/2026, Haiku 4.5 depois de uma ferramenta). Um
+                    # lembrete no fim do último turno muda o pedido; depois de
+                    # tool_result o texto é aceito no mesmo turno do usuário.
+                    ultimo = mensagens[-1] if mensagens else None
+                    if ultimo and ultimo["role"] == "user" and isinstance(ultimo["content"], list):
+                        ultimo["content"].append({"type": "text", "text": LEMBRETE_VAZIA})
                     continue
                 break
 
+            # Texto escrito junto da chamada de ferramenta ("vou registrar
+            # aqui...") é muitas vezes a resposta inteira: depois do resultado o
+            # Claude encerra sem escrever mais nada, porque já falou. Descartá-lo
+            # fazia a resposta sair vazia.
+            parcial = "".join(
+                b.text for b in r.content if getattr(b, "type", None) == "text").strip() or parcial
             mensagens.append({"role": "assistant",
                               "content": [b for b in (_bloco_anthropic(x) for x in r.content)
                                           if b]})
@@ -646,6 +667,7 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
 
     async with AsyncOpenAI(api_key=chave_api, max_retries=2) as client:
         vazias = 0
+        parcial = ""  # texto escrito junto de uma chamada de ferramenta
         for _ in range(MAX_RODADAS_FERRAMENTA + MAX_VAZIAS):
             try:
                 r = await client.responses.create(
@@ -688,7 +710,7 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
             chamadas = [o for o in (getattr(r, "output", None) or [])
                         if getattr(o, "type", None) == "function_call"]
             if not chamadas:
-                total.texto = (getattr(r, "output_text", "") or "").strip()
+                total.texto = (getattr(r, "output_text", "") or "").strip() or parcial
                 if not total.texto and vazias < MAX_VAZIAS:
                     vazias += 1
                     logger.info("Resposta vazia de %s, pedindo de novo", modelo_id)
@@ -701,6 +723,7 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
             # nos GPT-5 vêm cifrados e são obrigatórios para o modelo continuar
             # de onde parou. `previous_response_id` é o caminho que o provedor
             # mantém, e de quebra não reenvia nada já enviado.
+            parcial = (getattr(r, "output_text", "") or "").strip() or parcial
             extra["previous_response_id"] = r.id
             entrada = [
                 {"type": "function_call_output", "call_id": c.call_id,
@@ -752,6 +775,7 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
     async with AsyncOpenAI(api_key=chave_api, base_url=base_url, max_retries=2,
                            timeout=60) as client:
         vazias = 0
+        parcial = ""  # texto escrito junto de uma chamada de ferramenta
         for _ in range(MAX_RODADAS_FERRAMENTA + MAX_VAZIAS):
             try:
                 r = await client.chat.completions.create(
@@ -777,7 +801,7 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
             msg = escolhas[0].message
             chamadas = getattr(msg, "tool_calls", None) or []
             if not chamadas:
-                texto = _PENSAMENTO.sub("", getattr(msg, "content", None) or "").strip()
+                texto = _PENSAMENTO.sub("", getattr(msg, "content", None) or "").strip() or parcial
                 if not texto and getattr(escolhas[0], "finish_reason", None) == "length":
                     raise IAError("Resposta truncada pelo provedor (length)")
                 if not texto and vazias < MAX_VAZIAS:
@@ -794,6 +818,7 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
                 total.texto = texto
                 break
 
+            parcial = _PENSAMENTO.sub("", getattr(msg, "content", None) or "").strip() or parcial
             mensagens.append({
                 "role": "assistant",
                 "content": getattr(msg, "content", None),
