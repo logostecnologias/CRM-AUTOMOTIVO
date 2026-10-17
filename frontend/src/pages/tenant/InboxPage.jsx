@@ -3,7 +3,7 @@ import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import { useAuth } from "@/context/AuthContext";
 import { useActiveSession } from "@/hooks/useActiveSession";
-import { Hand, CheckCircle, X, Warning } from "@phosphor-icons/react";
+import { Hand, HandPalm, CheckCircle, X, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { STATUS, SessionListItem, MessageBubble, Avatar, ChatComposer, fotoDoContato } from "@/components/atendimento/shared";
 
@@ -37,8 +37,14 @@ export default function InboxPage() {
   const visible = sessions.filter((s) => s.status_atendimento === stage);
 
   const [assume, assumindo] = useAcao(async () => {
-    await api.post(`/atendimento/sessions/${activeId}/assume`);
-    toast.success("Conversa assumida");
+    const interrompendo = active?.status_atendimento === "bot";
+    try {
+      await api.post(`/atendimento/sessions/${activeId}/assume`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Não foi possível assumir a conversa");
+      return;
+    }
+    toast.success(interrompendo ? "Automação interrompida: a conversa é sua" : "Conversa assumida");
     setStage("em_atendimento");
     await refreshActive(); loadSessions();
   });
@@ -129,6 +135,13 @@ export default function InboxPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {active.status_atendimento === "bot" && (
+                  <button onClick={assume} disabled={assumindo}
+                    title="Para o robô ou o agente de IA nesta conversa e passa a resposta para você"
+                    className="zz-btn zz-btn-danger text-xs" data-testid="interrupt-btn">
+                    <HandPalm size={12} weight="bold" /> Interromper e assumir
+                  </button>
+                )}
                 {["aguardando"].includes(active.status_atendimento) && (
                   <button onClick={assume} disabled={assumindo}
                     className="zz-btn text-xs" data-testid="assume-btn">

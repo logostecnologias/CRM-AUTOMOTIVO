@@ -73,10 +73,15 @@ def executor(db, tenant_id: str, session: dict, simulado: bool = False):
         agora = _now()
         mudanca = {"status": "finalizada", "status_atendimento": "finalizado",
                    "finalizado_em": agora}
-        session.update(mudanca)
-        await db.conversation_sessions.update_one(
-            {"id": session["id"], "tenant_id": tenant_id},
+        # Uma pessoa pode ter interrompido o agente enquanto ele pensava:
+        # finalizar por cima tiraria a conversa da mão dela.
+        r = await db.conversation_sessions.update_one(
+            {"id": session["id"], "tenant_id": tenant_id,
+             "status_atendimento": {"$ne": "em_atendimento"}},
             {"$set": {**mudanca, "updated_at": agora}})
+        if not r.matched_count:
+            return "A conversa foi assumida por uma pessoa da equipe. Não responda nada."
+        session.update(mudanca)
         await log_message(
             db, session["id"], tenant_id, "sistema",
             "Agente de IA finalizou o atendimento" + (f": {resumo}" if resumo else ""),

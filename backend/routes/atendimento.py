@@ -172,6 +172,16 @@ async def get_session(
 
 @router.post("/sessions/{session_id}/assume")
 async def assume(session_id: str, user: dict = Depends(get_current_user)):
+    """Assume a conversa da fila, ou **interrompe** o robô/agente de IA.
+
+    A interrupção (conversa em `bot`) nasceu de um agente que mandou o preço
+    errado de um carro enquanto a equipe só podia assistir. Ela vale para quem
+    alcança a conexão, atendente incluído: é quem está olhando a conversa na
+    hora. O fluxo em andamento é largado (`awaiting` limpo), e o que o agente
+    estiver montando naquele instante não sai: `_send_outputs` confere a
+    conversa antes de cada envio, e a gravação final do motor não devolve a
+    conversa para `bot` (ver `flow_runtime`).
+    """
     db = get_db()
     s = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": user["tenant_id"]})
     if not s:
@@ -179,21 +189,31 @@ async def assume(session_id: str, user: dict = Depends(get_current_user)):
     accessible = await _accessible_connection_ids(db, user)
     if accessible is not None and s.get("whatsapp_connection_id") not in accessible:
         raise HTTPException(status_code=403, detail="Sem acesso a esta conexão")
-    if s.get("status_atendimento") not in ("aguardando", "em_atendimento"):
-        raise HTTPException(status_code=400, detail="Conversa não está em fila humana")
-    await db.conversation_sessions.update_one(
-        {"id": session_id},
-        {"$set": {
-            "status_atendimento": "em_atendimento",
-            "status": "aguardando_humano",
-            "atendente_id": user["id"],
-            "assumido_em": s.get("assumido_em") or _now(),
-            "aguardando_desde": None,
-            "updated_at": _now(),
-        }},
-    )
-    await log_message(db, session_id, user["tenant_id"], "sistema",
-                      f"{user['name']} assumiu a conversa", mtype="system")
+    estado = s.get("status_atendimento")
+    if estado not in ("bot", "aguardando", "em_atendimento"):
+        raise HTTPException(status_code=400, detail="Conversa já finalizada")
+    if (estado == "em_atendimento" and user["role"] == "agent"
+            and s.get("atendente_id") not in (None, user["id"])):
+        raise HTTPException(status_code=409, detail="Outra pessoa já está atendendo esta conversa")
+    mudanca = {
+        "status_atendimento": "em_atendimento",
+        "status": "aguardando_humano",
+        "atendente_id": user["id"],
+        "assumido_em": s.get("assumido_em") or _now(),
+        "aguardando_desde": None,
+        "updated_at": _now(),
+    }
+    if estado == "bot":
+        # Pergunta de menu ou de agenda pendente não pode responder por cima
+        # do atendente se a conversa um dia voltar ao robô.
+        mudanca.update({"awaiting": None, "interrompido_em": _now()})
+    await db.conversation_sessions.update_one({"id": session_id}, {"$set": mudanca})
+    if estado == "bot":
+        quem = "o agente de IA" if s.get("ia_agente_id") and not s.get("bot_id") else "o robô"
+        texto = f"{user['name']} interrompeu {quem} e assumiu a conversa"
+    else:
+        texto = f"{user['name']} assumiu a conversa"
+    await log_message(db, session_id, user["tenant_id"], "sistema", texto, mtype="system")
     return {"ok": True}
 
 

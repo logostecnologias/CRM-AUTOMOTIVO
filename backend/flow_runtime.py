@@ -326,6 +326,29 @@ async def _ritmo_humano(cred, number, o: dict, inicio: float | None) -> None:
         await _dormir(espera)
 
 
+async def _assumida_por_gente(db, session_id: str) -> bool:
+    """A conversa passou para uma pessoa (botão "Interromper e assumir")."""
+    s = await db.conversation_sessions.find_one(
+        {"id": session_id}, {"_id": 0, "status_atendimento": 1})
+    return bool(s) and s.get("status_atendimento") == "em_atendimento"
+
+
+async def _log_descartadas(db, tenant_id, session_id, restantes: list[dict]) -> None:
+    textos = []
+    for o in restantes:
+        if o["type"] == "text":
+            textos.append(o.get("content") or "")
+        elif o["type"] == "menu":
+            textos.append(_menu_em_texto(o))
+        elif o["type"] == "media":
+            textos.append(f"[{(o.get('doc') or {}).get('kind') or o.get('media_type') or 'mídia'}]")
+    if not textos:
+        return
+    await _log_msg(db, session_id, tenant_id, "sistema",
+                   "Resposta automática não enviada, a conversa foi assumida: "
+                   + " / ".join(t for t in textos if t)[:1500], mtype="system")
+
+
 async def _send_outputs(db, tenant_id, cred, number, session_id, outputs,
                         inicio: float | None = None):
     """Envia o que o motor (ou o agente de IA) produziu, na ordem.
@@ -335,7 +358,7 @@ async def _send_outputs(db, tenant_id, cred, number, session_id, outputs,
     `_ritmo_humano`).
     """
     primeiro = True
-    for o in outputs:
+    for i, o in enumerate(outputs):
         if o["type"] == "delay":
             # O nó Aguardar. Antes ele era descartado aqui, e o fluxo
             # publicado mandava tudo colado mesmo com a espera configurada.
@@ -350,6 +373,13 @@ async def _send_outputs(db, tenant_id, cred, number, session_id, outputs,
             except Exception as e:
                 logger.debug("Ritmo humano falhou, enviando assim mesmo: %s", e)
             primeiro = False
+            # Conferido depois da pausa, que é onde a janela é maior: entre o
+            # contato escrever e a resposta sair passam o tempo do provedor de
+            # IA e o "digitando…". Se uma pessoa assumiu nesse meio, o resto
+            # não sai, e fica no histórico o que ia sair.
+            if await _assumida_por_gente(db, session_id):
+                await _log_descartadas(db, tenant_id, session_id, outputs[i:])
+                return
         try:
             if o["type"] == "text":
                 wamid = await whatsapp.send_text(cred, number, o["content"])
@@ -807,7 +837,9 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             # sistema é outra: dizer "bot indisponível" ali descreveria um
             # defeito onde está a configuração escolhida na campanha.
             await db.conversation_sessions.update_one(
-                {"id": session_id},
+                # Quem interrompeu o agente enquanto ele decidia transferir já
+                # é a pessoa da transferência: não volta para a fila.
+                {"id": session_id, "status_atendimento": {"$ne": "em_atendimento"}},
                 {"$set": {"status": "aguardando_humano", "status_atendimento": "aguardando",
                           "aguardando_desde": session.get("aguardando_desde") or _now(),
                           "aguardando_primeira_resposta": False,
@@ -974,8 +1006,13 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
         session["status_atendimento"] = "finalizado"
         session["finalizado_em"] = _now()
 
+    # O filtro de `em_atendimento` é o botão "Interromper e assumir": uma
+    # pessoa pode ter assumido enquanto o robô ou o agente pensava, e esta
+    # gravação, feita a partir do estado lido antes, devolveria a conversa
+    # para `bot` por cima dela. Até aqui a sessão em memória nunca está em
+    # atendimento (esse caso sai lá em cima, sem responder).
     await db.conversation_sessions.update_one(
-        {"id": session_id},
+        {"id": session_id, "status_atendimento": {"$ne": "em_atendimento"}},
         {"$set": {
             "node_atual_id": session["node_atual_id"],
             "variables": session["variables"],
@@ -1026,7 +1063,7 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
         session["node_atual_id"] = start["id"]
         await _run_from(start["id"], target_flow, session, outputs)
         await db.conversation_sessions.update_one(
-            {"id": session_id},
+            {"id": session_id, "status_atendimento": {"$ne": "em_atendimento"}},
             {"$set": {
                 "bot_id": session["bot_id"],
                 "flow_id": session["flow_id"],

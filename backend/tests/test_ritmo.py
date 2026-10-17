@@ -181,6 +181,64 @@ async def etapa_presence_nunca_levanta():
     check("presence engole erro de rede", True)
 
 
+async def etapa_interromper_no_meio():
+    """O botão "Interromper e assumir" apertado enquanto o agente "digita":
+    o que ainda não saiu não sai, e fica no histórico o que ia sair."""
+    _conectar_fake()
+    await DB.conversation_sessions.insert_one({
+        "id": "s-int", "tenant_id": TENANT, "status": "ativa",
+        "status_atendimento": "bot", "awaiting": {"node_id": "m1"},
+        "whatsapp_connection_id": "c-1", "ia_agente_id": "ag-1", "bot_id": None})
+
+    for uid in ("u-1", "u-2"):
+        await DB.user_connection_access.insert_one(
+            {"tenant_id": TENANT, "user_id": uid, "whatsapp_connection_id": "c-1"})
+    from routes import atendimento
+    atendimento.get_db = lambda: DB
+
+    async def assume_durante_pausa(segundos):
+        EVENTOS.append(("dormiu", segundos))
+        await atendimento.assume("s-int", {"id": "u-1", "name": "Ana", "role": "agent",
+                                           "tenant_id": TENANT})
+    flow_runtime._dormir = assume_durante_pausa
+    await flow_runtime._send_outputs(
+        DB, TENANT, WUZ, NUM, "s-int",
+        [{"type": "text", "content": "O Onix sai por R$ 12.000"},
+         {"type": "text", "content": "Posso reservar?"}])
+    check("nenhuma mensagem saiu", "texto" not in _tipos(), EVENTOS)
+
+    s = await DB.conversation_sessions.find_one({"id": "s-int"})
+    check("conversa com a pessoa que interrompeu",
+          s["status_atendimento"] == "em_atendimento" and s["atendente_id"] == "u-1"
+          and s["status"] == "aguardando_humano" and s["awaiting"] is None, s)
+    logs = [m["content"] async for m in DB.messages_log.find({"session_id": "s-int"})]
+    check("histórico diz quem interrompeu o agente",
+          any("Ana interrompeu o agente de IA" in t for t in logs), logs)
+    check("histórico guarda o que não saiu",
+          any("não enviada" in t and "R$ 12.000" in t and "Posso reservar" in t for t in logs), logs)
+
+    # Outro atendente não toma a conversa de quem já está nela.
+    try:
+        await atendimento.assume("s-int", {"id": "u-2", "name": "Bia", "role": "agent",
+                                           "tenant_id": TENANT})
+        check("segundo atendente recusado", False)
+    except Exception as e:
+        check("segundo atendente recusado", getattr(e, "status_code", None) == 409, e)
+
+
+async def etapa_motor_nao_devolve_ao_bot():
+    """A gravação final do motor não passa por cima de quem assumiu."""
+    _conectar_fake()
+    await DB.conversation_sessions.insert_one({
+        "id": "s-int2", "tenant_id": TENANT, "status": "aguardando_humano",
+        "status_atendimento": "em_atendimento", "atendente_id": "u-1"})
+    await DB.conversation_sessions.update_one(
+        {"id": "s-int2", "status_atendimento": {"$ne": "em_atendimento"}},
+        {"$set": {"status": "ativa", "status_atendimento": "bot"}})
+    s = await DB.conversation_sessions.find_one({"id": "s-int2"})
+    check("filtro do motor preserva o atendimento", s["status_atendimento"] == "em_atendimento", s)
+
+
 async def _assincronas():
     await etapa_wuzapi_digita_antes()
     await etapa_desconta_tempo_ja_gasto()
@@ -190,6 +248,8 @@ async def _assincronas():
     await etapa_motor_guarda_segundos()
     await etapa_falha_do_indicador()
     await etapa_presence_nunca_levanta()
+    await etapa_interromper_no_meio()
+    await etapa_motor_nao_devolve_ao_bot()
 
 
 def test_suite():

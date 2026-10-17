@@ -3,7 +3,7 @@ import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import { useAuth } from "@/context/AuthContext";
 import { useActiveSession } from "@/hooks/useActiveSession";
-import { Hand, CheckCircle, X } from "@phosphor-icons/react";
+import { Hand, HandPalm, CheckCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { STATUS, SessionCard, MessageBubble, StatusBadge, ConnectionBadge, ChatComposer } from "@/components/atendimento/shared";
 
@@ -48,8 +48,14 @@ export default function AtendimentoPage() {
   }, {});
 
   const [assume, assumindo] = useAcao(async () => {
-    await api.post(`/atendimento/sessions/${activeId}/assume`);
-    toast.success("Conversa assumida");
+    const interrompendo = active?.status_atendimento === "bot";
+    try {
+      await api.post(`/atendimento/sessions/${activeId}/assume`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Não foi possível assumir a conversa");
+      return;
+    }
+    toast.success(interrompendo ? "Automação interrompida: a conversa é sua" : "Conversa assumida");
     await refreshActive(); loadSessions();
   });
   const [finalize, finalizando] = useAcao(async () => {
@@ -166,6 +172,13 @@ export default function AtendimentoPage() {
                 {depts.map((d) => <option key={d.id} value={d.id}>{d.nome}</option>)}
               </select>
               <div className="flex-1" />
+              {active.status_atendimento === "bot" && (
+                <button onClick={assume} disabled={assumindo}
+                  title="Para o robô ou o agente de IA nesta conversa e passa a resposta para você"
+                  className="zz-btn zz-btn-danger text-xs" data-testid="interrupt-btn">
+                  <HandPalm size={12} weight="bold" /> Interromper e assumir
+                </button>
+              )}
               {["aguardando"].includes(active.status_atendimento) && (
                 <button onClick={assume} disabled={assumindo}
                   className="zz-btn text-xs" data-testid="assume-btn">

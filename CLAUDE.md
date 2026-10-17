@@ -22,7 +22,7 @@ O desenvolvimento continua localmente via **Claude Code**.
 
 1. **Super Admin** — cria/ativa/desativa empresas (tenants), gerencia planos, pode "Entrar na empresa" (impersonation, via JWT com claim `impersonation_id`, com log de auditoria em `impersonation_log` e rota `/api/auth/exit-impersonation` pra sair).
 2. **Tenant Admin** — vê e configura toda a operação da própria empresa: bots, fluxos, conexões WhatsApp, departamentos, usuários e toda a Central de Atendimento.
-3. **Usuário Comum (agente/atendente)** — só vê conversas das conexões de WhatsApp liberadas explicitamente pra ele (`user_connection_access`). Só pode assumir conversas em "Aguardando" e responder as que já assumiu.
+3. **Usuário Comum (agente/atendente)** — só vê conversas das conexões de WhatsApp liberadas explicitamente pra ele (`user_connection_access`). Pode assumir conversas em "Aguardando", interromper o robô/agente de IA numa conversa em "Bot" (e assumi-la), e responder as que já assumiu.
 
 ---
 
@@ -82,6 +82,7 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - Rotas: `/api/departments` (CRUD), `/api/users` (CRUD de atendentes), `/api/atendimento/*` (listar com filtros de escopo, `/assume`, `/finalize`, `/department`, `/send`, `/summary`)
 - Frontend: Kanban de 4 colunas, painel lateral de chat com histórico completo (incluindo trecho conduzido pelo bot antes do handoff), polling de 3s (ainda não é WebSocket)
 - Barra "MODO SUPORTE" visível durante impersonation do Super Admin
+- **"Interromper e assumir" (17/10/2026)**: conversa em `bot` (robô ou agente de IA) pode ser tomada por quem alcança a conexão, atendente incluído, pelo mesmo `POST /assume`. Nasceu de um agente que mandou o preço errado de um carro enquanto a equipe só podia assistir. O `awaiting` é limpo e o histórico diz quem interrompeu. **O que o agente estava montando no instante do clique não sai**: `_send_outputs` confere a conversa antes de cada envio (depois do "digitando…", onde a janela é maior) e grava no histórico o texto descartado. As gravações do motor que vêm depois (persistência final, transferência entre bots, ida para a fila, `finalizar_atendimento`) filtram `status_atendimento != em_atendimento`, senão devolveriam a conversa para `bot` por cima de quem assumiu. Atendente não toma conversa que já está com outra pessoa (409). Mensagem que **já saiu** não volta: a Cloud API não apaga mensagem enviada
 
 ### Mídias (envio e recebimento)
 - `POST /api/atendimento/sessions/{id}/send-media` (multipart: `file` + `caption`) — mesma regra de permissão do envio de texto, extraída em `_authorize_send`
