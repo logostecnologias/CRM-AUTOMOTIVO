@@ -43,8 +43,8 @@ import Modal from "@/components/ui/Modal";
 
 // Os tetos de `ai_agents` e `routes/ai.py`, repetidos só para avisar antes;
 // quem recusa é o servidor.
-const MAX_ITEM = 2000;
-const MAX_TOTAL = 20000;
+const MAX_ITEM = 10000;  // `ai_agents.MAX_MEMORIA_ITEM`
+const MAX_TOTAL = 60000; // `ai_agents.MAX_MEMORIA_TOTAL`
 const MAX_FOTOS = 30;
 const MAX_DOCUMENTOS = 60000; // `ai_documentos.MAX_TOTAL`
 

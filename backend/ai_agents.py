@@ -81,11 +81,13 @@ MAX_FOTOS_POR_RESPOSTA = 5
 # Treinamento: o que a empresa vai ensinando ao agente, uma mensagem por vez.
 # Cada ensinamento entra inteiro no prompt de TODA chamada, como as instruções.
 # O teto é sobre o total de caracteres, não sobre a contagem: dez frases curtas
-# custam menos que um texto colado de três páginas. 20 mil caracteres são ~5 mil
-# tokens de prefixo, que o cache absorve; sem teto, um treino de meses
-# encareceria cada resposta sem ninguém perceber.
-MAX_MEMORIA_ITEM = 2000
-MAX_MEMORIA_TOTAL = 20000
+# custam menos que um texto colado de três páginas. 60 mil caracteres são ~15
+# mil tokens de prefixo, que o cache absorve (o mesmo teto dos documentos); sem
+# teto, um treino de meses encareceria cada resposta sem ninguém perceber.
+# Subiu de 2 mil/20 mil em 17/10/2026 a pedido do cliente: uma tabela de preços
+# colada não cabia num ensinamento só.
+MAX_MEMORIA_ITEM = 10000
+MAX_MEMORIA_TOTAL = 60000
 
 # `[FOTO:3]`, pelo índice mostrado no prompt e não pelo uuid do arquivo: um uuid
 # gasta ~20 tokens por linha do catálogo e o modelo erra dígito no meio dele. O
