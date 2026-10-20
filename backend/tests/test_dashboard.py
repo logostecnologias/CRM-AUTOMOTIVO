@@ -72,7 +72,23 @@ async def semear():
         await DB.conversation_sessions.insert_one({
             "id": sid, "tenant_id": TENANT, "contact_id": "c1",
             "status": "finalizada", "status_atendimento": estado,
+            "whatsapp_connection_id": "cn2" if sid == "s3" else "cn1",
             "created_at": iso(days=-2), "updated_at": iso(days=-1)})
+    # A fila: s3 espera há mais tempo que s2. s4 foi assumida depois de 10 min.
+    await DB.conversation_sessions.update_one(
+        {"id": "s2"}, {"$set": {"aguardando_desde": iso(minutes=-20)}})
+    await DB.conversation_sessions.update_one(
+        {"id": "s3"}, {"$set": {"aguardando_desde": iso(hours=-3)}})
+    await DB.conversation_sessions.update_one(
+        {"id": "s4"}, {"$set": {"aguardando_desde": iso(days=-2),
+                                "assumido_em": iso(days=-2, minutes=10),
+                                "atendente_id": "u-at"}})
+    # Da semana anterior: entra na comparação, não na semana atual.
+    await DB.conversation_sessions.insert_one({
+        "id": "s-velha", "tenant_id": TENANT, "contact_id": "c1",
+        "status_atendimento": "finalizado", "whatsapp_connection_id": "cn1",
+        "aguardando_desde": iso(days=-10), "assumido_em": iso(days=-10, minutes=30),
+        "created_at": iso(days=-10), "updated_at": iso(days=-10)})
     # De outra empresa: não pode entrar em conta nenhuma.
     await DB.conversation_sessions.insert_one({
         "id": "sx", "tenant_id": "t-2", "contact_id": "cx", "status": "ativa",
@@ -144,7 +160,21 @@ async def semear():
     await DB.whatsapp_connections.insert_one({
         "id": "cn1", "tenant_id": TENANT, "status": "conectado"})
     await DB.whatsapp_connections.insert_one({
-        "id": "cn2", "tenant_id": TENANT, "status": "desconectado"})
+        "id": "cn2", "tenant_id": TENANT, "nome": "Filial", "status": "desconectado"})
+
+    await DB.deals.insert_one({
+        "id": "d5", "tenant_id": TENANT, "pipeline_id": "p1", "contact_id": "c1",
+        "status": "perdido", "valor": 1000,
+        "fechado_em": (inicio_do_mes() + timedelta(hours=5)).isoformat(),
+        "created_at": iso(days=-20)})
+    await DB.ai_agents.insert_one({"id": "ag1", "tenant_id": TENANT, "nome": "Bia",
+                                   "ativo": True, "modo": "fallback",
+                                   "credencial_status": "erro"})
+    await DB.ai_agents.insert_one({"id": "ag2", "tenant_id": TENANT, "nome": "Pausado",
+                                   "ativo": False, "modo": "fallback",
+                                   "credencial_status": "erro"})
+    await DB.campaigns.insert_one({"id": "camp-3", "tenant_id": TENANT, "nome": "Parada",
+                                   "status": "pausada", "motivo_pausa": "Conexão caiu"})
 
 
 async def etapa_atendimento(m):
@@ -153,11 +183,88 @@ async def etapa_atendimento(m):
     check("1 com o robo", a["bot"] == 1, a)
     check("2 na fila", a["aguardando"] == 2, a)
     check("1 em atendimento", a["em_atendimento"] == 1, a)
-    check("1 finalizada", a["finalizado"] == 1, a)
+    check("2 finalizadas", a["finalizado"] == 2, a)
     check("em aberto = fila + em atendimento", a["em_aberto"] == 3, a)
     check("conversa de outra empresa fora da conta",
-          a["bot"] + a["aguardando"] + a["em_atendimento"] + a["finalizado"] == 5, a)
+          a["bot"] + a["aguardando"] + a["em_atendimento"] + a["finalizado"] == 6, a)
     check("mensagens dos 30 dias, sem a de 45", a["mensagens_30d"] == 4, a)
+
+
+async def etapa_alertas(m):
+    print("\n[6] Alertas: o que precisa de alguem agora, com onde resolver")
+    por_tipo = {a["tipo"]: a for a in m["alertas"]}
+    fila = por_tipo.get("fila") or {}
+    check("fila com a contagem", fila.get("n") == 2, m["alertas"])
+    check("e a espera mais antiga (s3, 3h)", (fila.get("desde") or "") < iso(hours=-2), fila)
+    check("fila leva para a Central", fila.get("para") == "/app/inbox", fila)
+    check("atividade atrasada", por_tipo.get("atividades", {}).get("n") == 1, m["alertas"])
+    check("conexao fora do ar, com o nome",
+          por_tipo.get("conexoes", {}).get("nomes") == ["Filial"], m["alertas"])
+    check("agente ativo com chave recusada; o pausado nao conta",
+          por_tipo.get("agentes", {}).get("nomes") == ["Bia"], m["alertas"])
+    check("campanha pausada com o motivo",
+          por_tipo.get("campanhas", {}).get("motivo") == "Conexão caiu", m["alertas"])
+
+
+async def etapa_serie(m):
+    print("\n[7] Serie de 14 dias e a semana contra a anterior")
+    s = m["serie"]
+    check("14 dias, todos presentes mesmo zerados", len(s) == 14, len(s))
+    check("termina hoje", s[-1]["dia"] == datetime.now(timezone.utc).date().isoformat(), s[-1])
+    total_h = sum(d["humano"] for d in s)
+    total_a = sum(d["automatico"] for d in s)
+    check("assumidas por gente contam como humano (s4 e a velha)", total_h == 2, s)
+    check("o resto e automatico", total_a == 4, s)
+    w = m["semana"]
+    check("5 conversas nesta semana, 1 na anterior",
+          w["conversas"] == 5 and w["conversas_anterior"] == 1, w)
+    check("espera media da semana: 10 min", round(w["espera_media_s"]) == 600, w)
+    check("espera da semana anterior: 30 min", round(w["espera_media_anterior_s"]) == 1800, w)
+
+
+async def etapa_conversao(m):
+    print("\n[8] Conversao do mes sobre os decididos")
+    f = m["funil"]
+    check("1 perdido no mes", f["perdido_mes"]["n"] == 1, f)
+    check("conversao = 1 ganho / 2 decididos", f["conversao_mes"] == 0.5, f)
+    check("sem servico cadastrado, a agenda de hoje some", m["agenda_hoje"] is None, m)
+
+
+async def etapa_atendente():
+    print("\n[9] Atendente ve a fila das conexoes dele e as atividades dele")
+    atendente = {"id": "u-at", "tenant_id": TENANT, "role": "user", "email": "c@x.com"}
+    await DB.user_connection_access.insert_one(
+        {"tenant_id": TENANT, "user_id": "u-at", "whatsapp_connection_id": "cn1"})
+    m = await rdash.dashboard_metrics(hoje_ate=iso(hours=12), semana_ate=iso(days=7),
+                                      user=atendente)
+    check("fila so da conexao liberada (s2, nao s3)", m["atendimento"]["aguardando"] == 1,
+          m["atendimento"])
+    check("as conversas que ele esta atendendo", m["atendimento"]["minhas"] == 1,
+          m["atendimento"])
+    check("atividades so as dele (nenhuma)", m["agenda"]["pendentes"] == 0, m["agenda"])
+    check("sem dados de gestao (funil, base)", "funil" not in m and "base" not in m, list(m))
+    tipos = {a["tipo"] for a in m["alertas"]}
+    check("alertas de configuracao sao do admin", tipos == {"fila"}, tipos)
+
+    # Agenda de hoje: aparece com servico, e conta so os horarios de hoje.
+    await DB.services.insert_one({"id": "sv1", "tenant_id": TENANT, "nome": "Corte",
+                                  "ativo": True})
+    import agenda as agenda_mod
+    tz = agenda_mod.fuso_de({})
+    hoje = datetime.now(tz).replace(hour=23, minute=0, second=0, microsecond=0)
+    for aid, quando, status in (("ap1", hoje, "agendado"),
+                                ("ap2", hoje - timedelta(hours=1), "cancelado"),
+                                ("ap3", hoje + timedelta(days=1), "agendado")):
+        await DB.appointments.insert_one({
+            "id": aid, "tenant_id": TENANT, "inicio": agenda_mod._iso(quando),
+            "status": status, "service_nome": "Corte", "resource_nome": "Ana",
+            "contact_nome": "Maria"})
+    m = await rdash.dashboard_metrics(hoje_ate=iso(hours=12), semana_ate=iso(days=7),
+                                      user=atendente)
+    ah = m["agenda_hoje"]
+    check("so o horario de hoje que ocupa (cancelado e amanha fora)",
+          ah["total"] == 1 and [i["id"] for i in ah["itens"]] == ["ap1"], ah)
+    check("com o fuso da empresa para a tela formatar", ah["fuso"] == "America/Sao_Paulo", ah)
 
 
 async def etapa_funil(m):
@@ -215,6 +322,10 @@ def test_suite():
         await etapa_funil(m)
         await etapa_agenda_e_campanhas(m)
         await etapa_base(m)
+        await etapa_alertas(m)
+        await etapa_serie(m)
+        await etapa_conversao(m)
         await etapa_isolamento()
+        await etapa_atendente()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())
