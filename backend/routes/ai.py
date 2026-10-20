@@ -603,6 +603,7 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     blocos, ferramentas, executar = await ai_agents.preparar_ferramentas(
         db, user["tenant_id"], agente, contato_teste, None, simulado=True)
     executar, marcou = ai_agents.registrar_marcacao(executar)
+    await ai_agents.anexar_contexto_agenda(db, user["tenant_id"], blocos, contato_teste, historico)
 
     try:
         resposta = await ai_runtime.responder_por_agente(

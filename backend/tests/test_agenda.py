@@ -835,22 +835,64 @@ async def etapa_ferramentas_ia(ctx):
     check("o agendamento da IA fica com origem 'ia'", doc is not None)
     check("e amarrado à conversa em que aconteceu", doc["session_id"] == "s-ia")
 
-    # O mesmo horário de novo **não** é recusado enquanto sobrar alguém na
-    # equipe: é o desenho do módulo, e a marcação vai para o outro profissional.
+    # O caso do cliente (20/10/2026): o contato confirma de novo e o modelo
+    # chama agendar outra vez. Com dois profissionais a hora ainda cabia no
+    # outro, e o mesmo contato ficava com dois horários iguais.
+    def do_c2():
+        return DB.appointments.count_documents(
+            {"tenant_id": TENANT, "contact_id": "c-2", "status": "agendado"})
+    antes = await do_c2()
     r = await executar("agendar", {"servico": "Corte masculino",
                                    "dia": SEGUNDA.isoformat(), "hora": "16:30"})
-    check("com dois profissionais, o mesmo horário ainda cabe, no outro",
-          r.startswith("MARCADO") and doc["resource_nome"] not in r, r)
-    segundo = await DB.appointments.find_one(
-        {"tenant_id": TENANT, "contact_id": "c-2", "origem": "ia",
-         "resource_id": {"$ne": doc["resource_id"]}, "status": "agendado"})
+    check("o mesmo horário de novo, para o mesmo contato, não grava outro",
+          r.startswith("JÁ MARCADO") and await do_c2() == antes, r)
 
     r = await executar("agendar", {"servico": "Corte masculino",
-                                   "dia": SEGUNDA.isoformat(), "hora": "16:30"})
+                                   "dia": SEGUNDA.isoformat(), "hora": "17:00"})
+    check("o mesmo serviço em outra hora pede para cancelar o antigo antes",
+          r.startswith("NÃO FOI MARCADO") and "cancelar_agendamento" in r
+          and await do_c2() == antes, r)
+
+    r = await executar("agendar", {"servico": "Corte masculino", "adicional": True,
+                                   "dia": SEGUNDA.isoformat(), "hora": "17:00"})
+    check("com adicional=true, o segundo horário é marcado", r.startswith("MARCADO"), r)
+    segundo = await DB.appointments.find_one(
+        {"tenant_id": TENANT, "contact_id": "c-2", "status": "agendado",
+         "id": {"$ne": doc["id"]}})
+
+    # Outro contato ainda pega a mesma hora com o outro profissional: é o
+    # desenho do módulo para equipes, e não mudou.
+    await DB.contacts.insert_one({"id": "c-ia3", "tenant_id": TENANT, "nome": "Teo",
+                                  "numero_whatsapp": "5511999990003"})
+    await DB.contacts.insert_one({"id": "c-ia4", "tenant_id": TENANT, "nome": "Lia",
+                                  "numero_whatsapp": "5511999990004"})
+    outro = ai_tools.executor(DB, TENANT, {"id": "c-ia3", "nome": "Teo"}, None)
+    r = await outro("agendar", {"servico": "Corte masculino",
+                                "dia": SEGUNDA.isoformat(), "hora": "16:30"})
+    check("outro contato na mesma hora vai para o outro profissional",
+          r.startswith("MARCADO") and doc["resource_nome"] not in r, r)
+    terceiro = await DB.appointments.find_one({"tenant_id": TENANT, "contact_id": "c-ia3"})
+
+    r = await ai_tools.executor(DB, TENANT, {"id": "c-ia4", "nome": "Lia"}, None)(
+        "agendar", {"servico": "Corte masculino",
+                    "dia": SEGUNDA.isoformat(), "hora": "16:30"})
     check("com a equipe toda ocupada, aí sim é recusado",
           "não está disponível" in r, r)
     check("e a resposta já oferece alternativas concretas do mesmo dia",
           "O que resta nesse dia" in r and "09:00" in r, r)
+    await dominio.cancelar(DB, TENANT, terceiro["id"])
+
+    # O dia do cancelamento é o da empresa: 21h de Brasília é 00:00Z do dia
+    # seguinte, e o prefixo do ISO mandava o modelo procurar no dia errado.
+    tarde = await dominio.agendar(
+        DB, TENANT, recurso=ctx["ana"], servico=ctx["corte"],
+        contato={"id": "c-ia3", "nome": "Teo"}, inicio=instante(SEGUNDA, 21),
+        config=await dominio.configuracao(DB, TENANT), forcar=True)
+    r = await outro("cancelar_agendamento", {"dia": SEGUNDA.isoformat()})
+    check("cancelar acha o horário das 21h pelo dia local",
+          r.startswith("CANCELADO"), r)
+    check("e cancela o horário certo",
+          (await DB.appointments.find_one({"id": tarde["id"]}))["status"] == "cancelado")
 
     r = await executar("agendar", {"servico": "Corte masculino",
                                    "dia": SABADO.isoformat(), "hora": "10:00"})
@@ -917,6 +959,31 @@ async def etapa_prompt_da_ia(ctx):
           "NÃO tem acesso à agenda" not in instr)
     check("o catálogo não carrega nada do contato (senão quebraria o cache)",
           "Maria" not in bloco and "c-1" not in bloco, bloco[:300])
+    check("o horário de atendimento entra no prompt, com dias seguidos agrupados",
+          "Horário de atendimento:" in bloco and "Segunda a Sexta" in bloco
+          and "Sábado a Domingo fechado" in bloco, bloco)
+
+    # A hora atual e os horários do contato vão no último turno, não no prompt.
+    await dominio.agendar(DB, TENANT, recurso=ctx["ana"], servico=ctx["coloracao"],
+                          contato={"id": "c-1", "nome": "Maria Souza"},
+                          inicio=instante(TERCA, 14),
+                          config=await dominio.configuracao(DB, TENANT))
+    historico = [{"role": "user", "content": "oi"}, {"role": "assistant", "content": "olá"},
+                 {"role": "user", "content": "posso marcar?"}]
+    await ai_agents.anexar_contexto_agenda(
+        DB, TENANT, {"bloco_agenda": bloco}, {"id": "c-1"}, historico)
+    ultimo = historico[-1]["content"]
+    check("o último turno leva a hora atual",
+          ultimo.startswith("(agora: ") and ultimo.endswith("posso marcar?"), ultimo)
+    check("e o horário que o contato já tem", "Coloração" in ultimo and "14:00" in ultimo, ultimo)
+    check("o primeiro turno fica intacto", historico[0]["content"] == "oi")
+
+    historico = [{"role": "user", "content": "oi"}]
+    await ai_agents.anexar_contexto_agenda(DB, TENANT, {"bloco_agenda": ""}, {"id": "c-1"}, historico)
+    check("sem agenda, nada é anexado", historico[0]["content"] == "oi")
+    await DB.appointments.update_many({"tenant_id": TENANT, "contact_id": "c-1",
+                                       "service_id": ctx["coloracao"]["id"]},
+                                      {"$set": {"status": "cancelado"}})
 
 
 # ---------------------------------------------------------------------------

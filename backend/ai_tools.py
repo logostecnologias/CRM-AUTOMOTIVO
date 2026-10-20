@@ -37,10 +37,25 @@ Decisões:
     um id que o modelo tenha escrito. Um id inventado num campo de ferramenta
     cancelaria a consulta de outra pessoa: este é o único lugar do módulo em
     que o modelo poderia causar dano fora da conversa dele.
+
+  - **Marcar de novo o que o contato já tem é recusado** (20/10/2026). O
+    contato confirma duas vezes ("pode ser", "ok, fechado") e o modelo chama
+    `agendar` a cada confirmação. Com mais de um profissional a mesma hora
+    ainda está livre com outra pessoa, e o cliente encontrava dois horários
+    iguais do mesmo contato. A mesma hora devolve "JÁ MARCADO"; o mesmo serviço
+    em outra hora pede para cancelar o antigo antes (é remarcação) ou para
+    dizer `adicional=true` (é um segundo atendimento de verdade).
+
+  - **O modelo sabe que horas são e quando a empresa atende** (20/10/2026). A
+    grade semanal vai no prompt (estável, cacheada) e a hora atual mais os
+    horários já marcados do contato vão no último turno (variam a cada
+    mensagem). Sem isso o agente oferecia "hoje às 10h" às 15h e respondia
+    "abrimos às 8h" sem que a grade dissesse isso.
 """
 import logging
 import re
 import unicodedata
+from datetime import date, timedelta
 
 import agenda
 import ai_client
@@ -86,6 +101,10 @@ FERRAMENTAS = [
                                  "description": "Nome do profissional. Omita para a empresa escolher quem estiver livre."},
                 "observacao": {"type": "string",
                                "description": "Algo relevante que o contato disse sobre o atendimento."},
+                "adicional": {"type": "boolean",
+                              "description": ("Só true quando o contato quer MAIS UM horário do "
+                                              "mesmo serviço além do que já tem. Para trocar de "
+                                              "horário, cancele o antigo antes.")},
             },
             "required": ["servico", "dia", "hora"],
         },
@@ -178,13 +197,20 @@ def bloco_de_instrucoes(servicos: list, recursos: list, config: dict) -> str:
         linhas.append("\nProfissionais: " + ", ".join(r["nome"] for r in recursos))
         linhas.append("Se o contato não pedir ninguém específico, não pergunte: "
                       "omita o profissional e a empresa escolhe quem estiver livre.")
+        linhas.append("\n" + bloco_funcionamento(recursos, config))
 
     linhas.append(
         f"\nO fuso da empresa é {config.get('fuso')}; use sempre a hora local dela. "
         f"É preciso marcar com pelo menos {config.get('antecedencia_min_horas')}h de "
         "antecedência.\n"
-        "Nunca invente horário: chame consultar_horarios antes de oferecer qualquer "
-        "hora, e ofereça no máximo três de uma vez. Nunca diga que marcou sem que a "
+        "A hora atual e os horários que o contato já tem marcados vêm entre "
+        "parênteses na última mensagem dele: nunca ofereça hora que já passou.\n"
+        "O horário de atendimento acima responde \"vocês abrem sábado?\"; para "
+        "oferecer hora, chame consultar_horarios, porque a grade não diz o que já "
+        "está ocupado. Ofereça no máximo três horas de uma vez.\n"
+        "Chame agendar UMA vez por horário. Se o contato já tem o horário marcado, "
+        "não marque de novo: só confirme. Para trocar de horário, cancele o antigo "
+        "com cancelar_agendamento e marque o novo. Nunca diga que marcou sem que a "
         "ferramenta agendar tenha confirmado."
     )
     # A ferramenta devolve quantos horários sobraram porque isso ajuda o modelo a
@@ -195,6 +221,99 @@ def bloco_de_instrucoes(servicos: list, recursos: list, config: dict) -> str:
         "ao contato: ofereça as horas, nunca quantas sobraram."
     )
     return "\n".join(linhas)
+
+
+def _janelas_texto(janelas: list) -> str:
+    """As janelas de um dia, pelo mesmo filtro que gera os horários livres."""
+    return " e ".join(
+        f"{j['inicio']:%H:%M}-{j['fim']:%H:%M}"
+        for j in agenda._normaliza_janelas(janelas or [])
+    ) or "fechado"
+
+
+def _semana_texto(grade: list) -> str:
+    """"Segunda a Sexta 08:00-18:00; Sábado 08:00-12:00; Domingo fechado".
+
+    Dias seguidos com as mesmas janelas viram um intervalo: a grade de sete
+    linhas iguais é a mesma informação em sete vezes os tokens, e vai em toda
+    chamada.
+    """
+    dias = [_janelas_texto(g) for g in grade]
+    partes, i = [], 0
+    while i < 7:
+        j = i
+        while j + 1 < 7 and dias[j + 1] == dias[i]:
+            j += 1
+        nome = agenda.DIAS[i] if i == j else f"{agenda.DIAS[i]} a {agenda.DIAS[j]}"
+        partes.append(f"{nome} {dias[i]}")
+        i = j + 1
+    return "; ".join(partes)
+
+
+def bloco_funcionamento(recursos: list, config: dict, hoje: date = None) -> str:
+    """O horário de atendimento, para o modelo responder sem consultar.
+
+    "Vocês abrem sábado?" e "até que horas?" são perguntas sobre a grade, não
+    sobre vaga, e sem ela no prompt o modelo respondia de cabeça. Profissionais
+    com a mesma grade aparecem juntos: na maioria das empresas a equipe inteira
+    tem um horário só, e repeti-lo por pessoa é token pago em toda chamada.
+
+    Folga e horário especial de um profissional (`excecoes`) não entram: mudam
+    o que está livre, e isso é pergunta para `consultar_horarios`. Feriado da
+    empresa entra, porque fecha todo mundo e é o que o contato pergunta.
+    """
+    grupos = {}  # texto da semana -> nomes
+    for r in recursos:
+        grade = r.get("grade") or []
+        if len(grade) != 7:
+            continue
+        grupos.setdefault(_semana_texto(grade), []).append(r.get("nome") or "?")
+    if not grupos:
+        return "Horário de atendimento: não configurado."
+    if len(grupos) == 1:
+        linhas = ["Horário de atendimento: " + next(iter(grupos))]
+    else:
+        linhas = ["Horário de atendimento:"]
+        linhas += [f"- {', '.join(nomes)}: {semana}" for semana, nomes in grupos.items()]
+
+    hoje = hoje or agenda._agora().astimezone(agenda.fuso_de(config)).date()
+    limite = hoje + timedelta(days=60)
+    feriados = sorted(
+        (b["data"][:10], b.get("motivo") or "Fechado")
+        for b in config.get("bloqueios") or []
+        if hoje.isoformat() <= (b.get("data") or "")[:10] <= limite.isoformat()
+    )[:10]
+    if feriados:
+        linhas.append("Fechado (empresa toda): " + "; ".join(
+            f"{agenda.DIAS[date.fromisoformat(d).weekday()]} "
+            f"{d[8:10]}/{d[5:7]} ({m})" for d, m in feriados))
+    return "\n".join(linhas)
+
+
+async def contexto(db, tenant_id: str, contato: dict) -> str:
+    """A hora atual e o que o contato já tem marcado, para o último turno.
+
+    Varia a cada mensagem, então vai no histórico e não no prompt, pelo mesmo
+    motivo do nome do contato e da etapa do funil (`ai_funil.contexto`): no
+    prompt quebraria o cache. É também o que impede o modelo de oferecer
+    "hoje às 10h" às 15h, e de marcar de novo um horário que já existe.
+    """
+    config = await agenda.configuracao(db, tenant_id)
+    tz = agenda.fuso_de(config)
+    agora = agenda.local(agenda._iso(agenda._agora()), tz)
+    linha = (f"(agora: {agenda.DIAS[agora.weekday()].lower()}, "
+             f"{agora.day:02d}/{agora.month:02d}/{agora.year}, "
+             f"{agora.hour:02d}:{agora.minute:02d}")
+    futuros = []
+    if (contato or {}).get("id"):
+        futuros = await agenda.agendamentos_do_contato(db, tenant_id, contato["id"], limite=5)
+    if futuros:
+        linha += "; horários já marcados deste contato: " + "; ".join(
+            f"{a.get('service_nome')} {agenda.rotulo_completo(a['inicio'], tz)} "
+            f"com {a.get('resource_nome')}" for a in futuros)
+    else:
+        linha += "; este contato não tem horário marcado"
+    return linha + ")"
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +399,8 @@ def executor(db, tenant_id: str, contato: dict, session: dict, simulado: bool = 
                 return f"Não há horário livre em {dia} nem nos dias seguintes."
             return (f"Nada livre em {dia}. Os próximos dias com vaga são: "
                     + "; ".join(f"{d['dia']} ({d['rotulo']})" for d in proximos) + ".")
-        return (f"Horários livres em {dia} para {servico['nome']} "
+        d = date.fromisoformat(dia)
+        return (f"Horários livres em {dia} ({agenda.DIAS[d.weekday()]}) para {servico['nome']} "
                 f"({servico.get('duracao_min')} min): "
                 + ", ".join(f"{h['hora']} com {h['resource_nome']}" for h in horarios)
                 + f". Fuso: {tz}.")
@@ -303,10 +423,22 @@ def executor(db, tenant_id: str, contato: dict, session: dict, simulado: bool = 
         except HTTPException as e:
             return f"ERRO: {e.detail}"
 
+        alvo = agenda._iso(inicio)
+
+        # O que o contato já tem. Ver o cabeçalho do módulo: sem isto, cada
+        # "ok, pode ser" virava mais um agendamento na mesma hora.
+        ja_tem = await agenda.agendamentos_do_contato(db, tenant_id, contato["id"])
+        mesma_hora = next((a for a in ja_tem if a["inicio"] == alvo), None)
+        if mesma_hora:
+            return ("JÁ MARCADO: este contato já tem "
+                    f"{mesma_hora.get('service_nome')} em "
+                    f"{agenda.rotulo_completo(mesma_hora['inicio'], tz)} com "
+                    f"{mesma_hora.get('resource_nome')}. Não marque de novo; "
+                    "só confirme ao contato.")
+
         # Quem atende: entre os candidatos, o primeiro que tiver aquela hora
         # livre. Com profissional pedido pelo contato a lista tem um só, então a
         # regra é a mesma nos dois casos.
-        alvo = agenda._iso(inicio)
         livres = await agenda.horarios_do_dia(db, tenant_id, recursos=recursos,
                                               servico=servico, dia=dia, config=config)
         escolhido = next((h for h in livres if h["inicio"] == alvo), None)
@@ -318,7 +450,18 @@ def executor(db, tenant_id: str, contato: dict, session: dict, simulado: bool = 
                     + ", ".join(h["hora"] for h in livres[:8])
                     + ". Ofereça um destes ao contato.")
 
-        recurso = next((r for r in recursos if r["id"] == escolhido["resource_id"]), None)
+        # Só depois de saber que a hora nova está livre: mandar cancelar o
+        # antigo para trocar por uma hora ocupada deixaria o contato sem nenhuma.
+        mesmo_servico = [a for a in ja_tem if a.get("service_id") == servico["id"]]
+        if mesmo_servico and not args.get("adicional"):
+            return ("NÃO FOI MARCADO: este contato já tem " + servico["nome"] + " em "
+                    + "; ".join(agenda.rotulo_completo(a["inicio"], tz) for a in mesmo_servico)
+                    + f". {hora} de {dia} está livre. Se ele quer TROCAR de horário, chame "
+                    "cancelar_agendamento com o dia do antigo e depois agendar de novo. Se "
+                    "ele quer mesmo MAIS UM horário, chame agendar com adicional=true. Na "
+                    "dúvida, pergunte a ele.")
+
+        recurso =next((r for r in recursos if r["id"] == escolhido["resource_id"]), None)
         if simulado:
             return ("MARCADO (simulação: nada foi gravado). Confirme ao contato: "
                     f"{servico['nome']}, "
@@ -346,19 +489,25 @@ def executor(db, tenant_id: str, contato: dict, session: dict, simulado: bool = 
         config = await agenda.configuracao(db, tenant_id)
         tz = agenda.fuso_de(config)
 
+        # O dia no fuso da empresa, não o prefixo do ISO: um horário das 21h em
+        # Brasília está gravado como 00:00Z do dia seguinte, e o modelo, que
+        # pensa em hora local, nunca acertaria o dia dele.
+        def dia_local(a):
+            return agenda.local(a["inicio"], tz).date().isoformat()
+
         alvo = futuros[0]
         dia = (args.get("dia") or "").strip()
         if len(futuros) > 1:
-            candidatos = [a for a in futuros if a["inicio"][:10] == dia] if dia else []
+            candidatos = [a for a in futuros if dia_local(a) == dia] if dia else []
             if len(candidatos) != 1:
                 return ("Este contato tem mais de um horário marcado: "
                         + "; ".join(f"{a['service_nome']} em "
                                     f"{agenda.rotulo_completo(a['inicio'], tz)} "
-                                    f"(dia {a['inicio'][:10]})" for a in futuros)
+                                    f"(dia {dia_local(a)})" for a in futuros)
                         + ". Pergunte qual ele quer cancelar e chame de novo com o dia.")
             alvo = candidatos[0]
-        elif dia and futuros[0]["inicio"][:10] != dia:
-            return (f"O único horário marcado é em {futuros[0]['inicio'][:10]}, não em "
+        elif dia and dia_local(futuros[0]) != dia:
+            return (f"O único horário marcado é em {dia_local(futuros[0])}, não em "
                     f"{dia}. Confirme com o contato.")
 
         if simulado:

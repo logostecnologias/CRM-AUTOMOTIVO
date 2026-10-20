@@ -716,11 +716,25 @@ def registrar_marcacao(executar):
 
     async def embrulhado(nome: str, argumentos: dict) -> str:
         resultado = await executar(nome, argumentos)
-        if nome == "agendar" and str(resultado).startswith("MARCADO"):
+        if nome == "agendar" and str(resultado).startswith(("MARCADO", "JÁ MARCADO")):
             marcou["ok"] = True
         return resultado
 
     return embrulhado, marcou
+
+
+async def anexar_contexto_agenda(db, tenant_id: str, blocos: dict, contato: dict,
+                                 historico: list) -> None:
+    """Hora atual e horários do contato no último turno dele, se o agente agenda.
+
+    No último turno e não no primeiro (onde vai o funil): numa conversa longa o
+    primeiro turno é de horas atrás, e "agora" lido lá seria a hora errada.
+    Ver `ai_tools.contexto`.
+    """
+    if not blocos.get("bloco_agenda") or not historico or historico[-1]["role"] != "user":
+        return
+    linha = await ai_tools.contexto(db, tenant_id, contato)
+    historico[-1]["content"] = f"{linha}\n{historico[-1].get('content') or ''}".strip()
 
 
 async def confirmou_sem_agenda(db, tenant_id: str, contato: dict, texto: str,
@@ -842,6 +856,7 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
         if funil:
             linha = await ai_funil.contexto(db, tenant_id, funil, contato)
             historico[0]["content"] = f"{linha}\n{historico[0]['content']}".strip()
+    await anexar_contexto_agenda(db, tenant_id, blocos, contato, historico)
 
     try:
         resposta = await ai_runtime.responder_por_agente(
