@@ -733,6 +733,37 @@ async def etapa_fotos():
     check("a etiqueta e reconhecida com espaco e minuscula",
           [f["id"] for f in minusculo] == ["f2"], minusculo)
 
+    # --- a foto que contradiz o texto (caso real: "fotos da Strada", saiu SW4) ---
+    loja = [
+        {"id": "sw4-1", "media_id": "m1", "descricao": "SW4 Diamond 2023 prata, traseira"},
+        {"id": "sw4-2", "media_id": "m2", "descricao": "SW4 Diamond 2023 prata, frente"},
+        {"id": "str-1", "media_id": "m3", "descricao": "Fiat Strada Freedom 2025 branca, frente"},
+        {"id": "str-2", "media_id": "m4", "descricao": "Fiat Strada Freedom 2025 branca, interior"},
+        {"id": "oni-1", "media_id": "m5", "descricao": "Onix 2019 prata, frente"},
+    ]
+    limpo, trocada = ai_agents.extrair_fotos(
+        "Perfeito! Vou te enviar as fotos da Strada Freedom 2025:\n[FOTO:1]\n\n"
+        "Você pretende comprar à vista ou financiado?", loja)
+    check("foto de outro carro e trocada pela do carro citado",
+          [f["id"] for f in trocada] == ["str-1"], trocada)
+    check("e o texto sai igual", "Strada Freedom 2025:" in limpo and "FOTO" not in limpo, limpo)
+
+    _, duas = ai_agents.extrair_fotos("Fotos da Strada 2025: [FOTO:3] [FOTO:1]", loja)
+    check("a certa fica, so a errada e trocada, sem repetir",
+          [f["id"] for f in duas] == ["str-1", "str-2"], duas)
+
+    _, dois_itens = ai_agents.extrair_fotos(
+        "Strada 2025 não tenho mais, mas olha essa SW4: [FOTO:1]", loja)
+    check("texto que cita dois carros nao tem a foto trocada",
+          [f["id"] for f in dois_itens] == ["sw4-1"], dois_itens)
+
+    _, sem_citar = ai_agents.extrair_fotos("Olha só essa: [FOTO:5]", loja)
+    check("sem item citado no texto, vale a escolha do modelo",
+          [f["id"] for f in sem_citar] == ["oni-1"], sem_citar)
+
+    _, certa = ai_agents.extrair_fotos("Essa é a SW4: [FOTO:2]", loja)
+    check("foto certa nao e mexida", [f["id"] for f in certa] == ["sw4-2"], certa)
+
     # --- o catalogo no prompt ---
     agente = {"nome": "Bia", "tipo": "vendas", "midias": [
         {"id": "f1", "media_id": "m1", "descricao": "Onix 2019 prata, frente"},
@@ -775,6 +806,14 @@ async def etapa_fotos():
               for m in msgs), msgs)
     check("a conversa continua com o agente, nao foi para a fila",
           s_["status_atendimento"] == "bot", s_["status_atendimento"])
+
+    h = await ai_agents.montar_historico(DB, s_["id"], TENANT, catalogo=[
+        {"id": "f1", "media_id": doc["id"], "descricao": "Onix 2019 prata, frente"}])
+    check("a foto ja enviada volta ao agente como a etiqueta que a produziu",
+          h[-1]["role"] == "assistant" and h[-1]["content"].endswith("[FOTO:1]"), h)
+    h = await ai_agents.montar_historico(DB, s_["id"], TENANT)
+    check("foto fora do catalogo continua fora do historico",
+          "FOTO" not in h[-1]["content"], h)
 
     # --- foto apagada nao derruba a resposta ---
     await semear(agente={})

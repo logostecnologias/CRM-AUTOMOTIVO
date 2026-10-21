@@ -33,6 +33,7 @@ humana e a explicação no histórico. Mensagem de contato que não vira nem
 resposta nem fila é venda perdida sem ninguém saber.
 """
 import logging
+import math
 import re
 import unicodedata
 
@@ -356,7 +357,11 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "
             f"da conversa; não a cada mensagem. No máximo {MAX_FOTOS_POR_RESPOSTA} "
             "por resposta.\n"
             "Só existem as fotos desta lista. Nunca invente um número de etiqueta e "
-            "nunca descreva uma foto que não esteja aqui."
+            "nunca descreva uma foto que não esteja aqui.\n"
+            "Antes de escrever uma etiqueta, confira na lista que a descrição dela é "
+            "do mesmo item de que você está falando (mesmo modelo, mesmo ano). Se não "
+            "houver foto daquele item, diga que não tem foto dele; nunca mande a foto "
+            "de outro no lugar."
         )
 
     # O estoque entra só como formato (colunas, total, exemplo); as linhas vêm
@@ -456,7 +461,8 @@ async def agente_da_conexao(db, tenant_id: str, conexao_id: str | None) -> dict 
 
 async def montar_historico(db, session_id: str, tenant_id: str,
                            contato: dict | None = None, *,
-                           visao: bool | None = False) -> list[dict]:
+                           visao: bool | None = False,
+                           catalogo: list[dict] | None = None) -> list[dict]:
     """A conversa recente, no formato que os dois provedores aceitam.
 
     Ordena por `timestamp` **e `_id`** pelo mesmo motivo que todo histórico
@@ -467,7 +473,13 @@ async def montar_historico(db, session_id: str, tenant_id: str,
     Anexo do contato vira texto (`ai_midia.texto_do_anexo`), e as últimas
     `ai_midia.MAX_IMAGENS` fotos vão como imagem no turno (`imagens`) quando
     `visao` não é False. O formato de cada provedor fica com o `ai_client`.
+
+    Foto do `catalogo` que já foi enviada volta como a etiqueta que a produziu
+    (`[FOTO:n]`). Sem isso a bolha sem legenda sumia do histórico: o agente não
+    sabia o que já tinha mostrado e se via escrevendo "vou te enviar as fotos:"
+    sem etiqueta nenhuma, que é o exemplo que ele passa a imitar.
     """
+    indice_foto = {f.get("media_id"): i + 1 for i, f in enumerate(catalogo or [])}
     docs = await db.messages_log.find(
         {"session_id": session_id, "tenant_id": tenant_id,
          "direction": {"$in": ["recebida", "enviada"]}},
@@ -503,6 +515,10 @@ async def montar_historico(db, session_id: str, tenant_id: str,
                 d.get("type") or meta["media"].get("kind") or "document", conteudo,
                 transcricao=meta.get("transcricao"),
                 nome=meta["media"].get("filename"), imagem_vai=bool(img))
+        elif d["direction"] == "enviada" and meta.get("media"):
+            n = indice_foto.get(meta["media"].get("id"))
+            if n:
+                conteudo = f"{conteudo}\n[FOTO:{n}]".strip()
         if not conteudo and not img:
             continue
         papel = "user" if d["direction"] == "recebida" else "assistant"
@@ -562,7 +578,69 @@ def extrair_fotos(texto: str, fotos: list[dict]) -> tuple[str, list[dict]]:
     limpo = RE_FOTO.sub("", texto)
     limpo = re.sub(r"[ \t]{2,}", " ", limpo)
     limpo = re.sub(r"\n{3,}", "\n\n", limpo).strip()
-    return limpo, escolhidas
+    return limpo, conferir_fotos(limpo, escolhidas, fotos)
+
+
+# Palavras que aparecem em descrição de foto mas não dizem de qual item ela é.
+_TERMOS_VAZIOS = frozenset(
+    "foto fotos imagem imagens com sem para por que dos das uma um the and "
+    "carro carros veiculo veiculos modelo produto item vista lado".split())
+
+
+def _termos(texto: str) -> set[str]:
+    return {p for p in _normaliza(texto).split() if len(p) >= 3 and p not in _TERMOS_VAZIOS}
+
+
+def conferir_fotos(texto: str, escolhidas: list[dict], fotos: list[dict]) -> list[dict]:
+    """Troca a foto que contradiz o próprio texto da resposta.
+
+    Caso real (21/10/2026): "vou te enviar as fotos da Strada Freedom 2025" e
+    saiu a foto de uma SW4. O modelo escolhe pelo número, e o número não carrega
+    sentido nenhum: errar um dígito manda outro carro. Instrução no prompt não
+    basta, então a conferência é no código, contra as descrições do catálogo.
+
+    O texto é cotejado só com os termos que **distinguem** uma foto das outras
+    (os que não estão em todas as descrições, pesados pela raridade). Uma foto
+    escolhida é trocada só quando não tem nenhum desses termos em comum com o
+    texto **e** outra foto do catálogo tem: é a contradição óbvia. Foto que
+    divide qualquer termo distintivo com o texto passa, porque o texto pode
+    falar de dois itens ("não tenho Strada, mas olha essa SW4"), e trocar
+    nesse caso seria o sistema errando por cima do modelo.
+
+    A troca é pelas fotos que melhor casam com o texto, na ordem do catálogo:
+    o texto já prometeu as fotos da Strada, e mandar a frase sem foto nenhuma
+    seria a segunda metade do mesmo erro. Quando o texto não cita termo
+    distintivo nenhum, não há com o que conferir e a escolha do modelo vale.
+    """
+    if len(fotos) < 2 or not escolhidas:
+        return escolhidas
+    termos = [_termos(f.get("descricao") or "") for f in fotos]
+    contagem: dict[str, int] = {}
+    for ts in termos:
+        for t in ts:
+            contagem[t] = contagem.get(t, 0) + 1
+    n = len(fotos)
+    peso = {t: math.log(n / c) for t, c in contagem.items() if c < n}
+    citados = _termos(texto) & peso.keys()
+    if not citados:
+        return escolhidas
+    nota = [sum(peso[t] for t in ts & citados) for ts in termos]
+    melhor = max(nota)
+    if melhor <= 0:
+        return escolhidas
+
+    posicao = {id(f): i for i, f in enumerate(fotos)}
+    certas = [f for f in escolhidas if nota[posicao[id(f)]] > 0]
+    trocadas = len(escolhidas) - len(certas)
+    if not trocadas:
+        return escolhidas
+    logger.warning("Agente escolheu %d foto(s) que não casam com o texto %r; trocadas",
+                   trocadas, texto[:120])
+    ja = {id(f) for f in certas}
+    candidatas = sorted((i for i in range(n) if nota[i] > 0 and id(fotos[i]) not in ja),
+                        key=lambda i: (-nota[i], i))
+    certas += [fotos[i] for i in candidatas[:trocadas]]
+    return certas
 
 
 # ---------------------------------------------------------------------------
@@ -841,7 +919,8 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
     # ignorado. `ia_respostas` continua sendo contado na sessão, só não barra.
     # O que segura o custo é o teto de tokens do plano (`ai_runtime`).
 
-    historico = await montar_historico(db, session_id, tenant_id, contato, visao=visao)
+    historico = await montar_historico(db, session_id, tenant_id, contato, visao=visao,
+                                       catalogo=agente.get("midias") or [])
     if not historico:
         return await escalar("Sem histórico utilizável para o agente de IA — "
                              "encaminhado para atendimento humano")
