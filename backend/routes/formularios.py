@@ -130,7 +130,7 @@ async def receber(chave: str, request: Request, bg: BackgroundTasks):
         return {"ok": True}
 
     resposta = await formularios.receber(db, formulario, payload)
-    if resposta.get("whatsapp_status") == formularios.WPP_PENDENTE:
+    if resposta.get("whatsapp_status") == formularios.WPP_PENDENTE and not resposta.get("complemento"):
         bg.add_task(formularios.enviar_whatsapp, db, formulario["tenant_id"], resposta["id"])
 
     if resposta["status"] == formularios.RECUSADA:

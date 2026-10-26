@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Plus, PencilSimple, Trash, Code, ListBullets, Copy, ArrowsClockwise, WarningCircle,
@@ -531,7 +531,10 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
 }
 
 function Instalar({ f, onFechar, onChaveNova }) {
-  const endereco = `${API}/f/${f.chave}`;
+  // Em produção `API` é relativo ("/api"), e colado no site do cliente ele
+  // apontaria para o domínio da landing. O código precisa do endereço inteiro.
+  const base = /^https?:\/\//.test(API) ? API : `${window.location.origin}${API}`;
+  const endereco = `${base}/f/${f.chave}`;
   const script = `<script src="${endereco}/script.js" async></script>`;
   const marcacao = `<form data-zappzen>
   <input name="nome" placeholder="Nome">
@@ -613,8 +616,15 @@ function Trecho({ titulo, nota, codigo }) {
   );
 }
 
+// O que a pessoa preencheu, na ordem do envio. Chave com `_` é do script
+// (página, referrer), não pergunta do formulário.
+function camposPreenchidos(dados) {
+  return Object.entries(dados || {}).filter(([k, v]) => !k.startsWith("_") && v !== "" && v != null);
+}
+
 function Respostas({ f, onFechar }) {
   const [linhas, setLinhas] = useState(null);
+  const [aberta, setAberta] = useState(null);
 
   const carregar = useCallback(() => {
     api.get(`/formularios/${f.id}/respostas`, { params: { limite: 100 } })
@@ -624,7 +634,8 @@ function Respostas({ f, onFechar }) {
   useEffect(() => { carregar(); }, [carregar]);
 
   return (
-    <Modal largo titulo={`Respostas de "${f.nome}"`} descricao="As 100 mais recentes."
+    <Modal largo titulo={`Respostas de "${f.nome}"`}
+      descricao="As 100 mais recentes. Clique numa resposta para ver tudo o que a pessoa preencheu."
       onFechar={onFechar} testId="form-respostas" corpoClasse=""
       rodape={(
         <button type="button" className="zz-btn zz-btn-secondary mr-auto" onClick={carregar}>
@@ -654,9 +665,21 @@ function Respostas({ f, onFechar }) {
                 const st = STATUS[l.status] || STATUS.recebida;
                 const origem = [l.utm?.utm_source, l.utm?.utm_campaign].filter(Boolean).join(" / ");
                 const detalhe = [l.erro, ...(l.avisos || [])].filter(Boolean).join(" · ");
+                const campos = camposPreenchidos(l.dados);
+                const expandida = aberta === l.id;
                 return (
-                  <tr key={l.id} className="border-t border-line align-top">
-                    <td className="px-6 py-2.5 font-mono text-xs text-ink-2 whitespace-nowrap">{quando(l.created_at)}</td>
+                  <Fragment key={l.id}>
+                  <tr className="border-t border-line align-top cursor-pointer hover:bg-surface-2"
+                    onClick={() => setAberta(expandida ? null : l.id)}
+                    data-testid={`form-resposta-${l.id}`}>
+                    <td className="px-6 py-2.5 font-mono text-xs text-ink-2 whitespace-nowrap">
+                      {quando(l.atualizada_em || l.created_at)}
+                      {l.envios > 1 && (
+                        <div className="font-sans text-[11px] text-ink-3" title="Envios da mesma pessoa juntados nesta resposta">
+                          {l.envios} envios
+                        </div>
+                      )}
+                    </td>
                     <td className="px-6 py-2.5">
                       <div>{l.contato_nome || l.nome || <span className="text-ink-3">Sem nome</span>}</div>
                       <div className="text-xs text-ink-3">{telefone(l.numero) || l.dados?.telefone || l.dados?.celular || ""}</div>
@@ -673,6 +696,31 @@ function Respostas({ f, onFechar }) {
                       {l.respondeu_em && <div className="text-xs text-success">Respondeu</div>}
                     </td>
                   </tr>
+                  {expandida && (
+                    <tr className="bg-surface-2">
+                      <td colSpan={5} className="px-6 py-3">
+                        {campos.length === 0 ? (
+                          <div className="text-xs text-ink-3">O envio não trouxe nenhum campo.</div>
+                        ) : (
+                          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                            {campos.map(([k, v]) => (
+                              <div key={k} className="min-w-0">
+                                <dt className="text-[11px] font-bold uppercase tracking-wider text-ink-3">{k}</dt>
+                                <dd className="text-sm text-ink break-words whitespace-pre-wrap">{String(v)}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        )}
+                        {(l.pagina || Object.keys(l.clique || {}).length > 0) && (
+                          <div className="text-xs text-ink-3 mt-3 break-all">
+                            {l.pagina && <div>Página: {l.pagina}</div>}
+                            {Object.entries(l.clique || {}).map(([k, v]) => <div key={k}>{k}: {v}</div>)}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

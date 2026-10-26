@@ -40,10 +40,13 @@ Decisões, e o motivo de cada uma:
     criar; mas sumir com o envio esconderia um formulário mal configurado, que
     é exatamente o que a tela precisa mostrar.
 
-  - **Clique duplo não vira dois negócios.** O mesmo número no mesmo formulário
-    dentro de `JANELA_REPETIDA_MIN` vira resposta `repetida`, sem negócio, sem
-    tarefa e sem mensagem. Botão de enviar clicado duas vezes é o caso comum
-    de toda landing page.
+  - **A mesma pessoa no mesmo formulário é uma resposta só.** Outro envio do
+    mesmo número dentro de `JANELA_COMPLEMENTO_MIN` **completa** a resposta
+    anterior (campos novos entram, a anotação na ficha é reescrita com tudo),
+    sem segundo negócio, tarefa ou mensagem. Cobre o clique duplo e o
+    formulário em etapas que envia a primeira (nome e telefone, para não
+    perder quem desiste) e depois o resto. Descartar o segundo envio, como
+    era, perdia justamente as respostas completas.
 
   - **O WhatsApp sai depois da resposta ao site**, como na ligação: o
     formulário não pode ficar girando enquanto a Meta (ou a WuzAPI) responde. E
@@ -78,9 +81,10 @@ MAX_CAMPOS = 60
 MAX_CHAVE = 80
 MAX_VALOR = 2000
 
-# Mesmo número, mesmo formulário, dentro deste prazo: é o botão clicado duas
-# vezes, não um segundo pedido.
-JANELA_REPETIDA_MIN = 2
+# Mesmo número, mesmo formulário, dentro deste prazo: é a mesma resposta
+# (clique duplo, ou a etapa seguinte de um formulário em etapas), não um
+# segundo pedido. Depois dele, a pessoa voltou, e é uma conversão nova.
+JANELA_COMPLEMENTO_MIN = 60
 # Mensagem de WhatsApp: uma por pessoa nesta janela, mesmo que ela preencha de
 # novo (ou preencha dois formulários da mesma empresa). Mesmo prazo do
 # telefone, pelo mesmo motivo.
@@ -91,6 +95,8 @@ MODOS = ("agente", "bot", "fila")
 
 # Estados da resposta.
 RECEBIDA = "recebida"
+# Não é mais gravado (o envio repetido completa a resposta anterior); fica
+# para as respostas antigas que já o têm.
 REPETIDA = "repetida"
 RECUSADA = "recusada"
 
@@ -393,6 +399,65 @@ def _nota(formulario: dict, dados: dict, utm: dict, pagina: str | None) -> str:
     return "\n".join(linhas)[:5000]
 
 
+async def _gravar_nota(db, formulario: dict, resposta: dict) -> str:
+    """A anotação da resposta na ficha: criada, ou reescrita com tudo."""
+    texto = _nota(formulario, resposta["dados"], resposta["utm"], resposta["pagina"])
+    nota_id = resposta.get("nota_id")
+    if nota_id:
+        r = await db.contact_notes.update_one(
+            {"tenant_id": resposta["tenant_id"], "id": nota_id}, {"$set": {"texto": texto}})
+        if r.matched_count:
+            return nota_id
+    # Resposta sem anotação (anterior a esta versão) ou anotação apagada à mão.
+    nota_id = str(uuid.uuid4())
+    await db.contact_notes.insert_one({
+        "id": nota_id,
+        "tenant_id": resposta["tenant_id"],
+        "contact_id": resposta["contact_id"],
+        "texto": texto,
+        "autor_id": None,
+        "autor_nome": f"Formulário {formulario['nome']}",
+        "created_at": _now(),
+    })
+    return nota_id
+
+
+async def _complementar(db, formulario: dict, anterior: dict, nova: dict) -> dict:
+    """Junta um envio novo à resposta anterior da mesma pessoa.
+
+    O que veio preenchido agora ganha do que veio antes (a etapa seguinte é a
+    resposta mais completa); campo que veio vazio não apaga o anterior. A
+    origem do anúncio fica a da primeira chegada, só completada: é ela que
+    trouxe a pessoa. Negócio, tarefa e WhatsApp já foram decididos no
+    primeiro envio e não se repetem.
+    """
+    def junta(velho: dict, novo: dict) -> dict:
+        return {**(velho or {}), **{k: v for k, v in (novo or {}).items() if v not in ("", None)}}
+
+    def completa(velho: dict, novo: dict) -> dict:
+        return {**{k: v for k, v in (novo or {}).items() if v}, **{k: v for k, v in (velho or {}).items() if v}}
+
+    mudou = {
+        "dados": junta(anterior.get("dados"), nova["dados"]),
+        "nome": nova.get("nome") or anterior.get("nome"),
+        "email": nova.get("email") or anterior.get("email"),
+        "utm": completa(anterior.get("utm"), nova["utm"]),
+        "clique": completa(anterior.get("clique"), nova["clique"]),
+        "pagina": anterior.get("pagina") or nova.get("pagina"),
+        "referrer": anterior.get("referrer") or nova.get("referrer"),
+        "avisos": list(dict.fromkeys((anterior.get("avisos") or []) + nova["avisos"])),
+        "envios": int(anterior.get("envios") or 1) + 1,
+        "atualizada_em": _now(),
+    }
+    resposta = {**anterior, **mudou}
+    mudou["nota_id"] = await _gravar_nota(db, formulario, resposta)
+    resposta["nota_id"] = mudou["nota_id"]
+    await db.formulario_respostas.update_one(
+        {"tenant_id": anterior["tenant_id"], "id": anterior["id"]}, {"$set": mudou})
+    # Quem chama não agenda o WhatsApp de novo: ele é do primeiro envio.
+    return {**resposta, "complemento": True}
+
+
 async def _contato(db, formulario: dict, numero: str, sep: dict,
                    campos: dict) -> tuple[dict, bool]:
     """A ficha de quem preencheu: criada, ou completada sem sobrescrever."""
@@ -593,6 +658,8 @@ async def receber(db, formulario: dict, payload: dict) -> dict:
         "whatsapp_erro": None,
         "session_id": None,
         "respondeu_em": None,
+        "nota_id": None,
+        "envios": 1,
         "created_at": _now(),
     }
 
@@ -620,26 +687,16 @@ async def receber(db, formulario: dict, payload: dict) -> dict:
         resposta["contato_novo"] = novo
 
         desde = (datetime.now(timezone.utc)
-                 - timedelta(minutes=JANELA_REPETIDA_MIN)).isoformat()
-        repetida = await db.formulario_respostas.find_one({
+                 - timedelta(minutes=JANELA_COMPLEMENTO_MIN)).isoformat()
+        anteriores = await db.formulario_respostas.find({
             "tenant_id": tenant_id, "formulario_id": formulario["id"],
             "contact_id": contato["id"], "status": RECEBIDA,
             "created_at": {"$gte": desde},
-        }, {"_id": 0, "id": 1, "deal_id": 1})
-        if repetida:
-            resposta.update(status=REPETIDA, deal_id=repetida.get("deal_id"))
-            await db.formulario_respostas.insert_one(dict(resposta))
-            return resposta
+        }, {"_id": 0}).sort([("created_at", -1), ("_id", -1)]).limit(1).to_list(1)
+        if anteriores:
+            return await _complementar(db, formulario, anteriores[0], resposta)
 
-        await db.contact_notes.insert_one({
-            "id": str(uuid.uuid4()),
-            "tenant_id": tenant_id,
-            "contact_id": contato["id"],
-            "texto": _nota(formulario, resposta["dados"], sep["utm"], sep["pagina"]),
-            "autor_id": None,
-            "autor_nome": f"Formulário {formulario['nome']}",
-            "created_at": _now(),
-        })
+        resposta["nota_id"] = await _gravar_nota(db, formulario, resposta)
         resposta["deal_id"] = await _negocio(db, formulario, contato, resposta)
         resposta["atividade_id"] = await _tarefa(db, formulario, contato, resposta["deal_id"])
         if (formulario.get("whatsapp") or {}).get("ativo"):

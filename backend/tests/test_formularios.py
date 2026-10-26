@@ -10,8 +10,10 @@ O que precisa ficar provado é o que falha em silêncio, ou falha caro:
     guardado; envio sem telefone fica registrado como recusado, com o motivo;
     valor ruim num campo personalizado derruba o campo, não o lead.
 
-  - **Clique duplo não vira dois negócios**, e quem volta com negócio aberto
-    não ganha um segundo cartão.
+  - **A mesma pessoa é uma resposta só**: o segundo envio (clique duplo ou a
+    etapa seguinte de um formulário em etapas) completa o primeiro, sem perder
+    campo e sem segundo negócio; e quem volta com negócio aberto não ganha um
+    segundo cartão.
 
   - **A origem chega à venda**: o resumo diz quanto cada campanha vendeu.
 
@@ -337,12 +339,24 @@ async def etapa_existente_e_repeticao():
     check("a origem de quem já era contato continua a de antes",
           c["origem"] == "mensagem recebida", c["origem"])
 
-    # O botão clicado duas vezes.
-    await _enviar(f["chave"], {"nome": "Carla", "telefone": "85977776666"})
+    # A etapa seguinte do formulário (ou o botão clicado de novo), com mais campos.
+    await _enviar(f["chave"], {"nome": "Carla", "telefone": "85977776666",
+                               "email": "", "Cidade": "Fortaleza", "utm_source": "outro"})
     respostas = await DB.formulario_respostas.find(
         {"contact_id": "c-velho"}).sort("created_at", 1).to_list(10)
-    check("o segundo envio em seguida é marcado como repetido",
-          [r["status"] for r in respostas] == ["recebida", "repetida"], respostas)
+    check("o segundo envio em seguida completa a mesma resposta",
+          len(respostas) == 1 and respostas[0]["envios"] == 2
+          and respostas[0]["status"] == "recebida", respostas)
+    dados = respostas[0]["dados"]
+    check("com os campos novos, sem apagar os do primeiro com valor vazio",
+          dados.get("Cidade") == "Fortaleza" and dados.get("email") == "carla@x.com"
+          and dados.get("Bairro de interesse") == "Meireles", dados)
+    check("a origem que o primeiro envio não trouxe é completada",
+          respostas[0]["utm"].get("utm_source") == "outro", respostas[0]["utm"])
+    notas = await DB.contact_notes.find({"contact_id": "c-velho"}).to_list(10)
+    check("a ficha tem uma anotação só, reescrita com tudo",
+          len(notas) == 1 and "Cidade: Fortaleza" in notas[0]["texto"]
+          and "Bairro de interesse: Meireles" in notas[0]["texto"], notas)
     check("e não cria segundo negócio nem segunda tarefa",
           await DB.deals.count_documents({"contact_id": "c-velho"}) == 1
           and await DB.activities.count_documents({"contact_id": "c-velho"}) == 1)
