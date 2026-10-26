@@ -324,7 +324,8 @@ async def etapa_barreira_de_permissao():
                 if hasattr(p.default, "dependency")]
 
     for fn in (rt.list_tenants, rt.create_tenant, rt.update_tenant,
-               rt.delete_tenant, rt.impersonate, rt.global_metrics):
+               rt.delete_tenant, rt.impersonate, rt.visao_geral,
+               rt.tenant_detalhe):
         check(f"{fn.__name__} exige super admin",
               auth.require_super_admin in deps_de(fn), deps_de(fn))
 

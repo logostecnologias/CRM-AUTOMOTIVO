@@ -23,7 +23,7 @@ import {
 const adminNav = [
   {
     itens: [
-      { to: "/admin", icon: ChartLine, label: "Métricas Globais", end: true },
+      { to: "/admin", icon: ChartLine, label: "Visão geral", end: true },
       { to: "/admin/tenants", icon: Buildings, label: "Empresas" },
       { to: "/admin/plans", icon: CreditCard, label: "Planos" },
     ],

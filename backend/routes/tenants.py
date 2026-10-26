@@ -9,7 +9,8 @@ from pymongo.errors import DuplicateKeyError
 from db import get_db
 from auth import (require_super_admin, hash_password, create_access_token,
                   create_refresh_token, _set_auth_cookies, _cookie_secure)
-from plan_limits import plan_excess
+from plan_limits import plan_excess, uso_do_plano
+import plataforma
 import whatsapp_client as whatsapp
 import audit
 
@@ -59,39 +60,42 @@ async def _enrich_plan(db, tenants: list[dict]):
     return tenants
 
 
-async def _count_por_tenant(collection, tenant_ids: list[str]) -> dict[str, int]:
-    """Quantos documentos cada empresa tem, numa consulta só."""
-    if not tenant_ids:
-        return {}
-    return {
-        linha["_id"]: linha["n"]
-        async for linha in collection.aggregate([
-            {"$match": {"tenant_id": {"$in": tenant_ids}}},
-            {"$group": {"_id": "$tenant_id", "n": {"$sum": 1}}},
-        ])
-    }
-
-
 @router.get("/tenants")
 async def list_tenants(_=Depends(require_super_admin)):
-    """Lista as empresas com o resumo de bots e usuários de cada uma.
-
-    As contagens vêm agrupadas, e não uma consulta por empresa dentro do laço:
-    com 200 empresas na tela isso eram 400 idas ao banco para montar duas
-    colunas. Agora são duas, e em paralelo.
-    """
+    """Lista as empresas com a saúde de cada uma (ver `plataforma.saude`):
+    quem administra, WhatsApp no ar, movimento da semana e o que precisa de
+    atenção. Tudo em agregações agrupadas, nenhuma consulta por empresa."""
     db = get_db()
     tenants = await db.tenants.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    ids = [t["id"] for t in tenants]
-    bots, users = await asyncio.gather(
-        _count_por_tenant(db.bots, ids),
-        _count_por_tenant(db.users, ids),
+    await _enrich_plan(db, tenants)
+    por_id = await plataforma.saude(db, tenants)
+    return [{**t, "saude": por_id.get(t["id"])} for t in tenants]
+
+
+@router.get("/tenants/{tenant_id}")
+async def tenant_detalhe(tenant_id: str, _=Depends(require_super_admin)):
+    """A ficha de uma empresa para o super admin: equipe com email, conexões e
+    uso do plano. O uso sai de `plan_limits.uso_do_plano`, o mesmo que o
+    cliente vê em Ajustes e o mesmo que barra: as duas telas não podem
+    divergir."""
+    db = get_db()
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    await _enrich_plan(db, [tenant])
+    usuarios, conexoes, por_id, uso = await asyncio.gather(
+        db.users.find({"tenant_id": tenant_id},
+                      {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1,
+                       "status": 1, "created_at": 1}).sort("created_at", 1).to_list(500),
+        db.whatsapp_connections.find(
+            {"tenant_id": tenant_id},
+            {"_id": 0, "id": 1, "nome": 1, "status": 1, "numero_exibicao": 1, "numero": 1,
+             "canal": 1, "ultimo_erro": 1}).to_list(100),
+        plataforma.saude(db, [tenant]),
+        uso_do_plano(db, tenant_id, tenant.get("plan")),
     )
-    result = [
-        {**t, "bots_count": bots.get(t["id"], 0), "users_count": users.get(t["id"], 0)}
-        for t in tenants
-    ]
-    return await _enrich_plan(db, result)
+    return {**tenant, "usuarios": usuarios, "conexoes": conexoes,
+            "saude": por_id.get(tenant_id), "uso": uso}
 
 
 @router.post("/tenants")
@@ -291,14 +295,14 @@ async def impersonate(tenant_id: str, response: Response, super_admin=Depends(re
     return {"ok": True, "tenant_name": tenant["name"], "impersonation_id": log_id}
 
 
-@router.get("/metrics")
-async def global_metrics(_=Depends(require_super_admin)):
+@router.get("/visao")
+async def visao_geral(_=Depends(require_super_admin)):
+    """A visão geral da plataforma: o que precisa de atenção, receita, volume
+    contra a semana anterior e quem mais usa (ver `plataforma`)."""
     db = get_db()
-    return {
-        "tenants_total": await db.tenants.count_documents({}),
-        "tenants_active": await db.tenants.count_documents({"status": "active"}),
-        "users_total": await db.users.count_documents({"role": "tenant_admin"}),
-        "bots_total": await db.bots.count_documents({}),
-        "messages_total": await db.messages_log.count_documents({}),
-        "conversations_total": await db.conversation_sessions.count_documents({}),
-    }
+    tenants = await db.tenants.find({}, {"_id": 0}).to_list(5000)
+    await _enrich_plan(db, tenants)
+    ids = [t["id"] for t in tenants]
+    por_id, serie = await asyncio.gather(plataforma.saude(db, tenants),
+                                         plataforma.serie(db, ids))
+    return plataforma.visao(tenants, por_id, serie)
