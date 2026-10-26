@@ -67,7 +67,13 @@ let webpackConfig = {
   eslint: {
     configure: {
       extends: ["plugin:react-hooks/recommended"],
+      env: { browser: true, node: true, jest: true, es2022: true },
       rules: {
+        // Nome que não existe quebra a tela inteira, e só quando aquele trecho
+        // renderiza: foi assim que `PASSOS` (renomeado para `passos()`) deixou
+        // o "Criar agente" em branco em produção (26/10/2026). Aqui ele quebra
+        // o build.
+        "no-undef": "error",
         "react-hooks/rules-of-hooks": "error",
         "react-hooks/exhaustive-deps": "warn",
       },

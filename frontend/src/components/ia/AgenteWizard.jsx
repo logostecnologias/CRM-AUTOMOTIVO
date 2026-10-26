@@ -862,7 +862,7 @@ export default function AgenteWizard({
           </button>
           <div className="flex items-center gap-3">
             {bloqueio && <span className="text-xs text-ink-3">{bloqueio}</span>}
-            {passo < PASSOS.length - 1 ? (
+            {passo < passos().length - 1 ? (
               <button
                 type="button"
                 className="zz-btn"
