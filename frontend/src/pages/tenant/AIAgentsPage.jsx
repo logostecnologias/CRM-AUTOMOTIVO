@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { Sparkle } from "@phosphor-icons/react";
 import ListaAgentes from "@/components/ia/ListaAgentes";
+import { t } from "@/lib/textos";
 
 // A configuração de provedor, modelo e chave de API **não** mora aqui: mora
 // dentro de cada agente. Uma empresa pode ter a chave da Anthropic no agente de
@@ -31,7 +32,7 @@ export default function AIAgentsPage() {
     <div className="zz-page" data-testid="ai-agents-page">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
         <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight">Agentes de IA</h1>
+          <h1 className="font-heading text-3xl font-bold tracking-tight">{t("Agentes de IA")}</h1>
           <p className="text-ink-2 mt-1 text-sm">
             Atendimento automático por WhatsApp, com transferência para uma pessoa quando precisa.
           </p>
@@ -66,8 +67,8 @@ export default function AIAgentsPage() {
         <div className="zz-panel bg-surface-2 p-4 flex gap-3" data-testid="ai-fallback-note">
           <Sparkle size={18} weight="bold" className="text-ink-3 shrink-0 mt-0.5" />
           <p className="text-xs text-ink-2">
-            Agente sem chave própria usa a IA inclusa no seu plano, dentro do limite mensal
-            contratado. Informar a chave da empresa na configuração do agente remove esse limite e
+            {t("Agente")} sem chave própria usa a IA inclusa no seu plano, dentro do limite mensal
+            contratado. Informar a chave da {t("empresa")} na configuração do {t("agente")} remove esse limite e
             passa o custo direto para a conta dela no provedor.
           </p>
         </div>

@@ -199,6 +199,8 @@ async def etapa_marca():
 
     novo = await rt.update_tenant(t["id"], rt.TenantUpdate(marca="r3"), {"id": "sa"})
     check("a marca troca depois de criada", novo["marca"] == "r3", novo)
+    novo = await rt.update_tenant(t["id"], rt.TenantUpdate(marca="nexa"), {"id": "sa"})
+    check("a Nexa e uma marca aceita", novo["marca"] == "nexa", novo)
 
     await DB.tenants.delete_many({})
     await DB.users.delete_many({})

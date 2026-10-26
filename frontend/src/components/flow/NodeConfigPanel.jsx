@@ -6,6 +6,7 @@ import {
   FORMATO_TEXTO, FORMATO_LISTA, GATILHOS, MODOS_PROFISSIONAL, FORMATOS_AGENDA,
   MAX_DIAS_AGENDA,
 } from "./nodeTypes";
+import { t } from "@/lib/textos";
 
 export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
   const [data, setData] = useState(node?.data || {});
@@ -92,7 +93,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
               </select>
             </Field>
             {data.trigger === "keyword" && (
-              <Field label="Palavra ou Frase-chave" hint="O fluxo só inicia se a mensagem do contato contiver este texto">
+              <Field label="Palavra ou Frase-chave" hint={`O fluxo só inicia se a mensagem do ${t("contato")} contiver este texto`}>
                 <input className="zz-input" value={data.trigger_keyword || ""}
                   onChange={(e) => update({ trigger_keyword: e.target.value })}
                   placeholder="ex: promoção" data-testid="config-trigger-keyword" />
@@ -139,7 +140,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
               {problemas.length > 0 && (
                 <div className="text-xs bg-danger border border-danger text-ink p-3 rounded-lg space-y-1"
                   data-testid="config-menu-problemas">
-                  <div className="font-bold">Assim a mensagem não chega ao contato:</div>
+                  <div className="font-bold">Assim a mensagem não chega ao {t("contato")}:</div>
                   {problemas.map((prob, i) => <div key={i}>· {prob}</div>)}
                   <div className="text-ink-2">
                     O WhatsApp descarta a mensagem sem avisar. Enquanto não for corrigido,
@@ -226,7 +227,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
               </div>
 
               <Field label="Mensagem de Resposta Inválida"
-                hint="Vale também nos formatos com botão: o contato pode digitar em vez de tocar.">
+                hint={`Vale também nos formatos com botão: o ${t("contato")} pode digitar em vez de tocar.`}>
                 <input className="zz-input" value={data.invalid_message || ""}
                   onChange={(e) => update({ invalid_message: e.target.value })} />
               </Field>
@@ -243,7 +244,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
             <Field label="Origem do Valor">
               <select className="zz-input" value={data.source || "last_response"}
                 onChange={(e) => update({ source: e.target.value })}>
-                <option value="last_response">Última resposta do contato</option>
+                <option value="last_response">Última resposta do {t("contato")}</option>
                 <option value="fixed">Valor fixo</option>
               </select>
             </Field>
@@ -338,9 +339,9 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
             <>
               {!servicos.length && (
                 <div className="text-xs text-warning bg-warning-soft border border-warning rounded-lg p-3">
-                  Nenhum serviço cadastrado na Agenda. O nó publica, mas em toda conversa
+                  Nenhum {t("serviço")} cadastrado na Agenda. O nó publica, mas em toda conversa
                   ele vai sair direto pela saída <strong>Não agendou</strong>: cadastre os
-                  serviços em Agenda › Configuração.
+                  {t("serviços")} em Agenda › Configuração.
                 </div>
               )}
               {problemas.length > 0 && (
@@ -353,15 +354,15 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
                 </div>
               )}
 
-              <Field label="Serviço"
-                hint="Em branco, o nó pergunta ao contato qual é. Com um serviço só cadastrado, a pergunta é pulada.">
+              <Field label={t("Serviço")}
+                hint={`Em branco, o nó pergunta ao ${t("contato")} qual é. Com um ${t("serviço")} só cadastrado, a pergunta é pulada.`}>
                 <select className="zz-input" value={data.service_id || ""}
                   data-testid="config-agenda-servico"
                   onChange={(e) => {
                     const sv = servicos.find((x) => x.id === e.target.value);
                     update({ service_id: e.target.value, service_nome: sv?.nome || "" });
                   }}>
-                  <option value="">: perguntar ao contato, </option>
+                  <option value="">: perguntar ao {t("contato")}, </option>
                   {servicos.map((sv) => (
                     <option key={sv.id} value={sv.id}>{sv.nome} ({sv.duracao_min} min)</option>
                   ))}
@@ -424,7 +425,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
                   Cada campo em branco usa o texto padrão, que aparece como sugestão.
                 </p>
                 {[
-                  ["texto_servico", "Pergunta do serviço", "O que você gostaria de agendar?"],
+                  ["texto_servico", `Pergunta do ${t("serviço")}`, "O que você gostaria de agendar?"],
                   ["texto_profissional", "Pergunta do profissional", "Com quem você prefere ser atendido?"],
                   ["texto_dia", "Pergunta do dia", "Para qual dia?"],
                   ["texto_hora", "Pergunta do horário", "E qual horário fica melhor?"],
@@ -444,7 +445,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
                     onChange={(e) => update({ texto_confirmado: e.target.value })} />
                 </Field>
                 <Field label="Quando não dá para agendar"
-                  hint="Sai por esta mensagem e pela saída “Não agendou”: sem horário livre, ou o contato não escolheu nenhuma opção.">
+                  hint={`Sai por esta mensagem e pela saída “Não agendou”: sem horário livre, ou o ${t("contato")} não escolheu nenhuma opção.`}>
                   <textarea rows={3} className="zz-input"
                     value={data.texto_sem_horario || ""}
                     placeholder="No momento não encontrei horários disponíveis. Vou passar você para um atendente."
@@ -479,7 +480,7 @@ export default function NodeConfigPanel({ node, onChange, onDelete, onClose }) {
         )}
 
         {node.type === "transfer_bot" && (
-          <Field label="Bot de destino" hint="A conversa continua no fluxo do bot selecionado.">
+          <Field label={t("Bot de destino")} hint={t("A conversa continua no fluxo do bot selecionado.")}>
             <select className="zz-input" value={data.target_bot_id || ""}
               data-testid="config-target-bot"
               onChange={(e) => {

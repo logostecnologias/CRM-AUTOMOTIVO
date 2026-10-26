@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
+import { t } from "@/lib/textos";
 
 // O vínculo bot ↔ conexão é escolhido no bot (tela de Robôs / editor de fluxo).
 // Aqui os bots só servem pra saber se a conexão tem quem atenda.
@@ -147,7 +148,7 @@ export default function WhatsAppPage() {
           <p className="text-ink-2 mt-2 max-w-2xl">
             Cada conexão é um número de WhatsApp com seu próprio departamento padrão, pela
             <strong> API oficial da Meta</strong> ou pela <strong>ponte não oficial</strong>, que
-            pareia por QR. Os robôs são vinculados na tela de Robôs.
+            pareia por QR. Os {t("robôs")} são vinculados na tela de {t("Robôs")}.
           </p>
         </div>
         <button data-testid="new-connection-btn" onClick={() => setCreating((v) => !v)} className="zz-btn">
@@ -212,7 +213,7 @@ export default function WhatsAppPage() {
       {connections.length === 0 && !creating && (
         <div className="border border-dashed border-line rounded-xl bg-surface p-16 text-center">
           <div className="font-heading text-2xl font-black tracking-tighter mb-2">Nenhuma conexão ainda.</div>
-          <div className="text-sm text-ink-2">Crie a primeira conexão de WhatsApp da empresa.</div>
+          <div className="text-sm text-ink-2">Crie a primeira conexão de WhatsApp da {t("empresa")}.</div>
         </div>
       )}
 
@@ -352,14 +353,14 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
           {naoOficial ? (
             <>
               <strong>Webhook não configurado na instância.</strong> O número envia mensagens,
-              mas as respostas dos contatos não chegam. Salve a instância de novo — a
+              mas as respostas dos {t("contatos")} não chegam. Salve a instância de novo — a
               WuzAPI aceita a configuração e grava vazio quando o formato do campo não é o
               que ela espera, então a falha não aparece em outro lugar.
             </>
           ) : (
             <>
               <strong>Webhook não assinado.</strong> O número envia mensagens, mas as respostas
-              dos contatos não chegam até o app ser assinado na conta da Meta. Cadastre as
+              dos {t("contatos")} não chegam até o app ser assinado na conta da Meta. Cadastre as
               credenciais de novo com um token que tenha a permissão
               <span className="font-mono"> whatsapp_business_management</span>.
             </>
@@ -392,8 +393,8 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
 
       {!temBotPrimeiraMensagem && (
         <div className="mt-3 text-xs text-warning bg-warning-soft border border-warning p-2 rounded-lg" data-testid={`no-first-bot-warning-${conn.id}`}>
-          <strong>Sem bot de primeira mensagem.</strong> Mensagens que não casarem com a palavra-chave vão
-          direto para a fila de atendimento humano, sem nenhuma resposta automática para o contato.
+          <strong>{t("Sem bot de primeira mensagem.")}</strong> Mensagens que não casarem com a palavra-chave vão
+          direto para a fila de atendimento humano, sem nenhuma resposta automática para o {t("contato")}.
         </div>
       )}
     </div>
@@ -436,7 +437,7 @@ function FormWuzapi({ conn, onSalvar, onFechar }) {
       <div className="text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg">
         <strong>A chave de assinatura precisa ser a mesma com que a instância foi criada.</strong>{" "}
         A ponte só a aceita na criação, e não há como consultá-la depois — se ela não
-        bater, o número pareia, envia e as respostas dos contatos são recusadas sem
+        bater, o número pareia, envia e as respostas dos {t("contatos")} são recusadas sem
         aparecer em lugar nenhum. Se você não tem essa chave, exclua esta conexão e crie
         outra: aí o sistema provisiona a instância e a chave sozinho.
       </div>

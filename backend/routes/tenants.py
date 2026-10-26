@@ -31,7 +31,7 @@ Nome = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max
 # padrão, e empresa sem o campo gravado (anterior a ele) também é ZappZen.
 # Marca nova entra aqui e em `frontend/src/lib/marca.js`, junto com os tokens
 # dela em `index.css`.
-Marca = Literal["zappzen", "r3"]
+Marca = Literal["zappzen", "r3", "nexa"]
 MARCA_PADRAO = "zappzen"
 
 

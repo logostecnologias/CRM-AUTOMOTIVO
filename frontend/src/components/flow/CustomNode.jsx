@@ -5,6 +5,7 @@ import {
   MODOS_PROFISSIONAL, rotuloGatilho,
 } from "./nodeTypes";
 import { Warning } from "@phosphor-icons/react";
+import { t } from "@/lib/textos";
 
 function CustomNode({ id, data, selected, type }) {
   const meta = NODE_TYPES[type] || NODE_TYPES.text;
@@ -101,7 +102,7 @@ function CustomNode({ id, data, selected, type }) {
             <div className="text-xs text-ink">
               {data.service_nome
                 ? <span className="font-semibold">{data.service_nome}</span>
-                : <span className="text-ink-3">pergunta qual serviço</span>}
+                : <span className="text-ink-3">pergunta qual {t("serviço")}</span>}
             </div>
             <div className="text-[10px] font-mono text-ink-3">
               {MODOS_PROFISSIONAL.find((m) => m.valor === (data.modo_profissional || "qualquer"))
@@ -121,11 +122,11 @@ function CustomNode({ id, data, selected, type }) {
         )}
         {type === "transfer_bot" && (
           <div className="text-xs text-ink">
-            Passa a conversa para: <span className="font-mono text-info">{data.target_bot_name || data.target_bot_id || <span className="italic text-ink-4">selecione um bot</span>}</span>
+            Passa a conversa para: <span className="font-mono text-info">{data.target_bot_name || data.target_bot_id || <span className="italic text-ink-4">{t("selecione um bot")}</span>}</span>
           </div>
         )}
         {type === "end" && (
-          <div className="text-xs text-ink">A sessão do contato é finalizada.</div>
+          <div className="text-xs text-ink">A sessão do {t("contato")} é finalizada.</div>
         )}
       </div>
 

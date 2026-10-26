@@ -11,12 +11,14 @@ import AgenteWizard from "./AgenteWizard";
 import TreinarAgente from "./TreinarAgente";
 import { MediaContent, Transcricao } from "@/components/atendimento/shared";
 import { useAcao } from "@/hooks/useAcao";
+import { t } from "@/lib/textos";
 
-const MODO_ROTULO = {
-  fallback: "Entra quando nenhum robô atende",
+// Função, e não constante: o texto depende da marca, resolvida na renderização.
+const modoRotulo = () => ({
+  fallback: `Entra quando nenhum ${t("robô")} atende`,
   primeiro: "Atende na frente",
   desligado: "Desligado",
-};
+});
 
 /** Conversa de teste com um agente, sem WhatsApp e sem gravar nada.
  *
@@ -116,14 +118,14 @@ function ChatTeste({ agente, onFechar }) {
         // um aviso neutro. Nos dois casos é isso que o cliente leria.
         ...(data.transferiu && data.texto ? [{ role: "assistant", content: data.texto }] : []),
         ...(data.segurada
-          ? [{ role: "sistema", content: `Mensagem segurada, não enviada ao contato: "${data.segurada}"` }]
+          ? [{ role: "sistema", content: `Mensagem segurada, não enviada ao ${t("contato")}: "${data.segurada}"` }]
           : []),
         data.transferiu
           ? { role: "sistema", content: `Transferido para atendimento humano — ${data.motivo}` }
           : { role: "assistant", content: data.texto },
         // No teste nada é gravado; numa conversa real ela terminaria aqui.
         ...(data.finalizou
-          ? [{ role: "sistema", content: "O agente finalizou o atendimento (no teste nada é gravado)." }]
+          ? [{ role: "sistema", content: `O ${t("agente")} finalizou o atendimento (no teste nada é gravado).` }]
           : []),
       ]);
     } catch (ex) {
@@ -160,7 +162,7 @@ function ChatTeste({ agente, onFechar }) {
         <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-surface-2">
           {mensagens.length === 0 && (
             <div className="text-xs text-ink-3 text-center py-10">
-              Escreva como se fosse um cliente e veja o que o agente responde. Dá para mandar
+              Escreva como se fosse um cliente e veja o que o {t("agente")} responde. Dá para mandar
               foto e áudio também, pelo clipe ou pelo microfone.
             </div>
           )}
@@ -309,7 +311,7 @@ function MenuAcoes({ onEditar, onPrompt, onExcluir }) {
             <Code size={15} /> Ver instruções
           </button>
           <button className={`${item} text-danger`} onClick={onExcluir}>
-            <Trash size={15} /> Excluir agente
+            <Trash size={15} /> Excluir {t("agente")}
           </button>
         </div>
       )}
@@ -352,12 +354,12 @@ export default function ListaAgentes({ plataformaDisponivel }) {
 
   const remover = async (a) => {
     if (!(await confirmToast(
-      `Excluir o agente "${a.nome}"? As conversas que ele atende passam a cair na fila humana.`,
+      `Excluir o ${t("agente")} "${a.nome}"? As conversas que ele atende passam a cair na fila humana.`,
       { confirmLabel: "Excluir" }))) return;
     try {
       await api.delete(`/ai/agents/${a.id}`);
       setAgentes((as) => as.filter((x) => x.id !== a.id));
-      toast.success("Agente excluído.");
+      toast.success(`${t("Agente")} excluído.`);
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
     }
@@ -422,12 +424,12 @@ export default function ListaAgentes({ plataformaDisponivel }) {
       {agentes.length > 0 && (
         <div className="flex items-center gap-3 mb-4">
           <span className="text-sm text-ink-3 shrink-0" data-testid="agentes-total">
-            {agentes.length} {agentes.length === 1 ? "agente" : "agentes"}
+            {agentes.length} {agentes.length === 1 ? t("agente") : t("agentes")}
           </span>
           {agentes.length > 2 && (
             <div className="relative ml-auto w-full max-w-xs">
               <MagnifyingGlass size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
-              <input className="zz-input pl-9" placeholder="Buscar agentes…"
+              <input className="zz-input pl-9" placeholder={`Buscar ${t("agentes")}…`}
                 value={busca} onChange={(e) => setBusca(e.target.value)}
                 data-testid="buscar-agente" />
             </div>
@@ -441,13 +443,13 @@ export default function ListaAgentes({ plataformaDisponivel }) {
           <div className="w-14 h-14 rounded-2xl bg-brand-soft text-ink flex items-center justify-center">
             <Robot size={26} weight="bold" />
           </div>
-          <div className="font-heading text-lg font-bold tracking-tight">Nenhum agente ainda</div>
+          <div className="font-heading text-lg font-bold tracking-tight">Nenhum {t("agente")} ainda</div>
           <p className="text-ink-2 text-sm max-w-sm">
             Em três passos você define quem responde, com que tom, e até onde ele vai antes de
             chamar uma pessoa.
           </p>
           <button className="zz-btn mt-1" disabled={!catalogo} onClick={() => setEditando("novo")}>
-            <Plus size={16} weight="bold" /> Criar o primeiro agente
+            <Plus size={16} weight="bold" /> Criar o primeiro {t("agente")}
           </button>
         </div>
       ) : (
@@ -501,7 +503,7 @@ export default function ListaAgentes({ plataformaDisponivel }) {
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <span className="px-2 py-1 rounded-full bg-surface-2 border border-line text-[11px] text-ink-2">
-                      {MODO_ROTULO[a.modo] || a.modo}
+                      {modoRotulo()[a.modo] || a.modo}
                     </span>
                     {(a.tom || []).map((t) => (
                       <span key={t}
@@ -555,7 +557,7 @@ export default function ListaAgentes({ plataformaDisponivel }) {
           })}
           {filtrados.length === 0 ? (
             <div className="col-span-full zz-panel p-8 text-center text-sm text-ink-3">
-              Nenhum agente encontrado para “{busca}”.
+              Nenhum {t("agente")} encontrado para “{busca}”.
             </div>
           ) : (
             // O criar vive aqui, e não no cabeçalho: fica ao lado do que já
@@ -567,7 +569,7 @@ export default function ListaAgentes({ plataformaDisponivel }) {
                          hover:border-info hover:text-info hover:bg-info-soft
                          disabled:opacity-45 transition-colors">
               <Plus size={22} weight="bold" />
-              <span className="text-sm font-bold">Criar agente</span>
+              <span className="text-sm font-bold">Criar {t("agente")}</span>
             </button>
           )}
         </div>

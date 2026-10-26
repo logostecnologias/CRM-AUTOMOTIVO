@@ -8,15 +8,17 @@ import { useAcao } from "@/hooks/useAcao";
 import Modal from "@/components/ui/Modal";
 import EscolhaDeModelo from "@/components/whatsapp/EscolhaDeModelo";
 import { confirmToast } from "@/lib/confirm-toast";
+import { t } from "@/lib/textos";
 
 // Formulário de site: quem preenche a landing page vira contato aqui, com a
 // origem do anúncio, e pode já cair no funil, na agenda do vendedor e no
 // WhatsApp. Cada formulário tem um endereço com chave própria; a chave fica
 // no código da página e só serve para criar lead naquele formulário.
 
-const MODOS = [
-  ["agente", "Agente de IA", "O agente da conexão responde. Sem agente ligado, a conversa vai para a fila."],
-  ["bot", "Robô", "Um robô do editor começa do nó Início."],
+// Funcao, nao constante: o texto depende da marca (lib/textos.js).
+const modos = () => [
+  ["agente", t("Agente de IA"), `O ${t("agente")} da conexão responde. Sem ${t("agente")} ligado, a conversa vai para a fila.`],
+  ["bot", t("Robô"), `Um ${t("robô")} do editor começa do nó Início.`],
   ["fila", "Fila de atendimento", "Direto para a Central, para uma pessoa responder."],
 ];
 
@@ -140,8 +142,8 @@ export default function FormulariosPage() {
         <div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Formulários</h1>
           <p className="text-ink-2 mt-2 text-sm max-w-3xl">
-            Quem preenche o formulário do seu site vira contato aqui, com a origem do
-            anúncio. Daqui ele pode ir direto para o funil, para a agenda de um vendedor
+            Quem preenche o formulário do seu site vira {t("contato")} aqui, com a origem do
+            anúncio. Daqui ele pode ir direto para o {t("funil")}, para a agenda de um vendedor
             e receber uma mensagem no WhatsApp.
           </p>
         </div>
@@ -176,12 +178,12 @@ export default function FormulariosPage() {
           {resumo ? (
             <div className="grid grid-cols-2 gap-3">
               <Numero rotulo="Leads" valor={resumo.total.respostas} />
-              <Numero rotulo="Contatos novos" valor={resumo.total.contatos_novos} />
-              <Numero rotulo="Negócios" valor={resumo.total.negocios} />
-              <Numero rotulo="Vendas" valor={resumo.total.ganhos} />
+              <Numero rotulo={`${t("Contatos")} novos`} valor={resumo.total.contatos_novos} />
+              <Numero rotulo={t("Negócios")} valor={resumo.total.negocios} />
+              <Numero rotulo={t("Vendas")} valor={resumo.total.ganhos} />
               <div className="col-span-2 border border-line rounded-lg p-3">
                 <div className="font-heading text-2xl font-black">{reais(resumo.total.valor_ganho)}</div>
-                <div className="text-[11px] uppercase tracking-wider font-bold text-ink-3 mt-0.5">Vendido</div>
+                <div className="text-[11px] uppercase tracking-wider font-bold text-ink-3 mt-0.5">{t("Vendido")}</div>
               </div>
               {resumo.total.recusadas > 0 && (
                 <div className="col-span-2 text-xs text-warning flex items-start gap-1.5">
@@ -200,8 +202,8 @@ export default function FormulariosPage() {
           <div className="px-5 py-4 border-b border-line">
             <h3 className="font-heading text-lg font-black tracking-tight">De onde vieram os leads</h3>
             <p className="text-xs text-ink-2 mt-1">
-              Pelo utm_source e utm_campaign do link do anúncio. A venda conta para a campanha
-              que trouxe o lead, mesmo que tenha fechado depois.
+              Pelo utm_source e utm_campaign do link do anúncio.{" "}
+              {t("A venda conta para a campanha que trouxe o lead, mesmo que tenha fechado depois.")}
             </p>
           </div>
           <div className="overflow-x-auto">
@@ -211,9 +213,9 @@ export default function FormulariosPage() {
                   <th className="px-5 py-2 font-bold">Origem</th>
                   <th className="px-5 py-2 font-bold">Campanha</th>
                   <th className="px-5 py-2 font-bold text-right">Leads</th>
-                  <th className="px-5 py-2 font-bold text-right">Negócios</th>
-                  <th className="px-5 py-2 font-bold text-right">Vendas</th>
-                  <th className="px-5 py-2 font-bold text-right">Vendido</th>
+                  <th className="px-5 py-2 font-bold text-right">{t("Negócios")}</th>
+                  <th className="px-5 py-2 font-bold text-right">{t("Vendas")}</th>
+                  <th className="px-5 py-2 font-bold text-right">{t("Vendido")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -249,7 +251,7 @@ export default function FormulariosPage() {
 
 function CartaoFormulario({ f, onEditar, onInstalar, onRespostas, onExcluir, excluindo }) {
   const acoes = [
-    f.negocio?.ativo && "Abre negócio",
+    f.negocio?.ativo && `Abre ${t("negócio")}`,
     f.tarefa?.ativo && "Cria tarefa",
     f.whatsapp?.ativo && "Manda WhatsApp",
     f.dominios?.length > 0 && `Só ${f.dominios.join(", ")}`,
@@ -374,7 +376,7 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
       onFechar={onFechar} onSalvar={salvar} salvarLabel={novo ? "Criar formulário" : "Salvar"}
       testId="form-editar" corpoClasse="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Campo label="Nome" nota="Para você reconhecer. Ex.: LP Lançamento, Site — Contato.">
+        <Campo label="Nome" nota={`Para você reconhecer. Ex.: LP Lançamento, Site — ${t("Contato")}.`}>
           <input required autoFocus maxLength={80} className="zz-input" value={form.nome}
             data-testid="form-nome" onChange={(e) => set({ nome: e.target.value })} />
         </Campo>
@@ -386,13 +388,13 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
         </div>
       </div>
 
-      <Secao titulo="O contato">
+      <Secao titulo={`O ${t("contato")}`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Campo label="Etiquetas" nota="Separadas por vírgula. Somadas às que o contato já tem.">
+          <Campo label="Etiquetas" nota={`Separadas por vírgula. Somadas às que o ${t("contato")} já tem.`}>
             <input className="zz-input" value={form.tagsTexto} placeholder="site, lançamento"
               onChange={(e) => set({ tagsTexto: e.target.value })} />
           </Campo>
-          <Campo label="Responsável" nota="Dono do contato e do negócio. Quem já tem dono continua com ele.">
+          <Campo label="Responsável" nota={`Dono do ${t("contato")} e do ${t("negócio")}. Quem já tem dono continua com ele.`}>
             <select className="zz-input" value={form.responsavel_id} data-testid="form-responsavel"
               onChange={(e) => set({ responsavel_id: e.target.value })}>
               <option value="">Ninguém</option>
@@ -402,11 +404,11 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
         </div>
       </Secao>
 
-      <Secao titulo="Funil" ligado={form.negocio.ativo}
-        onLigar={(v) => setParte("negocio", { ativo: v })} rotulo="Abrir um negócio para cada lead"
-        nota="Quem já tem negócio aberto neste funil não ganha outro.">
+      <Secao titulo={t("Funil")} ligado={form.negocio.ativo}
+        onLigar={(v) => setParte("negocio", { ativo: v })} rotulo={`Abrir um ${t("negócio")} para cada lead`}
+        nota={`Quem já tem ${t("negócio")} aberto neste ${t("funil")} não ganha outro.`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Campo label="Funil">
+          <Campo label={t("Funil")}>
             <select className="zz-input" value={form.negocio.pipeline_id}
               onChange={(e) => setParte("negocio", { pipeline_id: e.target.value, etapa_id: "" })}>
               <option value="">Selecione…</option>
@@ -416,7 +418,7 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
           <Campo label="Etapa">
             <select className="zz-input" value={form.negocio.etapa_id}
               onChange={(e) => setParte("negocio", { etapa_id: e.target.value })}>
-              <option value="">A primeira do funil</option>
+              <option value="">A primeira do {t("funil")}</option>
               {etapas.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
             </select>
           </Campo>
@@ -424,7 +426,7 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
             <input className="zz-input" inputMode="decimal" value={form.negocio.valor}
               onChange={(e) => setParte("negocio", { valor: e.target.value })} />
           </Campo>
-          <Campo label="Título do negócio" nota="Use {nome} e {formulario}. Em branco: nome do formulário e do lead.">
+          <Campo label={`Título do ${t("negócio")}`} nota="Use {nome} e {formulario}. Em branco: nome do formulário e do lead.">
             <input className="zz-input" maxLength={200} value={form.negocio.titulo}
               onChange={(e) => setParte("negocio", { titulo: e.target.value })} />
           </Campo>
@@ -433,7 +435,7 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
 
       <Secao titulo="Retorno" ligado={form.tarefa.ativo}
         onLigar={(v) => setParte("tarefa", { ativo: v })} rotulo="Criar tarefa de retorno para o responsável"
-        nota="Aparece na agenda de Atividades e fica atrasada se ninguém ligar.">
+        nota={`Aparece na agenda de ${t("Atividades")} e fica atrasada se ninguém ligar.`}>
         {!form.responsavel_id && (
           <p className="text-xs text-warning mb-3">Escolha um responsável acima: a tarefa precisa de um dono.</p>
         )}
@@ -484,7 +486,7 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
         <div className="mt-4">
           <div className="text-xs font-bold uppercase tracking-wider text-ink-2 mb-1.5">Quem atende a resposta</div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {MODOS.map(([valor, rotulo, nota]) => {
+            {modos().map(([valor, rotulo, nota]) => {
               const marcado = form.whatsapp.resposta_modo === valor;
               return (
                 <button key={valor} type="button" onClick={() => setParte("whatsapp", { resposta_modo: valor })}
@@ -498,7 +500,7 @@ function EditarFormulario({ inicial, onFechar, onSalvo }) {
           </div>
           {form.whatsapp.resposta_modo === "bot" && (
             <div className="mt-3 max-w-sm">
-              <Campo label="Robô">
+              <Campo label={t("Robô")}>
                 <select className="zz-input" value={form.whatsapp.bot_id}
                   onChange={(e) => setParte("whatsapp", { bot_id: e.target.value })}>
                   <option value="">Selecione…</option>
@@ -585,8 +587,8 @@ ZappZen.enviar({ nome: "Ana", telefone: "85999998888", email: "ana@x.com" })
           <span className="font-mono">celular</span> / <span className="font-mono">whatsapp</span>,{" "}
           <span className="font-mono">email</span>, <span className="font-mono">empresa</span>,{" "}
           <span className="font-mono">cargo</span>.</div>
-        <div>Campo com o mesmo nome de um campo personalizado dos Contatos vai para ele. Os outros
-          ficam guardados na resposta e numa anotação na ficha do contato.</div>
+        <div>Campo com o mesmo nome de um campo personalizado dos {t("Contatos")} vai para ele. Os outros
+          ficam guardados na resposta e numa anotação na ficha do {t("contato")}.</div>
       </div>
       <div className="text-[11px] text-ink-3 break-all">
         Endereço: <span className="font-mono">{endereco}</span>

@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { useAcao } from "@/hooks/useAcao";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 // Treino do agente, numa conversa só: o que a empresa ensina, as fotos que o
 // agente pode mandar e o estoque que ele consulta.
@@ -103,7 +104,7 @@ function VerEstoque({ agente, estoque, onFechar }) {
           <div className="min-w-0">
             <div className="font-heading text-lg font-bold tracking-tight truncate">Estoque de {agente.nome}</div>
             <div className="text-[11px] text-ink-3">
-              Procure como um cliente perguntaria. É a mesma busca que o agente faz.
+              Procure como um cliente perguntaria. É a mesma busca que o {t("agente")} faz.
             </div>
           </div>
           <button className="zz-btn zz-btn-secondary text-xs py-1.5 shrink-0" onClick={onFechar}>Fechar</button>
@@ -120,7 +121,7 @@ function VerEstoque({ agente, estoque, onFechar }) {
             <div className="p-6 text-sm text-ink-3">Carregando…</div>
           ) : res.linhas.length === 0 ? (
             <div className="p-6 text-sm text-ink-3 text-center">
-              Nada encontrado. O agente também responderia que não tem.
+              Nada encontrado. O {t("agente")} também responderia que não tem.
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -225,7 +226,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
     const destino = destinoDoArquivo(f);
     if (destino === "foto") {
       if (fotosCheias) {
-        toast.error(`O agente já tem ${MAX_FOTOS} fotos, o máximo. Tire alguma antes de anexar outra.`);
+        toast.error(`O ${t("agente")} já tem ${MAX_FOTOS} fotos, o máximo. Tire alguma antes de anexar outra.`);
         return;
       }
       setFoto({ arquivo: f, previa: URL.createObjectURL(f) });
@@ -298,7 +299,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   const [subirEstoque, subindoEstoque] = useAcao(async (arquivo) => {
     if (estoque && !(await confirmToast(
       `Substituir o estoque atual (${estoque.total.toLocaleString("pt-BR")} itens) por "${arquivo.name}"? ` +
-      "O que não estiver na planilha nova deixa de existir para o agente.",
+      `O que não estiver na planilha nova deixa de existir para o ${t("agente")}.`,
       { confirmLabel: "Substituir" }))) return;
     const corpo = new FormData();
     corpo.append("file", arquivo);
@@ -313,7 +314,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
   });
 
   const [removerEstoque] = useAcao(async () => {
-    if (!(await confirmToast("Remover o estoque? O agente deixa de consultar produtos.",
+    if (!(await confirmToast(`Remover o estoque? O ${t("agente")} deixa de consultar produtos.`,
       { confirmLabel: "Remover" }))) return;
     try {
       await api.delete(`/ai/agents/${agente.id}/estoque`);
@@ -377,10 +378,10 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
 
   const [apagar] = useAcao(async (tipo, item) => {
     const pergunta = tipo === "foto"
-      ? `Tirar a foto "${item.descricao}" do catálogo do agente?`
+      ? `Tirar a foto "${item.descricao}" do catálogo do ${t("agente")}?`
       : tipo === "documento"
-        ? `O agente vai esquecer o que leu em "${item.nome}". Continuar?`
-        : "O agente vai esquecer este ensinamento. Continuar?";
+        ? `O ${t("agente")} vai esquecer o que leu em "${item.nome}". Continuar?`
+        : `O ${t("agente")} vai esquecer este ensinamento. Continuar?`;
     if (!(await confirmToast(pergunta, { confirmLabel: tipo === "foto" ? "Tirar" : "Esquecer" }))) return;
     try {
       if (tipo === "documento") {
@@ -426,10 +427,10 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
 
   const bloqueado = foto ? false : memoriaCheia;
   const placeholder = foto
-    ? "Descreva a foto: modelo, cor, ano, ângulo… (é por isso que o agente decide quando mandar)"
+    ? `Descreva a foto: modelo, cor, ano, ângulo… (é por isso que o ${t("agente")} decide quando mandar)`
     : memoriaCheia
       ? "Limite de ensinamentos atingido. Apague os antigos para continuar."
-      : "Ensine algo ao agente… (Enter para enviar, Shift+Enter para nova linha)";
+      : `Ensine algo ao ${t("agente")}… (Enter para enviar, Shift+Enter para nova linha)`;
 
   const acoesItem = (tipo, item, textoAtual) => (
     <span className="flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -482,7 +483,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           <div className="absolute inset-0 z-20 m-2 rounded-2xl border-2 border-dashed border-info bg-info-soft
                           flex flex-col items-center justify-center gap-2 pointer-events-none">
             <UploadSimple size={32} weight="bold" className="text-info" />
-            <div className="text-sm font-bold text-info">Solte para ensinar o agente</div>
+            <div className="text-sm font-bold text-info">Solte para ensinar o {t("agente")}</div>
             <div className="text-xs text-ink-2">Foto, planilha (Excel ou CSV) ou documento (PDF, Word, texto)</div>
           </div>
         )}
@@ -509,12 +510,12 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
         </div>
 
         <div className="border-b border-line px-4 py-2.5 flex flex-wrap items-center gap-2" data-testid="treinar-poderes">
-          <span className="text-[11px] text-ink-3 mr-1">O agente pode:</span>
+          <span className="text-[11px] text-ink-3 mr-1">O {t("agente")} pode:</span>
           {[
             { chave: "agenda_ativa", Icone: CalendarCheck, rotulo: "Marcar horário na Agenda",
-              nota: "Consulta os horários livres, marca e cancela de verdade. Os serviços e a grade vêm da tela Agenda." },
-            { chave: "funil_ativo", Icone: Funnel, rotulo: "Mover o lead no funil",
-              nota: "Cria o negócio de quem conversa com ele e avança pelas etapas em aberto. Ganho e Perdido ficam com a equipe." },
+              nota: `Consulta os horários livres, marca e cancela de verdade. Os ${t("serviços")} e a grade vêm da tela Agenda.` },
+            { chave: "funil_ativo", Icone: Funnel, rotulo: `Mover o lead no ${t("funil")}`,
+              nota: `Cria o ${t("negócio")} de quem conversa com ele e avança pelas etapas em aberto. ${t("Ganho")} e ${t("Perdido")} ficam com a equipe.` },
             { chave: "finalizar_ativo", Icone: CheckCircle, rotulo: "Finalizar o atendimento",
               nota: "Encerra a conversa quando o assunto se resolve, com um resumo no histórico." },
             { chave: "audio_ativo", Icone: Microphone, rotulo: "Entender áudios",
@@ -537,7 +538,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               </button>
             );
           })}
-          <span className="text-[11px] text-ink-3" title="Sempre ligado: é a saída de qualquer dúvida do agente.">
+          <span className="text-[11px] text-ink-3" title={`Sempre ligado: é a saída de qualquer dúvida do ${t("agente")}.`}>
             · transferir para uma pessoa, sempre
           </span>
           {poderes.audio_ativo && poderes.audio_pronto === false && (
@@ -545,9 +546,9 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               data-testid="audio-sem-transcricao">
               <Warning size={14} weight="bold" className="shrink-0 mt-px" />
               <span>
-                A chave deste agente <strong>não transcreve áudio</strong> (só as da OpenAI e da Groq transcrevem),
-                então quem mandar áudio vai para um atendente. Para o agente ouvir, use uma chave da OpenAI ou da
-                Groq no agente.
+                A chave deste {t("agente")} <strong>não transcreve áudio</strong> (só as da OpenAI e da Groq transcrevem),
+                então quem mandar áudio vai para um atendente. Para o {t("agente")} ouvir, use uma chave da OpenAI ou da
+                Groq no {t("agente")}.
               </span>
             </div>
           )}
@@ -556,9 +557,9 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               data-testid="imagem-sem-visao">
               <Warning size={14} weight="bold" className="shrink-0 mt-px" />
               <span>
-                O modelo escolhido para este agente <strong>não enxerga imagens</strong>, então foto sem texto vai
-                para um atendente. Para o agente ver fotos, troque por um modelo que enxergue (Claude, GPT-5 ou
-                Gemini) na configuração do agente.
+                O modelo escolhido para este {t("agente")} <strong>não enxerga imagens</strong>, então foto sem texto vai
+                para um atendente. Para o {t("agente")} ver fotos, troque por um modelo que enxergue (Claude, GPT-5 ou
+                Gemini) na configuração do {t("agente")}.
               </span>
             </div>
           )}
@@ -568,21 +569,21 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               <Funnel size={14} weight="bold" className="shrink-0 mt-px text-info" />
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span>Cria o negócio de cada contato</span>
+                  <span>Cria o {t("negócio")} de cada {t("contato")}</span>
                   {(poderes.funis || []).length > 1 ? (
                     <>
-                      <span>no funil</span>
+                      <span>no {t("funil")}</span>
                       <select className="zz-input h-8 text-xs" style={{ width: "auto" }} value={poderes.funil_id || ""}
                         data-testid="funil-do-agente-select" onChange={(e) => escolherFunil(e.target.value)}>
                         {poderes.funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                       </select>
                     </>
-                  ) : <span>no funil</span>}
+                  ) : <span>no {t("funil")}</span>}
                   <span>e avança por:</span>
                   <strong className="text-ink">{poderes.funil_etapas.join(" → ")}</strong>
                 </div>
                 <div>
-                  Só para a frente, e nunca marca venda ganha nem perdida: isso fica com a equipe. Para dizer
+                  {t("Só para a frente, e nunca marca venda ganha nem perdida: isso fica com a equipe.")} Para dizer
                   quando mover, ensine aqui mesmo, por exemplo: <em>"mova para Proposta enviada quando mandar o
                   orçamento"</em>.{" "}
                   <button type="button" className="underline font-semibold text-info"
@@ -596,10 +597,10 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               data-testid="agenda-sem-servico">
               <Warning size={14} weight="bold" className="shrink-0 mt-px" />
               <span>
-                A Agenda ainda não tem {poderes.agenda_servicos === 0 ? "nenhum serviço" : "nenhum profissional"} cadastrado,
-                então o agente <strong>não consegue marcar</strong>: ele anota o dia e o horário que o cliente quer e
+                A Agenda ainda não tem {poderes.agenda_servicos === 0 ? `nenhum ${t("serviço")}` : "nenhum profissional"} cadastrado,
+                então o {t("agente")} <strong>não consegue marcar</strong>: ele anota o dia e o horário que o cliente quer e
                 passa para a equipe confirmar. Para ele marcar sozinho, cadastre na tela <strong>Agenda</strong> um
-                serviço (por exemplo, "Visita à loja") e quem atende, com os horários de atendimento.
+                {t("serviço")} (por exemplo, "Visita à loja") e quem atende, com os horários de atendimento.
               </span>
             </div>
           )}
@@ -637,7 +638,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
           {linhaDoTempo.length === 0 && (
             <div className="text-center py-8 px-6">
               <Brain size={28} weight="bold" className="mx-auto text-ink-4 mb-3" />
-              <p className="text-sm text-ink-2 font-semibold">Ensine o agente como ensinaria um funcionário novo.</p>
+              <p className="text-sm text-ink-2 font-semibold">Ensine o {t("agente")} como ensinaria um funcionário novo.</p>
               <p className="text-xs text-ink-3 mt-2 leading-relaxed">
                 Uma regra, um fato ou um jeito de agir por mensagem. Por exemplo:<br />
                 “Quando perguntarem de entrega, diga que sai em até 2 dias úteis.”<br />
@@ -709,7 +710,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               <img src={foto.previa} alt="" className="w-12 h-12 rounded-lg object-cover shrink-0" />
               <div className="text-[11px] text-ink-2 flex-1 min-w-0">
                 <div className="font-semibold truncate">{foto.arquivo.name}</div>
-                O agente <strong>não vê</strong> a imagem: escreva abaixo o que aparece nela.
+                O {t("agente")} <strong>não vê</strong> a imagem: escreva abaixo o que aparece nela.
               </div>
               <button className="w-7 h-7 rounded-lg flex items-center justify-center text-ink-3 hover:bg-surface hover:text-ink shrink-0"
                 onClick={() => setFoto(null)} aria-label="Cancelar foto">
@@ -776,7 +777,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
             descricao={`Para ${agente.nome} marcar horários de verdade, a Agenda precisa ter o que oferecer.`}
             testId="modal-agenda-vazia"
             onFechar={() => setAgendaVazia(null)}
-            salvarLabel={agendaVazia.agenda_servicos === 0 ? "Cadastrar serviços" : "Cadastrar profissionais"}
+            salvarLabel={agendaVazia.agenda_servicos === 0 ? `Cadastrar ${t("serviços")}` : "Cadastrar profissionais"}
             salvandoLabel="Abrindo a Agenda…"
             cancelarLabel="Agora não"
             onSalvar={async () => {
@@ -794,15 +795,15 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
             }}
           >
             <p className="text-sm text-ink-2">
-              O agente consulta os horários livres e marca sozinho a partir do que está
+              O {t("agente")} consulta os horários livres e marca sozinho a partir do que está
               cadastrado na tela <strong>Agenda</strong>. Hoje ela tem{" "}
-              <strong>{agendaVazia.agenda_servicos} {agendaVazia.agenda_servicos === 1 ? "serviço" : "serviços"}</strong> e{" "}
+              <strong>{agendaVazia.agenda_servicos} {agendaVazia.agenda_servicos === 1 ? t("serviço") : t("serviços")}</strong> e{" "}
               <strong>{agendaVazia.agenda_profissionais} {agendaVazia.agenda_profissionais === 1 ? "profissional" : "profissionais"}</strong>,
               então ele não teria horário nenhum para oferecer.
             </p>
             <ol className="text-sm text-ink-2 space-y-2 list-decimal pl-5">
               <li className={agendaVazia.agenda_servicos > 0 ? "text-ink-3 line-through" : ""}>
-                Cadastre o <strong>serviço</strong> que o cliente marca, com a duração. Por exemplo:
+                Cadastre o <strong>{t("serviço")}</strong> que o cliente marca, com a duração. Por exemplo:
                 "Visita à loja, 60 min" ou "Avaliação, 30 min".
               </li>
               <li className={agendaVazia.agenda_profissionais > 0 ? "text-ink-3 line-through" : ""}>
@@ -812,7 +813,7 @@ export default function TreinarAgente({ agente, onFechar, onMudou, onTestar }) {
               <li>Volte aqui e use <strong>Testar</strong> para pedir um horário e conferir.</li>
             </ol>
             <p className="text-xs text-ink-3">
-              Ao continuar, a permissão já fica ligada. Enquanto a Agenda estiver vazia, o agente anota o dia e o
+              Ao continuar, a permissão já fica ligada. Enquanto a Agenda estiver vazia, o {t("agente")} anota o dia e o
               horário que o cliente quer e passa para a equipe confirmar, sem nunca dizer que está marcado.
             </p>
           </Modal>

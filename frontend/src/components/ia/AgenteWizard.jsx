@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import FotosAgente from "./FotosAgente";
+import { t } from "@/lib/textos";
 
 // Custo mensal estimado por modelo, para a empresa escolher com numero na
 // frente em vez de pelo nome. A carga de referencia e a de um cliente medio:
@@ -66,7 +67,8 @@ const ICONES_MODO = {
   desligado: Prohibit,
 };
 
-const PASSOS = ["Tipo de agente", "Sobre a empresa", "Comportamento", "Modelo e chave"];
+// Função, não constante: o texto depende da marca, resolvida na renderização.
+const passos = () => [`Tipo de ${t("agente")}`, `Sobre a ${t("empresa")}`, "Comportamento", "Modelo e chave"];
 
 const VAZIO = {
   nome: "",
@@ -170,12 +172,12 @@ export default function AgenteWizard({
   // backend recusar depois de três telas preenchidas.
   const bloqueio = [
     !form.tipo
-      ? "Escolha o tipo de agente"
+      ? `Escolha o tipo de ${t("agente")}`
       : form.tipo === "personalizado" && !form.objetivo.trim()
-        ? "Descreva o objetivo do agente personalizado"
+        ? `Descreva o objetivo do ${t("agente")} personalizado`
         : null,
     null, // sobre a empresa é todo opcional: dá para criar e completar depois
-    !form.nome.trim() ? "Dê um nome ao agente" : null,
+    !form.nome.trim() ? `Dê um nome ao ${t("agente")}` : null,
     // Sem provedor o agente cai na chave da plataforma. É um estado válido —
     // só não é, quando não existe chave da plataforma para cair.
     !form.provedor && !plataformaDisponivel
@@ -203,7 +205,7 @@ export default function AgenteWizard({
       const { data } = editando
         ? await api.patch(`/ai/agents/${agente.id}`, corpo)
         : await api.post("/ai/agents", corpo);
-      toast.success(editando ? "Agente atualizado." : "Agente criado.");
+      toast.success(editando ? `${t("Agente")} atualizado.` : `${t("Agente")} criado.`);
       onSalvo(data);
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
@@ -225,10 +227,10 @@ export default function AgenteWizard({
         {/* Cabeçalho e trilha */}
         <div className="border-b border-line p-6">
           <div className="font-heading text-2xl font-black tracking-tighter mb-4">
-            {editando ? "Editar agente" : "Novo agente de IA"}
+            {editando ? `Editar ${t("agente")}` : `Novo ${t("agente de IA")}`}
           </div>
           <div className="flex items-center gap-2">
-            {PASSOS.map((p, i) => (
+            {passos().map((p, i) => (
               <div key={p} className="flex items-center gap-2 flex-1 last:flex-none">
                 <div
                   className={`w-6 h-6 shrink-0 flex items-center justify-center text-[11px] font-bold border rounded-full ${
@@ -248,7 +250,7 @@ export default function AgenteWizard({
                 >
                   {p}
                 </div>
-                {i < PASSOS.length - 1 && <div className="h-px bg-surface-3 flex-1 min-w-4" />}
+                {i < passos().length - 1 && <div className="h-px bg-surface-3 flex-1 min-w-4" />}
               </div>
             ))}
           </div>
@@ -260,7 +262,7 @@ export default function AgenteWizard({
             <>
               <div>
                 <div className="font-heading text-lg font-black tracking-tight">
-                  Qual o objetivo principal do agente?
+                  Qual o objetivo principal do {t("agente")}?
                 </div>
                 <p className="text-xs text-ink-2 mt-0.5">
                   É isso que define a estratégia dele na conversa. Tudo o mais ajusta por cima.
@@ -295,7 +297,7 @@ export default function AgenteWizard({
               </div>
               {form.tipo === "personalizado" && (
                 <div>
-                  <Rotulo obrigatorio>Objetivo do agente</Rotulo>
+                  <Rotulo obrigatorio>Objetivo do {t("agente")}</Rotulo>
                   <textarea
                     className="zz-input min-h-24"
                     autoFocus
@@ -314,16 +316,16 @@ export default function AgenteWizard({
             <>
               <div>
                 <div className="font-heading text-lg font-black tracking-tight">
-                  Conte sobre a empresa
+                  Conte sobre a {t("empresa")}
                 </div>
                 <p className="text-xs text-ink-2 mt-0.5">
-                  Tudo aqui é opcional, mas é o que o agente vai saber. Sem isso ele é instruído a
+                  Tudo aqui é opcional, mas é o que o {t("agente")} vai saber. Sem isso ele é instruído a
                   transferir sempre que perguntarem preço, horário ou endereço — em vez de inventar.
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <Rotulo>Nome da empresa</Rotulo>
+                  <Rotulo>Nome da {t("empresa")}</Rotulo>
                   <input
                     className="zz-input"
                     data-testid="agente-empresa-nome"
@@ -360,7 +362,7 @@ export default function AgenteWizard({
                 />
               </div>
               <div>
-                <Rotulo>O que o agente precisa saber</Rotulo>
+                <Rotulo>O que o {t("agente")} precisa saber</Rotulo>
                 <textarea
                   className="zz-input min-h-32"
                   data-testid="agente-base"
@@ -372,15 +374,15 @@ export default function AgenteWizard({
                   onChange={(e) => set({ base_conhecimento: e.target.value })}
                 />
                 <p className="text-[11px] text-ink-3 mt-1.5">
-                  Esta é a única fonte de fatos do agente — ele é instruído a não inventar nada que
+                  Esta é a única fonte de fatos do {t("agente")} — ele é instruído a não inventar nada que
                   não esteja aqui. Quanto mais completo, menos transferências.
                 </p>
               </div>
 
               <div>
-                <Rotulo>Fotos que o agente pode enviar</Rotulo>
+                <Rotulo>Fotos que o {t("agente")} pode enviar</Rotulo>
                 <p className="text-xs text-ink-2 mb-3 -mt-1">
-                  O agente manda a foto sozinho quando a conversa pedir — o cliente diz que gostou
+                  O {t("agente")} manda a foto sozinho quando a conversa pedir — o cliente diz que gostou
                   do carro, ele mostra. Quem escolhe é ele, pela descrição de cada uma.
                 </p>
                 <FotosAgente agente={agente} />
@@ -393,14 +395,14 @@ export default function AgenteWizard({
             <>
               <div>
                 <div className="font-heading text-lg font-black tracking-tight">
-                  Como o agente deve se comportar?
+                  Como o {t("agente")} deve se comportar?
                 </div>
                 <p className="text-xs text-ink-2 mt-0.5">Ajuste fino de tom, tamanho e limites.</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <Rotulo obrigatorio>Nome do agente</Rotulo>
+                  <Rotulo obrigatorio>Nome do {t("agente")}</Rotulo>
                   <input
                     className="zz-input"
                     autoFocus
@@ -410,7 +412,7 @@ export default function AgenteWizard({
                     onChange={(e) => set({ nome: e.target.value })}
                   />
                   <p className="text-[11px] text-ink-3 mt-1">
-                    É assim que ele se apresenta ao contato.
+                    É assim que ele se apresenta ao {t("contato")}.
                   </p>
                 </div>
               </div>
@@ -474,7 +476,7 @@ export default function AgenteWizard({
                   className="zz-input min-h-32"
                   data-testid="agente-instrucoes"
                   placeholder={
-                    "Escreva livremente o que o agente precisa seguir.\n\n" +
+                    `Escreva livremente o que o ${t("agente")} precisa seguir.\n\n` +
                     "Ex: Sempre pergunte a cidade antes de falar de frete.\n" +
                     "Trate quem já é cliente pelo primeiro nome.\n" +
                     "Se perguntarem de parcelamento, diga que vai até 12x sem juros."
@@ -483,13 +485,13 @@ export default function AgenteWizard({
                   onChange={(e) => set({ instrucoes: e.target.value })}
                 />
                 <p className="text-[11px] text-ink-3 mt-1.5">
-                  Fica guardado no agente e vai junto em <strong>toda</strong> mensagem que ele
+                  Fica guardado no {t("agente")} e vai junto em <strong>toda</strong> mensagem que ele
                   responde. É onde entra o que as opções acima não cobrem.
                 </p>
               </div>
 
               <div>
-                <Rotulo>O que o agente NÃO deve fazer</Rotulo>
+                <Rotulo>O que o {t("agente")} NÃO deve fazer</Rotulo>
                 <textarea
                   className="zz-input min-h-20"
                   data-testid="agente-nao-fazer"
@@ -509,12 +511,12 @@ export default function AgenteWizard({
                     onChange={(e) => set({ agenda_ativa: e.target.checked })}
                   />
                   <span>
-                    <span className="font-semibold block">Deixar o agente marcar horário na Agenda</span>
+                    <span className="font-semibold block">Deixar o {t("agente")} marcar horário na Agenda</span>
                     <span className="text-[11px] text-ink-3 block mt-1">
                       Ele passa a consultar os horários livres de verdade, marcar e cancelar
-                      pelo WhatsApp, em vez de anotar a preferência e transferir. Os serviços,
+                      pelo WhatsApp, em vez de anotar a preferência e transferir. Os {t("serviços")},
                       profissionais e grade de horários vêm da tela <strong>Agenda</strong>;
-                      sem nenhum serviço cadastrado, esta opção não tem efeito.
+                      sem nenhum {t("serviço")} cadastrado, esta opção não tem efeito.
                     </span>
                   </span>
                 </label>
@@ -527,10 +529,10 @@ export default function AgenteWizard({
                     onChange={(e) => set({ finalizar_ativo: e.target.checked })}
                   />
                   <span>
-                    <span className="font-semibold block">Deixar o agente finalizar o atendimento</span>
+                    <span className="font-semibold block">Deixar o {t("agente")} finalizar o atendimento</span>
                     <span className="text-[11px] text-ink-3 block mt-1">
-                      Quando o assunto se resolve e o contato se despede, ele encerra a conversa
-                      sozinho e deixa um resumo no histórico. Se o contato escrever de novo, uma
+                      Quando o assunto se resolve e o {t("contato")} se despede, ele encerra a conversa
+                      sozinho e deixa um resumo no histórico. Se o {t("contato")} escrever de novo, uma
                       conversa nova começa.
                     </span>
                   </span>
@@ -554,7 +556,7 @@ export default function AgenteWizard({
 
               <div className="border-t border-line pt-5 space-y-4">
                 <div>
-                  <Rotulo>Quando o agente entra</Rotulo>
+                  <Rotulo>Quando o {t("agente")} entra</Rotulo>
                   <div className="space-y-2">
                     {catalogo.modos.map((m) => {
                       const Icone = ICONES_MODO[m.id] || Lifebuoy;
@@ -643,10 +645,10 @@ export default function AgenteWizard({
             <>
               <div>
                 <div className="font-heading text-lg font-bold tracking-tight">
-                  Qual IA responde por este agente?
+                  Qual IA responde por este {t("agente")}?
                 </div>
                 <p className="text-xs text-ink-2 mt-0.5">
-                  A chave é deste agente, não da empresa — dá para ter um agente na Anthropic e
+                  A chave é deste {t("agente")}, não da {t("empresa")} — dá para ter um {t("agente")} na Anthropic e
                   outro na Groq, com contas separadas. Serve qualquer serviço compatível com a API
                   da OpenAI.
                 </p>
@@ -787,7 +789,7 @@ export default function AgenteWizard({
                     {provedorAtual.modelos.length > 0 && (
                       <p className="text-[11px] text-ink-3 mt-2">
                         Estimativa para 50 atendimentos por dia (~9.000 respostas no mês). O provedor
-                        cobra em dólar, direto na conta da empresa
+                        cobra em dólar, direto na conta da {t("empresa")}
                         {provedorAtual.gratuito
                           ? "; no plano grátis dele não há cobrança, só limite de mensagens por minuto e por dia."
                           : "."}
@@ -880,7 +882,7 @@ export default function AgenteWizard({
               >
                 <FloppyDisk size={14} weight="bold" />
                 {salvando ? (form.provedor ? "Testando a chave…" : "Salvando…")
-                  : editando ? "Salvar" : "Criar agente"}
+                  : editando ? "Salvar" : `Criar ${t("agente")}`}
               </button>
             )}
           </div>

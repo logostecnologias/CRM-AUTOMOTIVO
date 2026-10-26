@@ -12,8 +12,9 @@ import { useAcao } from "@/hooks/useAcao";
 import NovoAgendamento from "@/components/agenda/NovoAgendamento";
 import { Servicos, Profissionais } from "@/components/agenda/Catalogo";
 import Configuracao from "@/components/agenda/Configuracao";
+import { t } from "@/lib/textos";
 import {
-  ORIGEM, STATUS, diaDe, hojeNaEmpresa, hora, instanteDoDia, moeda, rotuloDia, somaDias,
+  rotuloOrigem, STATUS, diaDe, hojeNaEmpresa, hora, instanteDoDia, moeda, rotuloDia, somaDias,
 } from "@/components/agenda/comum";
 
 // A agenda da empresa.
@@ -79,13 +80,13 @@ export default function AgendaPage() {
         <div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Agenda</h1>
           <p className="text-ink-2 mt-2 text-sm">
-            Os horários marcados, seja pela recepção, pelo robô do WhatsApp ou pelo agente de IA.
+            Os horários marcados, seja pela recepção, pelo {t("robô")} do WhatsApp ou pelo {t("agente de IA")}.
             Horário marcado por qualquer um deles some da lista dos outros na hora.
           </p>
         </div>
         {aba === "agenda" && (
           <button className="zz-btn" data-testid="novo-agendamento-btn" disabled={!pronto}
-            title={pronto ? "" : "Cadastre ao menos um serviço e um profissional"}
+            title={pronto ? "" : `Cadastre ao menos um ${t("serviço")} e um profissional`}
             onClick={() => setCriando(true)}>
             <Plus size={14} weight="bold" /> Novo agendamento
           </button>
@@ -99,7 +100,7 @@ export default function AgendaPage() {
               aba === id
                 ? "border-info text-info"
                 : "border-transparent text-ink-3 hover:text-ink"}`}>
-            {label}
+            {t(label)}
           </button>
         ))}
       </div>
@@ -171,7 +172,7 @@ function Quadro({ config, recursos, pronto, faltaCadastro }) {
       { confirmLabel: "Cancelar horário" }))) return;
     try {
       await api.post(`/agenda/appointments/${a.id}/cancel`, null, { params: { avisar: true } });
-      toast.success("Horário cancelado e contato avisado");
+      toast.success(`Horário cancelado e ${t("contato")} avisado`);
       carregar();
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
@@ -193,7 +194,7 @@ function Quadro({ config, recursos, pronto, faltaCadastro }) {
         <CalendarBlank size={28} weight="bold" className="mx-auto text-ink-3 mb-3" />
         <div className="font-semibold mb-1">A agenda ainda não está pronta</div>
         <p className="text-sm text-ink-2 max-w-lg mx-auto">
-          Falta cadastrar {faltaCadastro.servicos === 0 && "ao menos um serviço"}
+          Falta cadastrar {faltaCadastro.servicos === 0 && `ao menos um ${t("serviço")}`}
           {faltaCadastro.servicos === 0 && faltaCadastro.recursos === 0 && " e "}
           {faltaCadastro.recursos === 0 && "ao menos um profissional"}. Sem os dois não há
           horário livre para oferecer, nem na recepção, nem no WhatsApp.
@@ -308,8 +309,8 @@ function Cartao({ a, fuso, onCancelar, onStatus, ocupado }) {
 
       <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-line">
         <span className="text-[10px] text-ink-3 flex items-center gap-1"
-          title={ORIGEM[a.origem] || a.origem}>
-          <IconeOrigem size={12} weight="bold" /> {ORIGEM[a.origem] || a.origem}
+          title={rotuloOrigem(a.origem)}>
+          <IconeOrigem size={12} weight="bold" /> {rotuloOrigem(a.origem)}
         </span>
         {!encerrado && (
           <div className="flex gap-1">
@@ -321,7 +322,7 @@ function Cartao({ a, fuso, onCancelar, onStatus, ocupado }) {
               data-testid="agendamento-faltou" disabled={ocupado} onClick={() => onStatus("faltou")}>
               <Prohibit size={15} weight="bold" />
             </button>
-            <button className="zz-btn-icon" title="Cancelar e avisar o contato"
+            <button className="zz-btn-icon" title={`Cancelar e avisar o ${t("contato")}`}
               data-testid="agendamento-cancelar" disabled={ocupado} onClick={onCancelar}>
               <XCircle size={15} weight="bold" />
             </button>

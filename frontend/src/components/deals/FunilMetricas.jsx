@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "@/lib/api";
 import { formatBRL } from "@/lib/currency";
 import { TrendUp } from "@phosphor-icons/react";
+import { t } from "@/lib/textos";
 
 const JANELAS = [
   ["30", "Últimos 30 dias"],
@@ -44,7 +45,7 @@ export default function FunilMetricas({ pipelineId, semMoldura }) {
         {semMoldura ? <div /> : (
           <div className="flex items-center gap-2">
             <TrendUp size={18} weight="bold" />
-            <div className="font-heading text-xl font-black tracking-tighter">Desempenho do funil</div>
+            <div className="font-heading text-xl font-black tracking-tighter">Desempenho do {t("funil")}</div>
           </div>
         )}
         <select className="zz-input h-8 py-1 text-xs" data-testid="metricas-janela"
@@ -59,17 +60,17 @@ export default function FunilMetricas({ pipelineId, semMoldura }) {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-2 mb-4">
             <Caixa rotulo="Em aberto" valor={formatBRL(dados.resumo.aberto.valor)}
-              hint={`${dados.resumo.aberto.n} negócio(s)`} />
-            <Caixa rotulo="Ganho na janela" valor={formatBRL(dados.janela.ganho.valor)}
+              hint={`${dados.resumo.aberto.n} ${t("negócio")}(s)`} />
+            <Caixa rotulo={`${t("Ganho")} na janela`} valor={formatBRL(dados.janela.ganho.valor)}
               hint={`${dados.janela.ganho.n} fechado(s)`} />
             <Caixa rotulo="Conversão"
               valor={dados.conversao != null ? `${dados.conversao}%` : "—"}
-              hint="sobre negócios decididos" />
+              hint={`sobre ${t("negócios")} decididos`} />
             <Caixa rotulo="Ticket médio"
               valor={dados.ticket_medio != null ? formatBRL(dados.ticket_medio) : "—"} />
             <Caixa rotulo="Ciclo médio"
               valor={dados.ciclo_medio_dias != null ? `${dados.ciclo_medio_dias}d` : "—"}
-              hint="da criação ao ganho" />
+              hint={t("da criação ao ganho")} />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -79,14 +80,14 @@ export default function FunilMetricas({ pipelineId, semMoldura }) {
               </div>
               {dados.por_campanha.length === 0 ? (
                 <div className="text-xs text-ink-3 border border-dashed border-line rounded-xl bg-surface p-3">
-                  Nenhum negócio ganho veio de campanha nesta janela.
+                  Nenhum {t("negócio")} {t("ganho")} veio de campanha nesta janela.
                 </div>
               ) : (
                 <div className="border border-line bg-surface rounded-lg">
                   {dados.por_campanha.map((c) => (
                     <div key={c.campanha_id} className="flex items-center gap-2 px-3 py-2 border-b border-line last:border-b-0">
                       <span className="text-sm font-semibold flex-1 truncate">{c.nome}</span>
-                      <span className="text-[10px] font-mono text-ink-3">{c.n} ganho(s)</span>
+                      <span className="text-[10px] font-mono text-ink-3">{c.n} {t("ganho")}(s)</span>
                       <span className="text-sm font-mono font-bold">{formatBRL(c.valor)}</span>
                     </div>
                   ))}
@@ -95,7 +96,7 @@ export default function FunilMetricas({ pipelineId, semMoldura }) {
             </div>
             <div>
               <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">
-                Por que perdemos
+                {t("Por que perdemos")}
               </div>
               {dados.motivos_perda.length === 0 ? (
                 <div className="text-xs text-ink-3 border border-dashed border-line rounded-xl bg-surface p-3">

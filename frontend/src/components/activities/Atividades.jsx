@@ -6,6 +6,7 @@ import {
   Check, Plus, Trash, Phone, ChatText, Users, ListChecks, ArrowCounterClockwise,
 } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 export const TIPOS = [
   ["ligacao", "Ligação", Phone],
@@ -46,7 +47,7 @@ export function emDias(dias, hora = 9) {
 // A trava de clique repetido (inclusive o Enter apertado duas vezes) vem do
 // Modal, que embrulha o submit.
 function FormAtividade({ inicial, onSalvar, onCancelar, rotulo = "Criar",
-                         titulo = "Nova atividade", descricao, extra }) {
+                         titulo = `Nova ${t("atividade")}`, descricao, extra }) {
   const [form, setForm] = useState(inicial);
   return (
     <Modal titulo={titulo} descricao={descricao} onFechar={onCancelar}
@@ -151,7 +152,7 @@ export default function Atividades({ vinculo = {}, onMudou, mostrarVinculos = fa
           {!criando && (
             <button onClick={() => setCriando(true)} className="zz-btn text-xs py-1"
               data-testid="nova-atividade">
-              <Plus size={12} weight="bold" /> Atividade
+              <Plus size={12} weight="bold" /> {t("Atividade")}
             </button>
           )}
           {concluidas.length > 0 && (

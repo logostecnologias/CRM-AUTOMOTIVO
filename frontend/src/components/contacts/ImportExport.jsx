@@ -5,6 +5,7 @@ import {
   UploadSimple, DownloadSimple, Warning, CheckCircle, ArrowRight,
 } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 const ALVOS = [
   ["", "— não importar —"],
@@ -258,7 +259,7 @@ export default function ImportExport({ filtros, onClose, onImportou }) {
                 duplicados === "atualizar"
                   ? previa.novos + previa.duplicados
                   : previa.novos
-              } contato(s)`}
+              } ${t("contato")}(s)`}
             </button>
           </div>
         </div>

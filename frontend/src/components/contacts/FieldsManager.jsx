@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { Plus, Trash, PencilSimple } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 const TIPOS = [
   ["texto", "Texto"],
@@ -71,7 +72,7 @@ export default function FieldsManager({ onClose, onChanged }) {
 
   return (
     <Modal titulo="Campos personalizados"
-      descricao="Aparecem na ficha de todo contato desta empresa. Ex: número da apólice, curso de interesse, placa."
+      descricao={`Aparecem na ficha de todo ${t("contato")} desta ${t("empresa")}. Ex: número da apólice, curso de interesse, placa.`}
       onFechar={onClose} testId="fields-manager"
       rodape={(
         <button type="button" onClick={abrirNovo} className="zz-btn zz-btn-secondary mr-auto"

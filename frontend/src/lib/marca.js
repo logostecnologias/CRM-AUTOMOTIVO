@@ -42,6 +42,17 @@ export const MARCAS = {
     descricao: "Petróleo e lima, com a logo da R3.",
     amostra: ["#00333D", "#D6E30F", "#F1EEEE"],
   },
+  nexa: {
+    id: "nexa",
+    nome: "Nexa",
+    logo: `${BASE}/marcas/nexa.svg`,
+    favicon: `${BASE}/marcas/nexa.svg`,
+    descricao: "Para clínicas: sálvia, serifa nos títulos.",
+    amostra: ["#4A5F4B", "#EBF0EA", "#F5F6F2"],
+    // A Nexa troca também a tipografia (Fraunces + Figtree). As fontes só são
+    // buscadas quando a marca é aplicada: as outras marcas não esperam por elas.
+    fontes: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Figtree:wght@400;500;600;700&display=swap",
+  },
 };
 
 export const PADRAO = "zappzen";
@@ -69,6 +80,13 @@ export function aplicar(marca = guardada()) {
   if (icone && icone.getAttribute("href") !== m.favicon) {
     icone.setAttribute("href", m.favicon);
     icone.setAttribute("type", m.favicon.endsWith(".svg") ? "image/svg+xml" : "image/jpeg");
+  }
+  if (m.fontes && !document.querySelector(`link[data-fontes-marca='${m.id}']`)) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = m.fontes;
+    link.dataset.fontesMarca = m.id;
+    document.head.appendChild(link);
   }
   try {
     localStorage.setItem(CHAVE, m.id);

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Plus, Trash, FloppyDisk } from "@phosphor-icons/react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { CampoDuracao, emHoras } from "./CampoHora";
+import { t } from "@/lib/textos";
 
 // Preferências de agendamento da empresa.
 //
@@ -97,7 +98,7 @@ export default function Configuracao({ config, onSalvo }) {
               onChange={(m) => set({ antecedencia_min_horas: emHoras(m) })} />
           </Campo>
           <Campo label="Agenda aberta por" alinhado sufixo="dias"
-            nota="Até onde o contato consegue marcar. Longe demais enche a agenda de fantasmas.">
+            nota={`Até onde o ${t("contato")} consegue marcar. Longe demais enche a agenda de fantasmas.`}>
             <input type="number" min="1" max="365" className="zz-input font-mono pr-14"
               value={form.antecedencia_max_dias}
               onChange={(e) => set({ antecedencia_max_dias: e.target.value })} />
@@ -106,7 +107,7 @@ export default function Configuracao({ config, onSalvo }) {
       </Bloco>
 
       <Bloco titulo="Lembrete automático"
-        nota="Falta em horário marcado é o prejuízo de quem vive de agenda. O contato responde CONFIRMAR ou CANCELAR na própria conversa, e a agenda se ajusta sozinha.">
+        nota={`Falta em horário marcado é o prejuízo de quem vive de agenda. O ${t("contato")} responde CONFIRMAR ou CANCELAR na própria conversa, e a agenda se ajusta sozinha.`}>
         <label className="flex items-center gap-2 text-sm cursor-pointer mb-3">
           <input type="checkbox" checked={!!form.lembrete_ativo} data-testid="config-lembrete-ativo"
             onChange={(e) => set({ lembrete_ativo: e.target.checked })} />

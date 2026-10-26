@@ -4,6 +4,7 @@ import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import { useAtividadesAtrasadas } from "@/hooks/useAtividadesAtrasadas";
 import BotaoTema from "@/components/BotaoTema";
 import LogoMarca from "@/components/LogoMarca";
+import { t } from "@/lib/textos";
 import {
   House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
@@ -15,6 +16,10 @@ import {
 // em sequencia, "Departamentos" e "Funil" ficavam vizinhos sem nada em comum, e
 // achar uma tela era ler a lista inteira. O grupo sem titulo existe para o
 // Painel, que nao pertence a nenhum assunto.
+//
+// `label` e `titulo` sao o texto da ZappZen e a chave de `lib/textos.js`: a
+// tela mostra `t(label)`, e o `data-testid` continua saindo do texto da
+// ZappZen, para nao mudar com a marca.
 const adminNav = [
   {
     itens: [
@@ -101,7 +106,7 @@ export default function AppShell({ variant = "tenant" }) {
       {impersonatedFrom === "super_admin" && variant === "tenant" && (
         <div className="w-full bg-warning-solid border-b border-line px-6 py-2 flex items-center justify-between text-warning-fg" data-testid="impersonation-bar">
           <div className="text-sm font-bold tracking-wide">
-            ⚠ MODO SUPORTE — Você está navegando como Admin desta empresa
+            ⚠ MODO SUPORTE — Você está navegando como Admin desta {t("empresa")}
           </div>
           <button data-testid="exit-impersonation" onClick={handleExit} className="zz-btn zz-btn-secondary text-xs">
             <ArrowUUpLeft size={14} weight="bold" /> Sair do modo suporte
@@ -126,7 +131,7 @@ export default function AppShell({ variant = "tenant" }) {
                     className="zz-nav-grupo"
                     data-testid={`nav-grupo-${grupo.titulo.toLowerCase().replace(/\s/g, "-")}`}
                   >
-                    {grupo.titulo}
+                    {t(grupo.titulo)}
                   </div>
                 )}
                 {grupo.itens.map((item) => (
@@ -138,12 +143,12 @@ export default function AppShell({ variant = "tenant" }) {
                     className={({ isActive }) => `zz-nav-item ${isActive ? "active" : ""}`}
                   >
                     <item.icon size={18} weight="bold" />
-                    <span>{item.label}</span>
+                    <span>{t(item.label)}</span>
                     {item.to === "/app/atividades" && atrasadas > 0 && (
                       <span
                         className="zz-queue-badge ml-auto"
                         data-testid="nav-atividades-badge"
-                        title={`${atrasadas} atividade(s) atrasada(s)`}
+                        title={`${atrasadas} ${t("atividade")}(s) atrasada(s)`}
                       >
                         {atrasadas > 99 ? "99+" : atrasadas}
                       </span>

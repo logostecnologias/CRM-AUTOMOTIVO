@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import {
@@ -205,7 +206,7 @@ function SeletorContatos({ selecionados, onChange }) {
       <input className="zz-input border-0 border-b border-line" placeholder="Buscar por nome ou número…"
         value={busca} onChange={(e) => setBusca(e.target.value)} data-testid="campaign-contact-search" />
       <div className="max-h-44 overflow-y-auto">
-        {achados.length === 0 && <div className="p-3 text-xs text-ink-3">Nenhum contato encontrado.</div>}
+        {achados.length === 0 && <div className="p-3 text-xs text-ink-3">Nenhum {t("contato")} encontrado.</div>}
         {achados.map((c) => (
           <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 border-b border-line hover:bg-surface-2 cursor-pointer">
             <input type="checkbox" checked={selecionados.includes(c.id)} onChange={() => alterna(c.id)} />
@@ -429,7 +430,7 @@ export default function CampanhasPage() {
         <div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Campanhas</h1>
           <p className="text-ink-2 mt-2 text-sm">
-            Dispare uma mensagem para uma lista de contatos e acompanhe quem recebeu e quem respondeu.
+            Dispare uma mensagem para uma lista de {t("contatos")} e acompanhe quem recebeu e quem respondeu.
           </p>
         </div>
         <button data-testid="new-campaign-btn" onClick={abrirNova} disabled={semConexao} className="zz-btn disabled:opacity-40">
@@ -442,9 +443,9 @@ export default function CampanhasPage() {
         <div className="text-sm text-ink">
           <strong className="font-bold">Cada modelo entregue é cobrado pela Meta.</strong> Fora da janela de 24
           horas o WhatsApp só entrega modelo aprovado, e é isso que o disparo usa. Marketing custa mais que
-          utilidade, e conteúdo que o contato denuncia derruba a nota de qualidade do número, o que reduz o
-          limite diário de conversas e chega a suspender o número da empresa. Mande para quem espera receber
-          e sempre ofereça a saída (o contato que responder <span className="font-mono">SAIR</span> é removido
+          utilidade, e conteúdo que o {t("contato")} denuncia derruba a nota de qualidade do número, o que reduz o
+          limite diário de conversas e chega a suspender o número da {t("empresa")}. Mande para quem espera receber
+          e sempre ofereça a saída (o {t("contato")} que responder <span className="font-mono">SAIR</span> é removido
           dos próximos disparos automaticamente).
         </div>
       </div>
@@ -487,8 +488,8 @@ export default function CampanhasPage() {
             </div>
             <div className="text-[11px] text-ink-3 mt-2">
               {form.conteudo.tipo === "template"
-                ? "Chega a qualquer contato da lista. O modelo precisa estar aprovado na conta da Meta."
-                : "Só chega a quem falou com a empresa nas últimas 24 horas. Os demais ficam como ignorados, com o motivo."}
+                ? `Chega a qualquer ${t("contato")} da lista. O modelo precisa estar aprovado na conta da Meta.`
+                : `Só chega a quem falou com a ${t("empresa")} nas últimas 24 horas. Os demais ficam como ignorados, com o motivo.`}
             </div>
           </Campo>
 
@@ -525,7 +526,7 @@ export default function CampanhasPage() {
 
           <Campo label="Público" className="sm:col-span-2 lg:col-span-3">
             <div className="flex gap-2 mb-2">
-              {[["todos", "Todos os contatos"], ["tags", "Por etiqueta"], ["selecionados", "Escolher contatos"]].map(([v, r]) => (
+              {[["todos", `Todos os ${t("contatos")}`], ["tags", "Por etiqueta"], ["selecionados", `Escolher ${t("contatos")}`]].map(([v, r]) => (
                 <button key={v} type="button" data-testid={`campaign-audience-${v}`}
                   onClick={() => setForm({ ...form, publico: { ...form.publico, tipo: v } })}
                   className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider border rounded-full ${
@@ -538,7 +539,7 @@ export default function CampanhasPage() {
             {form.publico.tipo === "tags" && (
               tagsDisponiveis.length === 0 ? (
                 <div className="text-xs text-ink-3">
-                  Nenhuma etiqueta criada ainda — marque contatos na tela de Contatos.
+                  Nenhuma etiqueta criada ainda — marque {t("contatos")} na tela de {t("Contatos")}.
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
@@ -559,7 +560,7 @@ export default function CampanhasPage() {
             )}
             {previa && (
               <div className="text-xs mt-2 font-semibold text-ink" data-testid="campaign-audience-preview">
-                {previa.total.toLocaleString("pt-BR")} contato(s) vão receber
+                {previa.total.toLocaleString("pt-BR")} {t("contato")}(s) vão receber
                 {previa.total > previa.limite && (
                   <span className="text-danger"> — acima do limite de {previa.limite.toLocaleString("pt-BR")} por campanha</span>
                 )}
@@ -576,16 +577,16 @@ export default function CampanhasPage() {
             <input type="datetime-local" className="zz-input" data-testid="campaign-schedule"
               value={form.agendada_para} onChange={(e) => setForm({ ...form, agendada_para: e.target.value })} />
           </Campo>
-          <Campo label="Quando o contato responder">
+          <Campo label={`Quando o ${t("contato")} responder`}>
             <select className="zz-input" data-testid="campaign-reply-mode" value={form.resposta_modo}
               onChange={(e) => setForm({ ...form, resposta_modo: e.target.value, bot_id: e.target.value === "bot" ? form.bot_id : null })}>
               <option value="aguardando">Vai para a fila de atendimento</option>
-              <option value="bot">Um robô atende primeiro</option>
+              <option value="bot">Um {t("robô")} atende primeiro</option>
             </select>
           </Campo>
 
           {form.resposta_modo === "bot" && (
-            <Campo label="Robô que atende">
+            <Campo label={`${t("Robô")} que atende`}>
               <select required className="zz-input" data-testid="campaign-bot" value={form.bot_id || ""}
                 onChange={(e) => setForm({ ...form, bot_id: e.target.value || null })}>
                 <option value="">Selecione…</option>
@@ -646,7 +647,7 @@ export default function CampanhasPage() {
                   {["rascunho", "pausada", "agendada"].includes(c.status) && (
                     <button title="Iniciar" data-testid={`campaign-start-${c.id}`}
                       onClick={() => acao(c, c.status === "pausada" ? "resume" : "start",
-                        (d) => d.status === "agendada" ? "Campanha agendada" : `Disparando para ${d.pendentes} contato(s)`,
+                        (d) => d.status === "agendada" ? "Campanha agendada" : `Disparando para ${d.pendentes} ${t("contato")}(s)`,
                         c.status === "rascunho" ? `Disparar "${c.nome}" agora?` : null)}
                       className="p-1.5 hover:bg-success-soft text-success"><Play size={14} weight="bold" /></button>
                   )}

@@ -4,6 +4,7 @@ import { formatBRL } from "@/lib/currency";
 import { Warning, Megaphone, Headset, Funnel, CalendarBlank } from "@phosphor-icons/react";
 import SerieDiaria from "@/components/reports/SerieDiaria";
 import FunilMetricas from "@/components/deals/FunilMetricas";
+import { t } from "@/lib/textos";
 
 const JANELAS = [["7", "7 dias"], ["30", "30 dias"], ["90", "90 dias"], ["365", "12 meses"]];
 
@@ -231,9 +232,9 @@ function Campanhas({ janela }) {
         <Tile rotulo="Falhas" valor={resumo.falhas.toLocaleString("pt-BR")} />
         <Tile rotulo="Respostas" valor={resumo.respostas.toLocaleString("pt-BR")}
           hint={resumo.enviados ? `${Math.round(resumo.respostas / resumo.enviados * 100)}% de quem recebeu` : null} />
-        <Tile rotulo="Negócios ganhos" valor={resumo.negocios.toLocaleString("pt-BR")} />
+        <Tile rotulo={`${t("Negócios")} ${t("ganhos")}`} valor={resumo.negocios.toLocaleString("pt-BR")} />
         <Tile rotulo="Receita atribuída" valor={formatBRL(resumo.valor)} destaque
-          hint="negócios fechados vindos de campanha" />
+          hint={`${t("negócios")} fechados vindos de campanha`} />
       </div>
 
       <div className="border border-line bg-surface rounded-lg">
@@ -243,12 +244,12 @@ function Campanhas({ janela }) {
           <div className="col-span-1 text-right">Falhas</div>
           <div className="col-span-1 text-right">Respostas</div>
           <div className="col-span-1 text-right">Taxa</div>
-          <div className="col-span-1 text-right">Negócios</div>
+          <div className="col-span-1 text-right">{t("Negócios")}</div>
           <div className="col-span-3 text-right">Receita</div>
         </div>
         {dados.itens.length === 0 && (
           <div className="p-8 text-center text-sm text-ink-3">
-            Nenhuma campanha com disparo ou negócio fechado no período.
+            Nenhuma campanha com disparo ou {t("negócio")} fechado no período.
           </div>
         )}
         {dados.itens.map((i) => (
@@ -356,12 +357,12 @@ function Agenda({ janela }) {
         <Tile rotulo="Receita perdida" valor={formatBRL(resumo.receita_perdida)}
           hint="faltas e cancelamentos" />
         <Tile rotulo="Marcados pelo WhatsApp" valor={automaticos.toLocaleString("pt-BR")}
-          hint={`${origem.manual || 0} pela equipe${origem.ia ? ` · ${origem.ia} pelo agente de IA` : ""}`} />
+          hint={`${origem.manual || 0} pela equipe${origem.ia ? ` · ${origem.ia} pelo ${t("agente de IA")}` : ""}`} />
       </div>
 
       {resumo.sem_preco > 0 && (
         <div className="text-[11px] text-ink-3 mb-4">
-          {resumo.sem_preco} horário(s) sem preço no cadastro do serviço não entram em receita nenhuma.
+          {resumo.sem_preco} horário(s) sem preço no cadastro do {t("serviço")} não entram em receita nenhuma.
         </div>
       )}
 
@@ -449,22 +450,22 @@ function Agenda({ janela }) {
           </table>
           <div className="text-[11px] text-ink-3 mt-3">
             Ocupação é o tempo marcado dividido pelo tempo de grade do período, no fuso da
-            empresa ({dados.fuso}). Passa de 100% quando alguém foi encaixado fora do horário
+            {t("empresa")} ({dados.fuso}). Passa de 100% quando alguém foi encaixado fora do horário
             de atendimento.
           </div>
         </div>
 
         <div className="border border-line bg-surface p-5 rounded-lg">
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-3">
-            Por serviço
+            Por {t("serviço")}
           </div>
           {dados.por_servico.length === 0 ? (
-            <div className="text-xs text-ink-4">Nenhum serviço no período.</div>
+            <div className="text-xs text-ink-4">Nenhum {t("serviço")} no período.</div>
           ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-line">
-                  <th className="text-left pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Serviço</th>
+                  <th className="text-left pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">{t("Serviço")}</th>
                   <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Horários</th>
                   <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Atendidos</th>
                   <th className="text-right pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-3">Duração</th>
@@ -538,7 +539,7 @@ export default function RelatoriosPage() {
         <div>
           <h1 className="font-heading text-4xl font-black tracking-tighter">Relatórios</h1>
           <p className="text-ink-2 mt-2 text-sm">
-            O que a operação produziu no período: atendimento, agenda, campanhas e funil.
+            O que a operação produziu no período: atendimento, agenda, campanhas e {t("funil")}.
           </p>
         </div>
         {aba !== "funil" && (
@@ -561,7 +562,7 @@ export default function RelatoriosPage() {
             className={`px-3 py-2 text-xs font-bold uppercase tracking-wider border-b-2 -mb-px flex items-center gap-1.5 ${
               aba === v ? "border-info text-ink" : "border-transparent text-ink-3 hover:text-ink"
             }`}>
-            <Icone size={13} weight="bold" /> {r}
+            <Icone size={13} weight="bold" /> {t(r)}
           </button>
         ))}
       </div>

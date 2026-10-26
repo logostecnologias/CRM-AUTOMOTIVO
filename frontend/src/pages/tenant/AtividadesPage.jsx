@@ -7,6 +7,7 @@ import {
 } from "@phosphor-icons/react";
 import { TIPOS, IconeTipo, quando, emDias } from "@/components/activities/Atividades";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 // Os limites de "hoje" e "semana" saem daqui, no fuso de quem está olhando: o
 // servidor não sabe em que fuso o navegador está, e calcular lá faria a agenda
@@ -72,7 +73,7 @@ export default function AtividadesPage() {
         contact_id: criando.contato?.id || null,
       });
       setCriando(null);
-      toast.success("Atividade criada");
+      toast.success(`${t("Atividade")} criada`);
       carregar();
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
@@ -114,7 +115,7 @@ export default function AtividadesPage() {
     <div className="zz-page" data-testid="atividades-page">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <h1 className="font-heading text-4xl font-black tracking-tighter">Atividades</h1>
+          <h1 className="font-heading text-4xl font-black tracking-tighter">{t("Atividades")}</h1>
           <p className="text-ink-2 mt-2 text-sm">
             O que precisa acontecer, e com quem. Ao concluir, agende o próximo passo na mesma tela.
           </p>
@@ -128,7 +129,7 @@ export default function AtividadesPage() {
           <button onClick={() => setCriando({
             titulo: "", tipo: "ligacao", vence_em: emDias(1), responsavel_id: "", contato: null,
           })} className="zz-btn" data-testid="nova-atividade-btn">
-            <Plus size={14} weight="bold" /> Nova atividade
+            <Plus size={14} weight="bold" /> Nova {t("atividade")}
           </button>
         </div>
       </div>
@@ -146,8 +147,8 @@ export default function AtividadesPage() {
       </div>
 
       {criando && (
-        <Modal titulo="Nova atividade"
-          descricao="Atividade sem responsável não aparece na agenda de ninguém — em branco, ela fica com você."
+        <Modal titulo={`Nova ${t("atividade")}`}
+          descricao={`${t("Atividade")} sem responsável não aparece na agenda de ninguém — em branco, ela fica com você.`}
           onFechar={() => setCriando(null)} onSalvar={criar}
           salvarLabel="Criar" salvandoLabel="Criando…" testId="nova-atividade-form"
           corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -203,10 +204,10 @@ export default function AtividadesPage() {
           <CalendarBlank size={28} weight="bold" className="mx-auto mb-3 text-ink-4" />
           <div className="font-heading text-2xl font-black tracking-tighter mb-2">
             {aba === "atrasadas" ? "Nada atrasado." : aba === "concluidas" ? "Nada concluído ainda."
-              : "Nenhuma atividade nesta janela."}
+              : `Nenhuma ${t("atividade")} nesta janela.`}
           </div>
           <div className="text-sm text-ink-2">
-            {aba === "atrasadas" ? "Agenda em dia." : "Crie uma atividade ou mude a janela."}
+            {aba === "atrasadas" ? "Agenda em dia." : `Crie uma ${t("atividade")} ou mude a janela.`}
           </div>
         </div>
       ) : (
@@ -307,7 +308,7 @@ export default function AtividadesPage() {
         <button onClick={() => setAba("atrasadas")}
           className="mt-4 flex items-center gap-2 text-sm text-danger hover:underline">
           <Warning size={14} weight="bold" />
-          {resumo.atrasadas} atividade(s) atrasada(s) esperando
+          {resumo.atrasadas} {t("atividade")}(s) atrasada(s) esperando
         </button>
       )}
     </div>

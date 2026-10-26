@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useState } from "react";
 import api from "@/lib/api";
 import { aplicar as aplicarMarca, guardada as marcaGuardada } from "@/lib/marca";
 
@@ -56,7 +56,11 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, refresh, exitImpersonation, impersonatedFrom, marca }}>
-      {children}
+      {/* A chave remonta a árvore quando a marca muda (login, modo suporte):
+          é o que faz o texto de `lib/textos.js`, lido da marca pintada no
+          `<html>`, valer em toda tela já aberta. A troca só acontece nessas
+          fronteiras, onde a tela muda de qualquer jeito. */}
+      <Fragment key={marca}>{children}</Fragment>
     </AuthContext.Provider>
   );
 }

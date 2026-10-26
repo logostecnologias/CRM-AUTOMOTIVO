@@ -4,6 +4,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { formatBRL } from "@/lib/currency";
 import SerieDiaria from "@/components/reports/SerieDiaria";
+import { t } from "@/lib/textos";
 import {
   ArrowClockwise, ArrowDown, ArrowRight, ArrowUp, ChatsCircle, CheckCircle,
   CheckSquareOffset, Headset, Megaphone, Robot, UsersThree, Warning,
@@ -89,9 +90,9 @@ function textoDoAlerta(a) {
     }
     case "atividades":
       return {
-        titulo: plural(a.n, "atividade atrasada", "atividades atrasadas"),
+        titulo: plural(a.n, `${t("atividade")} atrasada`, `${t("atividades")} atrasadas`),
         detalhe: "Venceram e ainda não foram concluídas.",
-        acao: "Ver atividades",
+        acao: `Ver ${t("atividades")}`,
       };
     case "conexoes":
       return {
@@ -101,9 +102,9 @@ function textoDoAlerta(a) {
       };
     case "agentes":
       return {
-        titulo: a.n === 1 ? "Agente de IA com a chave recusada" : `${a.n} agentes de IA com a chave recusada`,
+        titulo: a.n === 1 ? `${t("Agente de IA")} com a chave recusada` : `${a.n} ${t("agentes de IA")} com a chave recusada`,
         detalhe: `${a.nomes.join(", ")}. As conversas estão indo para a fila.`,
-        acao: "Ver agentes",
+        acao: `Ver ${t("agentes")}`,
       };
     case "campanhas":
       return {
@@ -126,8 +127,8 @@ function Alertas({ alertas, admin }) {
           <span className="font-semibold">Tudo em dia.</span>{" "}
           <span className="text-ink-2">
             {admin
-              ? "Fila vazia, nenhuma atividade atrasada e todas as conexões no ar."
-              : "Nenhuma conversa esperando e nenhuma atividade sua atrasada."}
+              ? `Fila vazia, nenhuma ${t("atividade")} atrasada e todas as conexões no ar.`
+              : `Nenhuma conversa esperando e nenhuma ${t("atividade")} sua atrasada.`}
           </span>
         </div>
       </div>
@@ -229,7 +230,7 @@ function Indicador({ rotulo, valor, rodape, para, testid }) {
 
 function ConversasAgora({ a, admin }) {
   const linhas = [
-    { rotulo: "Com o robô ou agente de IA", n: a.bot, icone: Robot },
+    { rotulo: `Com o ${t("robô")} ou ${t("agente de IA")}`, n: a.bot, icone: Robot },
     { rotulo: "Na fila", n: a.aguardando, icone: Headset, alerta: a.aguardando > 0 },
     { rotulo: "Em atendimento", n: a.em_atendimento, icone: UsersThree },
   ];
@@ -323,12 +324,12 @@ function Operacao({ m }) {
       valor: `${m.base.conexoes_conectadas} de ${m.base.conexoes_total} no ar`,
       alerta: m.base.conexoes_total > 0 && m.base.conexoes_conectadas < m.base.conexoes_total,
     },
-    { para: "/app/bots", icone: Robot, rotulo: "Robôs ativos", valor: m.base.bots_ativos },
+    { para: "/app/bots", icone: Robot, rotulo: `${t("Robôs")} ativos`, valor: m.base.bots_ativos },
     {
       para: "/app/campanhas", icone: Megaphone, rotulo: "Campanhas",
       valor: `${m.campanhas.em_andamento} em andamento · ${m.campanhas.disparos_mes.toLocaleString("pt-BR")} enviadas no mês`,
     },
-    { para: "/app/contacts", icone: UsersThree, rotulo: "Contatos", valor: m.base.contatos.toLocaleString("pt-BR") },
+    { para: "/app/contacts", icone: UsersThree, rotulo: t("Contatos"), valor: m.base.contatos.toLocaleString("pt-BR") },
     {
       para: "/app/relatorios", icone: ChatsCircle, rotulo: "Mensagens em 30 dias",
       valor: m.atendimento.mensagens_30d.toLocaleString("pt-BR"),
@@ -355,8 +356,9 @@ function Operacao({ m }) {
 // Tela
 // ---------------------------------------------------------------------------
 
-const SERIES = [
-  { chave: "automatico", rotulo: "Só robô ou IA", slot: 1 },
+// Funcao, nao constante: o rotulo depende da marca (lib/textos.js).
+const series = () => [
+  { chave: "automatico", rotulo: `Só ${t("robô")} ou IA`, slot: 1 },
   { chave: "humano", rotulo: "Com atendente", slot: 2 },
 ];
 
@@ -441,23 +443,23 @@ export default function TenantDashboard() {
             {admin ? (
               <>
                 <Indicador testid="kpi-vendido" para="/app/funil"
-                  rotulo="Vendido no mês"
+                  rotulo={t("Vendido no mês")}
                   valor={formatBRL(m.funil.ganho_mes.valor)}
                   rodape={
                     <span className="text-ink-3">
-                      {plural(m.funil.ganho_mes.n, "negócio", "negócios")}
+                      {plural(m.funil.ganho_mes.n, t("negócio"), t("negócios"))}
                       {m.funil.conversao_mes != null &&
                         ` · ${Math.round(m.funil.conversao_mes * 100)}% de conversão`}
                     </span>
                   } />
                 <Indicador testid="kpi-aberto" para="/app/funil"
-                  rotulo="Em negociação no funil"
+                  rotulo={`Em negociação no ${t("funil")}`}
                   valor={formatBRL(m.funil.aberto.valor)}
-                  rodape={<span className="text-ink-3">{plural(m.funil.aberto.n, "negócio aberto", "negócios abertos")}</span>} />
+                  rodape={<span className="text-ink-3">{plural(m.funil.aberto.n, `${t("negócio")} aberto`, `${t("negócios")} abertos`)}</span>} />
               </>
             ) : (
               <Indicador testid="kpi-atividades"
-                rotulo="Suas atividades"
+                rotulo={`Suas ${t("atividades")}`}
                 valor={m.agenda.hoje.toLocaleString("pt-BR")}
                 rodape={<span className="text-ink-3">
                   para hoje · {plural(m.agenda.pendentes, "pendente", "pendentes")} no total
@@ -468,7 +470,7 @@ export default function TenantDashboard() {
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
             <div className="xl:col-span-2 space-y-2">
               <SerieDiaria titulo="Conversas novas por dia · 14 dias" dados={m.serie}
-                series={SERIES} altura={200} />
+                series={series()} altura={200} />
               {pctAuto != null && (
                 <p className="text-xs text-ink-3 px-1">
                   {pctAuto}% das conversas dos últimos 14 dias terminaram sem precisar de um atendente.
@@ -488,7 +490,7 @@ export default function TenantDashboard() {
             <Link to="/app/atividades"
               className="flex items-center gap-2 text-xs text-ink-3 hover:text-ink px-1">
               <CheckSquareOffset size={13} />
-              {plural(m.agenda.hoje, "atividade", "atividades")} para hoje,{" "}
+              {plural(m.agenda.hoje, t("atividade"), t("atividades"))} para hoje,{" "}
               {plural(m.agenda.pendentes, "pendente", "pendentes")} no total
               <ArrowRight size={11} weight="bold" />
             </Link>

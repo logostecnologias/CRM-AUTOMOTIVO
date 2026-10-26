@@ -9,6 +9,7 @@ import {
 } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
 import { useAcao } from "@/hooks/useAcao";
+import { t } from "@/lib/textos";
 import DealPanel from "@/components/deals/DealPanel";
 import FunilConfig from "@/components/deals/FunilConfig";
 import FunilMetricas from "@/components/deals/FunilMetricas";
@@ -117,7 +118,7 @@ function SeletorContato({ valor, onChange }) {
   }
   return (
     <div className="border border-line bg-surface rounded-lg">
-      <input className="zz-input border-0 h-9" placeholder="Buscar contato…" data-testid="deal-contact-search"
+      <input className="zz-input border-0 h-9" placeholder={`Buscar ${t("contato")}…`} data-testid="deal-contact-search"
         value={busca} onChange={(e) => setBusca(e.target.value)} />
       {busca && (
         <div className="max-h-36 overflow-y-auto border-t border-line">
@@ -203,7 +204,7 @@ export default function FunilPage() {
 
   // A trava de clique repetido vem do Modal.
   const criar = async () => {
-    if (!novo.contato) return toast.error("Escolha o contato do negócio");
+    if (!novo.contato) return toast.error(`Escolha o ${t("contato")} do ${t("negócio")}`);
     try {
       const r = await api.post("/deals", {
         titulo: novo.titulo,
@@ -214,7 +215,7 @@ export default function FunilPage() {
         previsao_fechamento: novo.previsao || null,
       });
       setNovo(null);
-      toast.success("Negócio criado");
+      toast.success(`${t("Negócio")} criado`);
       carregar();
       setAbertoId(r.data.id);
     } catch (ex) {
@@ -259,9 +260,9 @@ export default function FunilPage() {
     <div className={`p-8 ${abertoId ? "pr-[500px]" : ""}`} data-testid="funil-page">
       <div className="flex items-end justify-between mb-6 gap-4">
         <div>
-          <h1 className="font-heading text-4xl font-black tracking-tighter">Funil de negócios</h1>
+          <h1 className="font-heading text-4xl font-black tracking-tighter">{t("Funil de negócios")}</h1>
           <p className="text-ink-2 mt-2 text-sm">
-            Arraste o cartão entre as etapas. {formatBRL(totalAberto)} em aberto no funil.
+            Arraste o cartão entre as etapas. {formatBRL(totalAberto)} em aberto no {t("funil")}.
           </p>
         </div>
         <div className="flex gap-2 items-center">
@@ -281,13 +282,13 @@ export default function FunilPage() {
           </button>
           <button onClick={() => setNovo({ titulo: "", valor: 0, contato: null, responsavel_id: "", previsao: "" })}
             className="zz-btn" data-testid="new-deal-btn" disabled={!funilId}>
-            <Plus size={14} weight="bold" /> Novo negócio
+            <Plus size={14} weight="bold" /> Novo {t("negócio")}
           </button>
         </div>
       </div>
 
       {metricas && funilId && (
-        <Modal titulo="Desempenho do funil" largo onFechar={() => setMetricas(false)}>
+        <Modal titulo={`Desempenho do ${t("funil")}`} largo onFechar={() => setMetricas(false)}>
           <FunilMetricas pipelineId={funilId} semMoldura />
         </Modal>
       )}
@@ -300,8 +301,8 @@ export default function FunilPage() {
       )}
 
       {novo && (
-        <Modal titulo="Novo negócio"
-          descricao="O negócio é o que gera conversão, ticket médio e ciclo de venda — a conversa sozinha não."
+        <Modal titulo={`Novo ${t("negócio")}`}
+          descricao={`O ${t("negócio")} é o que gera conversão, ticket médio e ciclo de venda — a conversa sozinha não.`}
           onFechar={() => setNovo(null)} onSalvar={criar}
           salvarLabel="Criar" salvandoLabel="Criando…" testId="new-deal-form"
           corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -312,7 +313,7 @@ export default function FunilPage() {
               value={novo.titulo} onChange={(e) => setNovo({ ...novo, titulo: e.target.value })} />
           </div>
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Contato</label>
+            <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">{t("Contato")}</label>
             <SeletorContato valor={novo.contato} onChange={(c) => setNovo({ ...novo, contato: c })} />
           </div>
           <div>
@@ -327,7 +328,7 @@ export default function FunilPage() {
       <div className="flex gap-3 items-center mb-4">
         <div className="relative flex-1 max-w-xs">
           <MagnifyingGlass size={14} weight="bold" className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4" />
-          <input className="zz-input pl-8" placeholder="Buscar negócio…" data-testid="deal-search"
+          <input className="zz-input pl-8" placeholder={`Buscar ${t("negócio")}…`} data-testid="deal-search"
             value={busca} onChange={(e) => setBusca(e.target.value)} />
         </div>
         <select className="zz-input max-w-[200px]" data-testid="deal-owner-filter"
@@ -404,14 +405,14 @@ export default function FunilPage() {
       )}
 
       {perda && (
-        <Modal titulo="Por que perdemos?"
-          descricao={'É este campo que alimenta o relatório de motivos de perda. Pode deixar em branco, mas aí o negócio entra como "não informado".'}
+        <Modal titulo={t("Por que perdemos?")}
+          descricao={`É este campo que alimenta o relatório de motivos de perda. Pode deixar em branco, mas aí o ${t("negócio")} entra como "não informado".`}
           onFechar={() => setPerda(null)}
           onSalvar={() => { mover(perda.dealId, perda.etapaId, perda.motivo); setPerda(null); }}
-          salvarLabel="Marcar como perdido" testId="motivo-perda-dialog">
+          salvarLabel={`Marcar como ${t("perdido")}`} testId="motivo-perda-dialog">
           <div className="flex items-center gap-2 text-danger">
             <Warning size={18} weight="bold" />
-            <span className="text-sm font-semibold">Este negócio sai do funil como perdido.</span>
+            <span className="text-sm font-semibold">{t("Este negócio sai do funil como perdido.")}</span>
           </div>
           <input autoFocus className="zz-input" data-testid="motivo-perda-input"
             placeholder="Preço, prazo, escolheu concorrente…"

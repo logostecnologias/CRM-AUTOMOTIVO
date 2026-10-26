@@ -3,6 +3,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { Plus, Trash, ArrowUp, ArrowDown } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 const CORES = ["#64748B", "#2563EB", "#F97316", "#8B5CF6", "#10B981", "#EF4444", "#0F172A", "#F59E0B"];
 const TIPOS = [["aberta", "Em aberto"], ["ganho", "Ganho"], ["perdido", "Perdido"]];
@@ -42,7 +43,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
       await api.patch(`/pipelines/${pipeline.id}`,
         { nome, etapas: etapas.map(({ id, nome: n, cor, tipo }) => ({ id, nome: n, cor, tipo })) },
         { params: moverPara ? { mover_para: moverPara } : {} });
-      toast.success("Funil salvo");
+      toast.success(t("Funil salvo"));
       setConflito(null);
       onSaved?.();
       onClose();
@@ -58,8 +59,8 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
   const restantes = etapas.filter((e) => e.id);
 
   return (
-    <Modal titulo="Etapas do funil" largo
-      descricao="A etapa marcada como Ganho ou Perdido é a que fecha o negócio e alimenta os relatórios de conversão."
+    <Modal titulo={`Etapas do ${t("funil")}`} largo
+      descricao={`A etapa marcada como ${t("Ganho")} ou ${t("Perdido")} é a que fecha o ${t("negócio")} e alimenta os relatórios de conversão.`}
       onFechar={onClose} onSalvar={salvar} testId="funil-config"
       rodape={(
         <button type="button" onClick={adicionar} className="zz-btn zz-btn-secondary mr-auto"
@@ -69,7 +70,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
       )}>
       <div className="max-w-sm">
         <label className="text-[10px] font-bold uppercase tracking-wider text-ink-2 block mb-1">
-          Nome do funil
+          Nome do {t("funil")}
         </label>
         <input required className="zz-input" data-testid="funil-nome"
           value={nome} onChange={(e) => setNome(e.target.value)} />
@@ -90,7 +91,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
               onChange={(ev) => alterar(i, { nome: ev.target.value })} />
             <select className="zz-input h-8 text-xs w-32" value={etapa.tipo}
               onChange={(ev) => alterar(i, { tipo: ev.target.value })}>
-              {TIPOS.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+              {TIPOS.map(([v, r]) => <option key={v} value={v}>{t(r)}</option>)}
             </select>
             <div className="flex gap-0.5">
               {CORES.map((c) => (
@@ -113,7 +114,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
           <div className="flex gap-2 items-center">
             <select className="zz-input h-8 py-1 text-sm max-w-xs" data-testid="mover-para"
               value={moverPara} onChange={(e) => setMoverPara(e.target.value)}>
-              <option value="">Mover os negócios para…</option>
+              <option value="">Mover os {t("negócios")} para…</option>
               {restantes.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
             </select>
             <button type="submit" disabled={!moverPara} className="zz-btn text-xs py-1 disabled:opacity-40">

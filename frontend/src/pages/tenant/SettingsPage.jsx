@@ -5,6 +5,7 @@ import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { formatBRL } from "@/lib/currency";
 import { rotuloPapel } from "@/lib/papeis";
+import { t } from "@/lib/textos";
 
 const SENHA_MINIMA = 8;
 
@@ -86,7 +87,7 @@ function LinhaUso({ linha }) {
 }
 
 function MinhaConta() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, impersonatedFrom } = useAuth();
   const [nome, setNome] = useState(user?.name || "");
   const [salvandoNome, setSalvandoNome] = useState(false);
   const [senha, setSenha] = useState({ atual: "", nova: "", repetir: "" });
@@ -129,6 +130,21 @@ function MinhaConta() {
       setTrocando(false);
     }
   };
+
+  // No modo suporte a sessão é do super admin com o papel trocado: os campos
+  // abaixo mostrariam o email dele como se fosse o admin da empresa, e o
+  // backend recusa as duas escritas (`routes/settings.py`).
+  if (impersonatedFrom) {
+    return (
+      <Bloco icone={User} titulo="Minha conta">
+        <p className="text-sm text-ink-2" data-testid="conta-modo-suporte">
+          Você está em modo suporte, com a sua própria conta ({user?.email}). Os usuários
+          desta {t("empresa")}, com o email de acesso de cada um, estão em <strong>Usuários</strong>,
+          onde também se define uma senha nova.
+        </p>
+      </Bloco>
+    );
+  }
 
   return (
     <>
@@ -197,21 +213,21 @@ function Empresa() {
   useEffect(() => {
     api.get("/settings/empresa")
       .then((r) => setDados(r.data))
-      .catch((e) => setErro(e.response?.data?.detail || "Não foi possível carregar os dados da empresa"));
+      .catch((e) => setErro(e.response?.data?.detail || `Não foi possível carregar os dados da ${t("empresa")}`));
   }, []);
 
   if (erro) {
-    return <Bloco icone={Buildings} titulo="Empresa"><div className="text-sm text-danger">{erro}</div></Bloco>;
+    return <Bloco icone={Buildings} titulo={t("Empresa")}><div className="text-sm text-danger">{erro}</div></Bloco>;
   }
   if (!dados) {
-    return <Bloco icone={Buildings} titulo="Empresa"><div className="text-sm text-ink-3">Carregando…</div></Bloco>;
+    return <Bloco icone={Buildings} titulo={t("Empresa")}><div className="text-sm text-ink-3">Carregando…</div></Bloco>;
   }
 
   const { empresa, plano, uso } = dados;
 
   return (
     <>
-      <Bloco icone={Buildings} titulo="Empresa">
+      <Bloco icone={Buildings} titulo={t("Empresa")}>
         <div className="space-y-2 text-sm">
           <div className="flex justify-between border-b border-line pb-2">
             <span className="text-ink-3">Nome</span>
@@ -238,7 +254,7 @@ function Empresa() {
         {empresa.status !== "active" && (
           <div className="mt-4 flex items-start gap-2 border border-danger bg-danger-soft text-danger p-3 rounded-lg text-xs">
             <Warning size={14} weight="bold" className="shrink-0 mt-0.5" />
-            <span>Esta empresa está suspensa. Fale com o suporte para reativar.</span>
+            <span>Esta {t("empresa")} está suspensa. Fale com o suporte para reativar.</span>
           </div>
         )}
       </Bloco>

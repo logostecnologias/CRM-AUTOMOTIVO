@@ -200,6 +200,73 @@ html.dark[data-marca="r3"] {
   --sombra-2: rgba(0, 0, 0, 0.55);
 }
 
+/* ===========================================================================
+   Marca Nexa
+   ---------------------------------------------------------------------------
+   A versão do produto para clínicas (projeto "LOGOS - IA de atendimento"),
+   com a paleta padrão dela, a Sálvia: neutros esverdeados, sólido sálvia e
+   serifa só nos títulos. É a única marca que troca também a tipografia; as
+   fontes são buscadas por `lib/marca.js` só quando ela é aplicada.
+
+   Informação/foco/seleção seguem a marca, como na Nexa: um azul fixo destoaria
+   justamente no anel de foco de todo campo.
+   =========================================================================== */
+html[data-marca="nexa"] {
+  --bg: #F5F6F2;
+  --surface: #FFFFFF;
+  --surface-2: #F7F9F6;
+  --surface-3: #ECEFE9;
+
+  --line: #DFE4DC;
+  --line-strong: #BCC3BA;
+
+  --text: #1C221D;
+  --text-2: #4D584E;
+  --text-3: #636E64;
+  --text-4: #7F8880;
+
+  --brand: #4A5F4B;
+  --brand-fg: #FFFFFF;
+  --brand-soft: #EBF0EA;
+
+  --info: #4A5F4B;
+  --info-soft: #EBF0EA;
+
+  --sombra-1: rgba(28, 34, 29, 0.06);
+  --sombra-2: rgba(28, 34, 29, 0.18);
+
+  --font-heading: 'Fraunces', Georgia, serif;
+  --font-body: 'Figtree', system-ui, sans-serif;
+}
+
+html.dark[data-marca="nexa"] {
+  --bg: #0F1210;
+  --surface: #161B17;
+  --surface-2: #1C221D;
+  --surface-3: #232B24;
+
+  --line: #2A322B;
+  --line-strong: #3F483F;
+
+  --text: #E7EBE6;
+  --text-2: #B5BEB4;
+  --text-3: #8A9488;
+  --text-4: #737C71;
+
+  --brand: #8FAF8E;
+  --brand-fg: #102012;
+  --brand-soft: #1E2A1F;
+
+  --info: #8FAF8E;
+  --info-soft: #1E2A1F;
+
+  --grade: #2A322B;
+  --eixo: #737C71;
+
+  --sombra-1: rgba(0, 0, 0, 0.30);
+  --sombra-2: rgba(0, 0, 0, 0.55);
+}
+
 body {
   margin: 0;
   font-family: var(--font-body);
@@ -216,6 +283,18 @@ body, .zz-panel, .zz-panel-hard, .zz-input, .zz-btn, .zz-nav-item {
 }
 
 .font-heading { font-family: var(--font-heading); letter-spacing: -0.02em; }
+
+/* As telas usam `font-heading font-black tracking-tighter`, feito para a
+   grotesca da ZappZen. A Fraunces da Nexa não tem peso 900 (o navegador
+   inventaria um negrito borrado) e serifa apertada fica ilegível, então na
+   Nexa o título é 500 com espaçamento quase normal. */
+html[data-marca="nexa"] .font-heading,
+html[data-marca="nexa"] .font-heading.tracking-tighter,
+html[data-marca="nexa"] .font-heading.tracking-tight { letter-spacing: -0.01em; }
+html[data-marca="nexa"] .font-heading.font-black, html[data-marca="nexa"] .font-heading.font-extrabold,
+html[data-marca="nexa"] .font-heading.font-bold, html[data-marca="nexa"] .font-heading.font-semibold {
+  font-weight: 500;
+}
 .font-mono { font-family: var(--font-mono); }
 
 /* ===========================================================================
@@ -590,5 +669,32 @@ textarea.zz-input { line-height: 1.55; }
     --card-foreground: 0 10% 94%;
     --popover: 190 100% 12%;
     --popover-foreground: 0 10% 94%;
+  }
+
+  /* Marca Nexa: os mesmos papéis dos tokens acima, em HSL. */
+  html[data-marca="nexa"] {
+    --background: 0 0% 100%;
+    --foreground: 130 10% 12%;
+    --primary: 123 12% 33%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 123 12% 33%;
+    --border: 98 13% 88%;
+    --input: 98 13% 88%;
+    --card-foreground: 130 10% 12%;
+    --popover-foreground: 130 10% 12%;
+  }
+
+  html.dark[data-marca="nexa"] {
+    --background: 140 9% 6%;
+    --foreground: 108 11% 91%;
+    --primary: 118 17% 62%;
+    --primary-foreground: 128 33% 9%;
+    --ring: 118 17% 62%;
+    --border: 128 9% 18%;
+    --input: 128 9% 18%;
+    --card: 132 10% 10%;
+    --card-foreground: 108 11% 91%;
+    --popover: 132 10% 10%;
+    --popover-foreground: 108 11% 91%;
   }
 }

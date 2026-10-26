@@ -8,12 +8,15 @@ import {
 } from "@phosphor-icons/react";
 import BotaoTema from "@/components/BotaoTema";
 import LogoMarca from "@/components/LogoMarca";
+import { t } from "@/lib/textos";
 
-const RECURSOS = [
+// Funcao, nao constante: o texto depende da marca, e uma lista no topo do
+// modulo ficaria na marca de quando o arquivo carregou.
+const recursos = () => [
   { icone: Headset, titulo: "Central de Atendimento", linha: "Fila, times e histórico de cada conversa" },
-  { icone: Sparkle, titulo: "Agentes de IA", linha: "Respondem sozinhos e chamam gente na hora certa" },
+  { icone: Sparkle, titulo: t("Agentes de IA"), linha: "Respondem sozinhos e chamam gente na hora certa" },
   { icone: Robot, titulo: "Fluxos automáticos", linha: "Editor visual, menus e integrações" },
-  { icone: UsersThree, titulo: "CRM e funil", linha: "Ficha do contato, negócios e próximo passo" },
+  { icone: UsersThree, titulo: t("CRM e funil"), linha: `Ficha do ${t("contato")}, ${t("negócios")} e próximo passo` },
   { icone: CalendarCheck, titulo: "Agenda", linha: "Horário marcado pelo WhatsApp, com lembrete" },
   { icone: Megaphone, titulo: "Campanhas", linha: "Disparo por modelo aprovado, com métrica" },
 ];
@@ -47,10 +50,10 @@ export default function LoginPage() {
 
         <div>
           <h1 className="font-heading text-4xl xl:text-5xl font-black tracking-tighter leading-[0.95] mb-5">
-            Todo o WhatsApp da sua<br/>empresa em <span className="text-info">um só painel.</span>
+            Todo o WhatsApp da sua<br/>{t("empresa")} em <span className="text-info">um só painel.</span>
           </h1>
           <p className="text-ink-2 text-base leading-relaxed max-w-md mb-8">
-            Atendimento em equipe, agentes de IA, CRM com funil, agenda e campanhas. Várias empresas no mesmo lugar.
+            Atendimento em equipe, {t("agentes de IA")}, {t("CRM com funil")}, agenda e campanhas. Várias {t("empresas")} no mesmo lugar.
           </p>
 
           {/* O que a tela mostra e o que o produto faz, nao uma funcionalidade
@@ -61,7 +64,7 @@ export default function LoginPage() {
               lateral, entao a promessa da tela publica e o menu de dentro
               dizem a mesma coisa. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 max-w-lg">
-            {RECURSOS.map(({ icone: Icone, titulo, linha }) => (
+            {recursos().map(({ icone: Icone, titulo, linha }) => (
               <div key={titulo} className="flex gap-2.5">
                 <Icone size={17} weight="bold" className="text-ink-3 shrink-0 mt-0.5" />
                 <div>
@@ -74,7 +77,7 @@ export default function LoginPage() {
         </div>
 
         <div className="font-mono text-[11px] text-ink-3 tracking-wide">
-          Multiempresa · Em português
+          {t("Multiempresa")} · Em português
         </div>
       </div>
 
@@ -99,7 +102,7 @@ export default function LoginPage() {
                 className="zz-input"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="voce@empresa.com"
+                placeholder={t("voce@empresa.com")}
               />
             </div>
             <div>

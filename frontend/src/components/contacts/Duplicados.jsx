@@ -3,6 +3,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { ArrowsMerge, CheckCircle } from "@phosphor-icons/react";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 
 const CRITERIO = { email: "mesmo e-mail", nome: "mesmo nome" };
 
@@ -52,7 +53,7 @@ export default function Duplicados({ onClose, onMesclou }) {
 
   return (
     <Modal titulo="Possíveis duplicados" largo
-      descricao="Fichas com o mesmo e-mail ou o mesmo nome. Escolha qual fica — as outras são absorvidas e apagadas, e conversas, negócios, atividades e notas passam para ela."
+      descricao={`Fichas com o mesmo e-mail ou o mesmo nome. Escolha qual fica — as outras são absorvidas e apagadas, e conversas, ${t("negócios")}, ${t("atividades")} e notas passam para ela.`}
       onFechar={onClose} testId="duplicados">
       {grupos === null && <div className="text-xs text-ink-3 py-4">Procurando…</div>}
 

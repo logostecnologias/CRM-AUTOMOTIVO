@@ -8,6 +8,11 @@ import {
   Play, ChatText, ListNumbers, Database, GitBranch, Image,
   Clock, Cloud, UserSwitch, StopCircle, ArrowsLeftRight, CalendarCheck,
 } from "@phosphor-icons/react";
+import { t } from "@/lib/textos";
+
+// Texto que cita vocabulário da marca (contato, serviço, empresa) vai em
+// getter: estas listas são do módulo, e um valor resolvido no import ficaria na
+// marca de quando o arquivo carregou. O getter resolve a cada leitura, na tela.
 
 // Gatilhos do nó de Início.
 //
@@ -17,7 +22,7 @@ import {
 // configuração e a lista de bots — e antes o cartão mostrava a chave crua.
 export const GATILHOS = [
   { valor: "first_message", label: "Primeira mensagem",
-    opcao: "Primeira mensagem do contato" },
+    get opcao() { return `Primeira mensagem do ${t("contato")}`; } },
   { valor: "keyword", label: "Palavra-chave",
     opcao: "Palavra-chave específica" },
   { valor: "no_response", label: "Sem resposta",
@@ -35,9 +40,9 @@ export const FORMATO_LISTA = "lista";
 
 export const MENU_FORMATOS = [
   { valor: FORMATO_TEXTO, label: "Texto numerado",
-    ajuda: "Lista de opções no corpo da mensagem. O contato responde digitando o número. Funciona em qualquer aparelho." },
+    get ajuda() { return `Lista de opções no corpo da mensagem. O ${t("contato")} responde digitando o número. Funciona em qualquer aparelho.`; } },
   { valor: FORMATO_BOTOES, label: "Botões de resposta rápida",
-    ajuda: "Até 3 opções, cada uma como um botão sob a mensagem. O contato toca em vez de digitar." },
+    get ajuda() { return `Até 3 opções, cada uma como um botão sob a mensagem. O ${t("contato")} toca em vez de digitar.`; } },
   { valor: FORMATO_LISTA, label: "Lista de opções",
     ajuda: "Até 10 opções dentro de um menu que abre por um botão. Cada opção pode ter uma linha de descrição." },
 ];
@@ -98,10 +103,10 @@ export function validarMenu(data = {}) {
 // a barreira que recusa a publicação. Mexer num é mexer no outro.
 
 export const MODOS_PROFISSIONAL = [
-  { valor: "qualquer", label: "A empresa escolhe quem estiver livre",
-    ajuda: "O contato não escolhe profissional. Menos uma pergunta na conversa: use quando tanto faz quem atende." },
-  { valor: "perguntar", label: "O contato escolhe",
-    ajuda: "Mostra a lista de profissionais que atendem o serviço. Com um só cadastrado, a pergunta é pulada." },
+  { valor: "qualquer", get label() { return `A ${t("empresa")} escolhe quem estiver livre`; },
+    get ajuda() { return `O ${t("contato")} não escolhe profissional. Menos uma pergunta na conversa: use quando tanto faz quem atende.`; } },
+  { valor: "perguntar", get label() { return `O ${t("contato")} escolhe`; },
+    get ajuda() { return `Mostra a lista de profissionais que atendem o ${t("serviço")}. Com um só cadastrado, a pergunta é pulada.`; } },
   { valor: "fixo", label: "Sempre o mesmo profissional",
     ajuda: "Todo agendamento por este nó vai para quem você escolher abaixo." },
 ];
@@ -110,7 +115,7 @@ export const FORMATOS_AGENDA = [
   { valor: "lista", label: "Lista de opções",
     ajuda: "Até 10 opções num menu que abre por um botão. É o formato certo para dias e horários." },
   { valor: "texto", label: "Texto numerado",
-    ajuda: "As opções no corpo da mensagem; o contato digita o número. Funciona em qualquer aparelho." },
+    get ajuda() { return `As opções no corpo da mensagem; o ${t("contato")} digita o número. Funciona em qualquer aparelho.`; } },
 ];
 
 export const MAX_DIAS_AGENDA = 10;

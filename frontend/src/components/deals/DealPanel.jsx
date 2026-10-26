@@ -4,17 +4,19 @@ import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import Atividades from "@/components/activities/Atividades";
+import { t } from "@/lib/textos";
 import {
   X, Trash, Megaphone, User, ClockCounterClockwise, ChatCircleDots,
 } from "@phosphor-icons/react";
 
-const EVENTO_LABEL = {
-  criado: "criou o negócio",
+// Função, e não constante: o texto depende da marca, resolvida na renderização.
+const eventoLabel = () => ({
+  criado: `criou o ${t("negócio")}`,
   etapa: "moveu de etapa",
   valor: "mudou o valor",
-  ganho: "marcou como ganho",
-  perdido: "marcou como perdido",
-};
+  ganho: `marcou como ${t("ganho")}`,
+  perdido: `marcou como ${t("perdido")}`,
+});
 
 function Linha({ label, children }) {
   return (
@@ -68,7 +70,7 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
       const etapa = (pipeline?.etapas || []).find((e) => e.id === form.etapa_id);
       if (etapa?.tipo === "perdido") payload.motivo_perda = form.motivo_perda;
       await api.patch(`/deals/${dealId}`, payload);
-      toast.success("Negócio salvo");
+      toast.success(`${t("Negócio")} salvo`);
       carregar();
       onChanged?.();
     } catch (ex) {
@@ -79,11 +81,11 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
   };
 
   const excluir = async () => {
-    if (!(await confirmToast(`Excluir o negócio "${dados.deal.titulo}"?`,
+    if (!(await confirmToast(`Excluir o ${t("negócio")} "${dados.deal.titulo}"?`,
       { confirmLabel: "Excluir" }))) return;
     try {
       await api.delete(`/deals/${dealId}`);
-      toast.success("Negócio excluído");
+      toast.success(`${t("Negócio")} excluído`);
       onChanged?.();
       onClose();
     } catch (ex) {
@@ -108,7 +110,7 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
       <div className="px-5 py-4 border-b border-line-strong flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-1">
-            {d.status === "ganho" ? "Ganho" : d.status === "perdido" ? "Perdido" : "Em aberto"}
+            {d.status === "ganho" ? t("Ganho") : d.status === "perdido" ? t("Perdido") : "Em aberto"}
           </div>
           <div className="font-heading text-xl font-black tracking-tighter truncate">{d.titulo}</div>
           <div className="font-mono text-sm text-ink">{formatBRL(d.valor)}</div>
@@ -214,7 +216,7 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
               <div key={ev.id} className="border-l-2 border-line pl-3 py-1" data-testid={`deal-event-${ev.id}`}>
                 <div className="text-xs text-ink">
                   <strong className="font-semibold">{ev.autor_nome || "sistema"}</strong>{" "}
-                  {EVENTO_LABEL[ev.tipo] || ev.tipo}
+                  {eventoLabel()[ev.tipo] || ev.tipo}
                   {ev.de && ev.para ? `: ${ev.de} → ${ev.para}` : ev.para ? `: ${ev.para}` : ""}
                   {ev.valor_para != null ? `: ${formatBRL(ev.valor_para)}` : ""}
                   {ev.motivo ? ` (${ev.motivo})` : ""}
@@ -232,7 +234,7 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
             <a href={`/app/inbox?session=${d.session_id}`}
               className="flex items-center gap-2 border border-line px-3 py-2 hover:bg-surface-2 text-xs text-ink rounded-lg">
               <ChatCircleDots size={14} weight="bold" className="text-ink-3" />
-              Abrir a conversa que originou este negócio
+              Abrir a conversa que originou este {t("negócio")}
             </a>
           </div>
         )}
@@ -241,7 +243,7 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
       <div className="border-t border-line p-3 flex justify-end">
         <button onClick={excluir} data-testid="deal-delete"
           className="zz-btn zz-btn-secondary text-xs text-danger border-danger hover:bg-danger-soft">
-          <Trash size={13} weight="bold" /> Excluir negócio
+          <Trash size={13} weight="bold" /> Excluir {t("negócio")}
         </button>
       </div>
     </aside>

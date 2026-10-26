@@ -5,6 +5,7 @@ import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import { useAcao } from "@/hooks/useAcao";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 import Atividades from "@/components/activities/Atividades";
 import { fotoDoContato } from "@/components/atendimento/shared";
 import {
@@ -163,7 +164,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
         valor: criandoNegocio.valor,
       });
       setCriandoNegocio(null);
-      toast.success("Negócio criado no funil");
+      toast.success(`${t("Negócio")} criado no ${t("funil")}`);
       carregarNegocios();
     } catch (ex) {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
@@ -174,7 +175,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
     try {
       const r = await api.delete(`/contacts/${contactId}`, { params: { modo } });
       toast.success(modo === "apagar"
-        ? `Contato apagado (${r.data.conversas_apagadas} conversa(s), ${r.data.negocios_apagados} negócio(s))`
+        ? `${t("Contato")} apagado (${r.data.conversas_apagadas} conversa(s), ${r.data.negocios_apagados} ${t("negócio")}(s))`
         : `Dados pessoais removidos (${r.data.conversas_preservadas} conversa(s) preservada(s))`);
       onSaved?.();
       onClose();
@@ -341,17 +342,17 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
           <Atividades vinculo={{ contact_id: contactId }} />
         </Bloco>
 
-        <Bloco titulo={`Negócios (${negocios.length})`} acao={
+        <Bloco titulo={`${t("Negócios")} (${negocios.length})`} acao={
           funis.length > 0 && (
             <button onClick={() => setCriandoNegocio({
-              titulo: `Negócio — ${c.nome}`, valor: 0, pipeline_id: funis[0].id,
+              titulo: `${t("Negócio")} — ${c.nome}`, valor: 0, pipeline_id: funis[0].id,
             })} className="zz-btn text-xs py-1" data-testid="contact-new-deal">
               <Plus size={12} weight="bold" /> Novo
             </button>
           )
         }>
           {criandoNegocio && (
-            <Modal titulo="Novo negócio" descricao={`Para o contato ${c.nome}.`}
+            <Modal titulo={`Novo ${t("negócio")}`} descricao={`Para o ${t("contato")} ${c.nome}.`}
               onFechar={() => setCriandoNegocio(null)} onSalvar={criarNegocio}
               salvarLabel="Criar" salvandoLabel="Criando…" testId="contact-deal-form">
               <div>
@@ -370,7 +371,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                 </div>
                 {funis.length > 1 && (
                   <div>
-                    <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Funil</label>
+                    <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">{t("funil")}</label>
                     <select className="zz-input" value={criandoNegocio.pipeline_id}
                       onChange={(e) => setCriandoNegocio({ ...criandoNegocio, pipeline_id: e.target.value })}>
                       {funis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
@@ -381,7 +382,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
             </Modal>
           )}
           {negocios.length === 0 && !criandoNegocio && (
-            <div className="text-xs text-ink-4">Nenhum negócio para este contato.</div>
+            <div className="text-xs text-ink-4">Nenhum {t("negócio")} para este {t("contato")}.</div>
           )}
           <div className="space-y-1.5">
             {negocios.map((n) => (
@@ -398,7 +399,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                     : n.status === "perdido" ? "border-danger bg-danger-soft text-danger"
                     : "border-line bg-surface-2 text-ink-2"
                 }`}>
-                  {n.status}
+                  {t(n.status)}
                 </span>
               </a>
             ))}
@@ -417,7 +418,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                     {s.last_message?.content || "(sem mensagens)"}
                   </div>
                   <div className="text-[10px] font-mono text-ink-3">
-                    {KANBAN_LABEL[s.status_atendimento] || s.status_atendimento}
+                    {(s.status_atendimento === "bot" ? `com o ${t("robô")}` : KANBAN_LABEL[s.status_atendimento]) || s.status_atendimento}
                     {s.origem === "campanha" ? " · via campanha" : s.origem === "direta" ? " · iniciada por nós" : ""}
                     {" · "}{new Date(s.updated_at).toLocaleDateString("pt-BR")}
                   </div>
@@ -456,7 +457,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
           {!excluindo ? (
             <button onClick={() => setExcluindo(true)} data-testid="abrir-exclusao"
               className="zz-btn zz-btn-secondary text-xs py-1 text-danger border-danger hover:bg-danger-soft">
-              <TrashIcon size={12} weight="bold" /> Remover este contato
+              <TrashIcon size={12} weight="bold" /> Remover este {t("contato")}
             </button>
           ) : (
             <div className="space-y-2">
@@ -468,7 +469,7 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                 </div>
                 <div className="text-[11px] text-ink-2 mt-0.5">
                   Nome, número, e-mail, campos e notas somem; o texto das mensagens é redigido e a
-                  mídia sai do disco. As conversas e os negócios continuam existindo, para os
+                  mídia sai do disco. As conversas e os {t("negócios")} continuam existindo, para os
                   relatórios de meses passados não mudarem. <strong>É esta que atende ao pedido
                   do titular.</strong>
                 </div>
@@ -479,8 +480,8 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
                   <TrashIcon size={13} weight="bold" /> Apagar tudo
                 </div>
                 <div className="text-[11px] text-ink mt-0.5">
-                  Leva conversas, mensagens, negócios e histórico. A receita desses negócios sai
-                  dos relatórios. Use para contato de teste ou importação errada.
+                  Leva conversas, mensagens, {t("negócios")} e histórico. A receita desses {t("negócios")} sai
+                  dos relatórios. Use para {t("contato")} de teste ou importação errada.
                 </div>
               </button>
               <button onClick={() => setExcluindo(false)}
@@ -501,14 +502,14 @@ export default function ContactPanel({ contactId, onClose, onSaved }) {
             {c.opt_out && (
               <div className="text-[11px] text-warning mb-2 flex items-start gap-1.5">
                 <Warning size={12} weight="bold" className="mt-0.5 shrink-0" />
-                Este contato pediu para não receber campanhas. Mensagem direta ainda é permitida —
+                Este {t("contato")} pediu para não receber campanhas. Mensagem direta ainda é permitida —
                 a recusa vale para disparo em massa, não para atendimento.
               </div>
             )}
             <div className="flex gap-2 items-end">
               <textarea ref={areaRef} rows={2} required data-testid="contact-send-text"
                 className="zz-input flex-1 text-sm font-sans resize-none"
-                placeholder="Escrever para este contato…"
+                placeholder={`Escrever para este ${t("contato")}…`}
                 value={mensagem} onChange={(e) => setMensagem(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(e); }

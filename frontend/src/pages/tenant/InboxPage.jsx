@@ -6,6 +6,7 @@ import { useActiveSession } from "@/hooks/useActiveSession";
 import { Hand, HandPalm, CheckCircle, X, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { STATUS, SessionListItem, MessageBubble, Avatar, ChatComposer, fotoDoContato } from "@/components/atendimento/shared";
+import { t } from "@/lib/textos";
 
 export default function InboxPage() {
   const { user } = useAuth();
@@ -85,7 +86,7 @@ export default function InboxPage() {
                 }
               >
                 <Icon size={14} weight="bold" />
-                {s.label}
+                {t(s.label)}
                 <span
                   className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-[11px] font-bold ${alerting ? "rounded-full bg-surface text-danger" : "font-mono border rounded-full"}`}
                   style={alerting ? undefined : { borderColor: isActive ? "#fff" : "var(--line-strong)" }}
@@ -106,8 +107,8 @@ export default function InboxPage() {
         >
           <Warning size={16} weight="fill" />
           {counts.aguardando === 1
-            ? "1 cliente aguardando atendimento"
-            : `${counts.aguardando} clientes aguardando atendimento`}
+            ? `1 ${t("cliente")} aguardando atendimento`
+            : `${counts.aguardando} ${t("clientes")} aguardando atendimento`}
           <span className="underline">— ver fila</span>
         </button>
       )}
@@ -137,7 +138,7 @@ export default function InboxPage() {
               <div className="flex items-center gap-2 shrink-0">
                 {active.status_atendimento === "bot" && (
                   <button onClick={assume} disabled={assumindo}
-                    title="Para o robô ou o agente de IA nesta conversa e passa a resposta para você"
+                    title={`Para o ${t("robô")} ou o ${t("agente de IA")} nesta conversa e passa a resposta para você`}
                     className="zz-btn zz-btn-danger text-xs" data-testid="interrupt-btn">
                     <HandPalm size={12} weight="bold" /> Interromper e assumir
                   </button>

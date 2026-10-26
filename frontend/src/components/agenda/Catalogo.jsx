@@ -5,6 +5,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import { confirmToast } from "@/lib/confirm-toast";
 import { useAcao } from "@/hooks/useAcao";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 import { DIAS_GRADE, moeda } from "./comum";
 import { CampoHora } from "./CampoHora";
 
@@ -96,7 +97,7 @@ export function Servicos({ servicos, recursos, onMudou }) {
       if (editando.id) await api.patch(`/agenda/services/${editando.id}`, corpo);
       else await api.post("/agenda/services", corpo);
       setEditando(null);
-      toast.success("Serviço salvo");
+      toast.success(`${t("Serviço")} salvo`);
       onMudou();
     } catch (e) {
       toast.error(formatApiErrorDetail(e.response?.data?.detail));
@@ -122,7 +123,7 @@ export function Servicos({ servicos, recursos, onMudou }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-ink-2">
-          O que a empresa agenda. A <strong>duração</strong> é o que define os horários
+          O que a {t("empresa")} agenda. A <strong>duração</strong> é o que define os horários
           oferecidos: uma coloração de 2h não é oferecida às 17h num expediente que fecha às 18h.
         </p>
         <button className="zz-btn shrink-0 ml-4" data-testid="novo-servico"
@@ -130,12 +131,12 @@ export function Servicos({ servicos, recursos, onMudou }) {
             nome: "", duracao_min: 30, preco: "", descricao: "", ativo: true,
             ordem: servicos.length, recursos: [],
           })}>
-          <Plus size={14} weight="bold" /> Novo serviço
+          <Plus size={14} weight="bold" /> Novo {t("serviço")}
         </button>
       </div>
 
       {servicos.length === 0 ? (
-        <Vazio texto="Nenhum serviço cadastrado. Sem pelo menos um, o bot e o agente de IA não têm o que agendar." />
+        <Vazio texto={`Nenhum ${t("serviço")} cadastrado. Sem pelo menos um, o bot e o ${t("agente de IA")} não têm o que agendar.`} />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {servicos.map((s) => (
@@ -171,7 +172,7 @@ export function Servicos({ servicos, recursos, onMudou }) {
       )}
 
       {editando && (
-        <Modal titulo={editando.id ? "Editar serviço" : "Novo serviço"}
+        <Modal titulo={editando.id ? `Editar ${t("serviço")}` : `Novo ${t("serviço")}`}
           onFechar={() => setEditando(null)} onSalvar={salvar}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Campo label="Nome">
@@ -195,10 +196,10 @@ export function Servicos({ servicos, recursos, onMudou }) {
           </div>
           <Campo label="Descrição">
             <input className="zz-input" value={editando.descricao || ""}
-              placeholder="Aparece na lista que o contato recebe no WhatsApp."
+              placeholder={`Aparece na lista que o ${t("contato")} recebe no WhatsApp.`}
               onChange={(e) => setEditando({ ...editando, descricao: e.target.value })} />
           </Campo>
-          <Campo label="Quem atende este serviço">
+          <Campo label={`Quem atende este ${t("serviço")}`}>
             <div className="flex flex-wrap gap-2">
               {recursos.map((r) => {
                 const marcado = (editando.recursos || []).includes(r.id);
@@ -220,7 +221,7 @@ export function Servicos({ servicos, recursos, onMudou }) {
             </div>
             <p className="text-[11px] text-ink-3 mt-1.5">
               Nenhum marcado = todos atendem. É o padrão, para um profissional novo não
-              nascer de fora de todos os serviços.
+              nascer de fora de todos os {t("serviços")}.
             </p>
           </Campo>
           <Ativo valor={editando.ativo !== false}
@@ -355,7 +356,7 @@ export function Profissionais({ recursos, usuarios, config, onMudou }) {
             </Campo>
           </div>
 
-          <Campo label={`Folga entre atendimentos (minutos), em branco usa a da empresa (${config.intervalo_min || 0})`}>
+          <Campo label={`Folga entre atendimentos (minutos), em branco usa a da ${t("empresa")} (${config.intervalo_min || 0})`}>
             <input type="number" min="0" className="zz-input font-mono max-w-[160px]"
               value={editando.intervalo_min}
               onChange={(e) => setEditando({ ...editando, intervalo_min: e.target.value })} />
@@ -377,7 +378,7 @@ export function Profissionais({ recursos, usuarios, config, onMudou }) {
                 </div>
                 <p className="text-[11px] text-ink-3">
                   Folga, férias ou um horário diferente num dia. Ganha da grade acima
-                  e perde para o feriado da empresa, em Configuração.
+                  e perde para o feriado da {t("empresa")}, em Configuração.
                 </p>
               </div>
               <button className="zz-btn zz-btn-secondary text-xs shrink-0"

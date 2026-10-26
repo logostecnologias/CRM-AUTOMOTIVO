@@ -3,6 +3,7 @@ import api, { API, formatApiErrorDetail } from "@/lib/api";
 import { ImageSquare, Plus, Trash, Check, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
+import { t } from "@/lib/textos";
 
 // Catálogo de fotos que o agente pode mandar sozinho.
 //
@@ -29,7 +30,7 @@ export default function FotosAgente({ agente, onMudou }) {
       <div className="rounded-xl border border-dashed border-line-strong p-6 text-center">
         <ImageSquare size={24} weight="bold" className="mx-auto text-ink-4 mb-2" />
         <p className="text-sm text-ink-2">
-          As fotos entram depois de criar o agente.
+          As fotos entram depois de criar o {t("agente")}.
         </p>
         <p className="text-[11px] text-ink-3 mt-1">
           Termine os passos, clique em criar e abra a configuração de novo para montar o catálogo.
@@ -86,7 +87,7 @@ export default function FotosAgente({ agente, onMudou }) {
   };
 
   const remover = async (foto) => {
-    if (!(await confirmToast(`Tirar "${foto.descricao}" do catálogo do agente?`,
+    if (!(await confirmToast(`Tirar "${foto.descricao}" do catálogo do ${t("agente")}?`,
       { confirmLabel: "Tirar" }))) return;
     try {
       await api.delete(`/ai/agents/${agente.id}/midias/${foto.id}`);
@@ -192,7 +193,7 @@ export default function FotosAgente({ agente, onMudou }) {
       <input ref={inputArquivo} type="file" accept="image/*" className="hidden" onChange={escolher} />
 
       <p className="text-[11px] text-ink-3 mt-2">
-        O agente <strong>não vê</strong> a imagem — ele decide pela descrição. Escreva como se
+        O {t("agente")} <strong>não vê</strong> a imagem — ele decide pela descrição. Escreva como se
         estivesse contando por telefone o que aparece na foto: modelo, cor, ano, ângulo.
         {fotos.length > 0 && ` ${fotos.length} de ${MAX_FOTOS}.`}
       </p>

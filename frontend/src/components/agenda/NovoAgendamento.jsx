@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { CalendarBlank, MagnifyingGlass, Warning, X } from "@phosphor-icons/react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { hora, moeda, rotuloDia, somaDias, hojeNaEmpresa } from "./comum";
+import { t } from "@/lib/textos";
 
 // Marcação manual: a recepção atendendo o telefone.
 //
@@ -65,7 +66,7 @@ export default function NovoAgendamento({ servicos, recursos, fuso, onFechar, on
   const salvar = async () => {
     if (!escolhido) return toast.error("Escolha um horário");
     if (!contato && !novo.numero.trim())
-      return toast.error("Escolha um contato ou informe o WhatsApp");
+      return toast.error(`Escolha um ${t("contato")} ou informe o WhatsApp`);
     setSalvando(true);
     try {
       const r = await api.post("/agenda/appointments", {
@@ -113,7 +114,7 @@ export default function NovoAgendamento({ servicos, recursos, fuso, onFechar, on
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <Campo label="Serviço">
+            <Campo label={t("Serviço")}>
               <select className="zz-input" value={servicoId} data-testid="agendamento-servico"
                 onChange={(e) => { setServicoId(e.target.value); setRecursoId(""); }}>
                 {servicos.map((s) => (
@@ -200,7 +201,7 @@ export default function NovoAgendamento({ servicos, recursos, fuso, onFechar, on
                 <div className="relative">
                   <MagnifyingGlass size={14} weight="bold"
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-                  <input className="zz-input pl-8" placeholder="Buscar contato por nome ou número"
+                  <input className="zz-input pl-8" placeholder={`Buscar ${t("contato")} por nome ou número`}
                     value={busca} data-testid="agendamento-busca-contato"
                     onChange={(e) => setBusca(e.target.value)} />
                 </div>
@@ -232,7 +233,7 @@ export default function NovoAgendamento({ servicos, recursos, fuso, onFechar, on
 
           <Campo label="Observações">
             <textarea rows={2} className="zz-input" value={observacoes}
-              placeholder="Fica só na agenda: o contato não recebe."
+              placeholder={`Fica só na agenda: o ${t("contato")} não recebe.`}
               onChange={(e) => setObservacoes(e.target.value)} />
           </Campo>
 
@@ -240,9 +241,9 @@ export default function NovoAgendamento({ servicos, recursos, fuso, onFechar, on
             <input type="checkbox" checked={avisar} data-testid="agendamento-avisar"
               onChange={(e) => setAvisar(e.target.checked)} className="mt-0.5" />
             <span>
-              Avisar o contato pelo WhatsApp
+              Avisar o {t("contato")} pelo WhatsApp
               <span className="block text-[11px] text-ink-3">
-                Manda a confirmação com serviço, dia e profissional. O lembrete automático,
+                Manda a confirmação com {t("serviço")}, dia e profissional. O lembrete automático,
                 se estiver ligado, sai depois de qualquer jeito.
               </span>
             </span>

@@ -6,6 +6,7 @@ import { useActiveSession } from "@/hooks/useActiveSession";
 import { Hand, HandPalm, CheckCircle, X } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { STATUS, SessionCard, MessageBubble, StatusBadge, ConnectionBadge, ChatComposer } from "@/components/atendimento/shared";
+import { t } from "@/lib/textos";
 
 export default function AtendimentoPage() {
   const { user } = useAuth();
@@ -119,7 +120,7 @@ export default function AtendimentoPage() {
                     >
                       <Icon size={12} weight="bold" />
                     </div>
-                    <div className="text-xs font-bold uppercase tracking-wider">{col.label}</div>
+                    <div className="text-xs font-bold uppercase tracking-wider">{t(col.label)}</div>
                   </div>
                   <div
                     className={alerting
@@ -174,7 +175,7 @@ export default function AtendimentoPage() {
               <div className="flex-1" />
               {active.status_atendimento === "bot" && (
                 <button onClick={assume} disabled={assumindo}
-                  title="Para o robô ou o agente de IA nesta conversa e passa a resposta para você"
+                  title={`Para o ${t("robô")} ou o ${t("agente de IA")} nesta conversa e passa a resposta para você`}
                   className="zz-btn zz-btn-danger text-xs" data-testid="interrupt-btn">
                   <HandPalm size={12} weight="bold" /> Interromper e assumir
                 </button>

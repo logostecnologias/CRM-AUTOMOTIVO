@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Robot, Timer, Headset, CheckCircle, Paperclip, PaperPlaneRight, X, FileArrowDown, Prohibit } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { API, formatApiErrorDetail } from "@/lib/api";
+import { t } from "@/lib/textos";
 
 export const STATUS = [
   { key: "bot", label: "Bot", icon: Robot, color: "#2563EB" },
@@ -477,7 +478,7 @@ export function StatusBadge({ status }) {
   if (!s) return null;
   return (
     <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 border border-line-strong text-white rounded-full" style={{ background: s.color }}>
-      {s.label}
+      {t(s.label)}
     </span>
   );
 }

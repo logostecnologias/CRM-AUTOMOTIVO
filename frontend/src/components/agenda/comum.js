@@ -1,3 +1,4 @@
+import { t } from "@/lib/textos";
 // Formatação de data e hora da agenda.
 //
 // **Tudo aqui é exibido no fuso da EMPRESA, não no do navegador**: e isso é o
@@ -109,11 +110,15 @@ export const STATUS = {
   faltou: { label: "Faltou", classe: "bg-danger-soft text-danger border-danger" },
 };
 
-export const ORIGEM = {
-  manual: "Marcado na recepção",
-  bot: "Marcado pelo robô no WhatsApp",
-  ia: "Marcado pelo agente de IA",
-};
+// Função, não constante: o texto depende da marca, que só se sabe na renderização.
+export function rotuloOrigem(origem) {
+  const r = {
+    manual: "Marcado na recepção",
+    bot: `Marcado pelo ${t("robô")} no WhatsApp`,
+    ia: `Marcado pelo ${t("agente de IA")}`,
+  };
+  return r[origem] || origem;
+}
 
 export function moeda(valor) {
   if (valor == null || valor === "") return "";

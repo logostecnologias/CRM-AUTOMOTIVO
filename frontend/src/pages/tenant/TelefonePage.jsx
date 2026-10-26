@@ -6,6 +6,7 @@ import {
 import api, { API, formatApiErrorDetail } from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import EscolhaDeModelo from "@/components/whatsapp/EscolhaDeModelo";
+import { t } from "@/lib/textos";
 
 // Ligação não atendida que vira conversa de WhatsApp.
 //
@@ -24,9 +25,10 @@ const STATUS = {
   falha: { label: "Falhou", classe: "bg-danger-soft text-danger border-danger" },
 };
 
-const MODOS = [
-  ["agente", "Agente de IA", "O agente da conexão responde. Sem agente ligado, a conversa vai para a fila."],
-  ["bot", "Robô", "Um robô do editor começa do nó Início."],
+// Funcao, nao constante: o texto depende da marca (lib/textos.js).
+const modos = () => [
+  ["agente", t("Agente de IA"), `O ${t("agente")} da conexão responde. Sem ${t("agente")} ligado, a conversa vai para a fila.`],
+  ["bot", t("Robô"), `Um ${t("robô")} do editor começa do nó Início.`],
   ["fila", "Fila de atendimento", "Direto para a Central, para uma pessoa responder."],
 ];
 
@@ -146,15 +148,15 @@ export default function TelefonePage() {
         <h1 className="font-heading text-4xl font-black tracking-tighter">Telefone</h1>
         <p className="text-ink-2 mt-2 text-sm max-w-3xl">
           Quem liga e não é atendido ouve uma gravação. Se apertar 1, recebe uma
-          mensagem no WhatsApp e a conversa continua por aqui, com o robô, o agente
-          de IA ou a equipe.
+          mensagem no WhatsApp e a conversa continua por aqui, com o {t("robô")}, o{" "}
+          {t("agente de IA")} ou a equipe.
         </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
         <div className="xl:col-span-2 space-y-6">
           <Bloco titulo="Conta Twilio"
-            nota="Account SID e Auth Token ficam no painel do Twilio, na página inicial da conta (ou da subconta desta empresa). O número é o que foi comprado lá.">
+            nota={`Account SID e Auth Token ficam no painel do Twilio, na página inicial da conta (ou da subconta desta ${t("empresa")}). O número é o que foi comprado lá.`}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Campo label="Account SID">
                 <input className="zz-input font-mono" data-testid="voz-sid"
@@ -215,7 +217,7 @@ export default function TelefonePage() {
                 texto={form.texto_confirmacao} padrao={padrao.texto_confirmacao}
                 onTexto={(v) => set({ texto_confirmacao: v })} />
               <Campo label="Quando o número de quem liga está oculto"
-                nota="Não há para quem mandar a mensagem, então a gravação só diz onde achar a empresa. Sempre em voz sintética.">
+                nota={`Não há para quem mandar a mensagem, então a gravação só diz onde achar a ${t("empresa")}. Sempre em voz sintética.`}>
                 <textarea rows={2} className="zz-input" value={form.texto_sem_numero}
                   placeholder={padrao.texto_sem_numero}
                   onChange={(e) => set({ texto_sem_numero: e.target.value })} />
@@ -224,7 +226,7 @@ export default function TelefonePage() {
           </Bloco>
 
           <Bloco titulo="A mensagem no WhatsApp"
-            nota="Quem falou com a empresa nas últimas 24 horas recebe o texto abaixo, sem custo. Os outros só podem receber um modelo aprovado pela Meta: sem modelo, a mensagem não sai.">
+            nota={`Quem falou com a ${t("empresa")} nas últimas 24 horas recebe o texto abaixo, sem custo. Os outros só podem receber um modelo aprovado pela Meta: sem modelo, a mensagem não sai.`}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Campo label="Sai pela conexão">
                 <select className="zz-input" value={form.whatsapp_connection_id}
@@ -251,7 +253,7 @@ export default function TelefonePage() {
 
           <Bloco titulo="Quem atende a resposta">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {MODOS.map(([valor, rotulo, nota]) => {
+              {modos().map(([valor, rotulo, nota]) => {
                 const marcado = form.resposta_modo === valor;
                 return (
                   <button key={valor} type="button" data-testid={`voz-modo-${valor}`}
@@ -266,7 +268,7 @@ export default function TelefonePage() {
             </div>
             {form.resposta_modo === "bot" && (
               <div className="mt-4 max-w-sm">
-                <Campo label="Robô">
+                <Campo label={t("Robô")}>
                   <select className="zz-input" value={form.bot_id} data-testid="voz-bot"
                     onChange={(e) => set({ bot_id: e.target.value })}>
                     <option value="">Selecione…</option>
@@ -299,7 +301,7 @@ export default function TelefonePage() {
           </Bloco>
 
           <Bloco titulo="Como ligar o desvio"
-            nota="No celular da empresa, disque o código e aperte ligar. O número é o do Twilio, com DDD.">
+            nota={`No celular da ${t("empresa")}, disque o código e aperte ligar. O número é o do Twilio, com DDD.`}>
             <ul className="text-sm space-y-2">
               <li><span className="font-mono font-semibold">*61*número#</span>
                 <span className="text-ink-2"> desvia só quando você não atende</span></li>

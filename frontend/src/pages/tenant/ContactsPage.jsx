@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import Modal from "@/components/ui/Modal";
+import { t } from "@/lib/textos";
 import { toast } from "sonner";
 import { MagnifyingGlass, Prohibit, Plus, SlidersHorizontal, X, ArrowsDownUp, ArrowsMerge } from "@phosphor-icons/react";
 import ContactPanel from "@/components/contacts/ContactPanel";
@@ -67,7 +68,7 @@ export default function ContactsPage() {
     try {
       const r = await api.post("/contacts", novo);
       setNovo(null);
-      toast.success("Contato criado");
+      toast.success(`${t("Contato")} criado`);
       carregar();
       setAberto(r.data.id);
     } catch (ex) {
@@ -86,9 +87,9 @@ export default function ContactsPage() {
     <div className={`p-8 ${aberto ? "pr-[540px]" : ""}`} data-testid="contacts-page">
       <div className="flex items-end justify-between mb-6">
         <div>
-          <h1 className="font-heading text-4xl font-black tracking-tighter">Contatos</h1>
+          <h1 className="font-heading text-4xl font-black tracking-tighter">{t("Contatos")}</h1>
           <p className="text-ink-2 mt-2 text-sm">
-            Clique num contato para abrir a ficha, anotar, atribuir responsável e enviar mensagem.
+            Clique num {t("contato")} para abrir a ficha, anotar, atribuir responsável e enviar mensagem.
           </p>
         </div>
         <div className="flex gap-2">
@@ -106,7 +107,7 @@ export default function ContactsPage() {
           </button>
           <button onClick={() => setNovo({ nome: "", numero_whatsapp: "" })} className="zz-btn"
             data-testid="new-contact-btn">
-            <Plus size={14} weight="bold" /> Novo contato
+            <Plus size={14} weight="bold" /> Novo {t("contato")}
           </button>
         </div>
       </div>
@@ -135,8 +136,8 @@ export default function ContactsPage() {
       )}
 
       {novo && (
-        <Modal titulo="Novo contato"
-          descricao="O número é a identidade do contato: um já cadastrado é recusado em vez de virar ficha dupla."
+        <Modal titulo={`Novo ${t("contato")}`}
+          descricao={`O número é a identidade do ${t("contato")}: um já cadastrado é recusado em vez de virar ficha dupla.`}
           onFechar={() => setNovo(null)} onSalvar={criar}
           salvarLabel="Criar" salvandoLabel="Criando…" testId="new-contact-form"
           corpoClasse="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -178,18 +179,18 @@ export default function ContactsPage() {
             <X size={14} weight="bold" />
           </button>
         )}
-        <div className="text-xs font-mono text-ink-3 ml-auto">{total.toLocaleString("pt-BR")} contato(s)</div>
+        <div className="text-xs font-mono text-ink-3 ml-auto">{total.toLocaleString("pt-BR")} {t("contato")}(s)</div>
       </div>
 
       {contatos.length === 0 ? (
         <div className="border border-dashed border-line rounded-xl bg-surface p-16 text-center">
           <div className="font-heading text-2xl font-black tracking-tighter mb-2">
-            {busca || tagFiltro || responsavelFiltro ? "Nenhum contato encontrado." : "Nenhum contato ainda."}
+            {busca || tagFiltro || responsavelFiltro ? `Nenhum ${t("contato")} encontrado.` : `Nenhum ${t("contato")} ainda.`}
           </div>
           <div className="text-sm text-ink-2">
             {busca || tagFiltro || responsavelFiltro
               ? "Ajuste a busca ou os filtros."
-              : "Contatos são criados automaticamente quando alguém envia a primeira mensagem — ou cadastre um agora."}
+              : `${t("Contatos")} são criados automaticamente quando alguém envia a primeira mensagem — ou cadastre um agora.`}
           </div>
         </div>
       ) : (

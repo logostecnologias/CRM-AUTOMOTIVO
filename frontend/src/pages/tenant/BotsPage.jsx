@@ -7,6 +7,7 @@ import { Plus, PencilSimple, Copy, Trash, Pause, Play } from "@phosphor-icons/re
 import { toast } from "sonner";
 import { confirmToast } from "@/lib/confirm-toast";
 import { rotuloGatilho } from "@/components/flow/nodeTypes";
+import { t } from "@/lib/textos";
 
 export default function BotsPage() {
   const [bots, setBots] = useState([]);
@@ -28,20 +29,20 @@ export default function BotsPage() {
     try {
       const { data } = await api.post("/bots", { name, connection_id: connectionId || null });
       setName(""); setConnectionId(""); setCreating(false);
-      toast.success("Robô criado");
+      toast.success(`${t("Robô")} criado`);
       nav(`/app/bots/${data.id}/flow/${data.main_flow_id}`);
     } catch (ex) {
-      toast.error(ex.response?.data?.detail || "Erro ao criar robô");
+      toast.error(ex.response?.data?.detail || `Erro ao criar ${t("robô")}`);
     }
   };
 
   const [duplicate, duplicando] = useAcao(async (id) => {
     try {
       await api.post(`/bots/${id}/duplicate`);
-      toast.success("Robô duplicado");
+      toast.success(`${t("Robô")} duplicado`);
       load();
     } catch (ex) {
-      toast.error(ex.response?.data?.detail || "Erro ao duplicar robô");
+      toast.error(ex.response?.data?.detail || `Erro ao duplicar ${t("robô")}`);
     }
   });
 
@@ -52,9 +53,9 @@ export default function BotsPage() {
   };
 
   const [remove, removendo] = useAcao(async (id) => {
-    if (!(await confirmToast("Excluir este robô?", { confirmLabel: "Excluir" }))) return;
+    if (!(await confirmToast(`Excluir este ${t("robô")}?`, { confirmLabel: "Excluir" }))) return;
     await api.delete(`/bots/${id}`);
-    toast.success("Robô excluído");
+    toast.success(`${t("Robô")} excluído`);
     load();
   });
 
@@ -62,23 +63,23 @@ export default function BotsPage() {
     <div className="zz-page" data-testid="bots-page">
       <div className="flex items-end justify-between mb-8">
         <div>
-          <h1 className="font-heading text-4xl font-black tracking-tighter">Robôs</h1>
+          <h1 className="font-heading text-4xl font-black tracking-tighter">{t("Robôs")}</h1>
         </div>
         <button data-testid="new-bot-btn" onClick={() => setCreating(true)} className="zz-btn">
-          <Plus size={16} weight="bold" /> Criar Robô
+          <Plus size={16} weight="bold" /> Criar {t("Robô")}
         </button>
       </div>
 
       {creating && (
-        <Modal titulo="Criar robô"
-          descricao="O robô é criado já com um fluxo em branco, e o editor abre em seguida."
+        <Modal titulo={`Criar ${t("robô")}`}
+          descricao={t("O robô é criado já com um fluxo em branco, e o editor abre em seguida.")}
           onFechar={() => setCreating(false)} onSalvar={create}
           salvarLabel="Criar" salvandoLabel="Criando…" testId="new-bot-modal">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome do Robô</label>
+              <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Nome do {t("Robô")}</label>
               <input autoFocus required data-testid="new-bot-name" className="zz-input" value={name}
-                onChange={(e) => setName(e.target.value)} placeholder="Ex: Robô de Vendas" />
+                onChange={(e) => setName(e.target.value)} placeholder={`Ex: ${t("Robô")} de Vendas`} />
             </div>
             <div>
               <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Conexão</label>
@@ -94,8 +95,8 @@ export default function BotsPage() {
 
       {bots.length === 0 ? (
         <div className="border border-dashed border-line rounded-xl bg-surface p-16 text-center">
-          <div className="font-heading text-2xl font-black tracking-tighter mb-2">Nenhum robô ainda.</div>
-          <div className="text-sm text-ink-2 mb-4">Crie seu primeiro robô para começar a automatizar conversas.</div>
+          <div className="font-heading text-2xl font-black tracking-tighter mb-2">Nenhum {t("robô")} ainda.</div>
+          <div className="text-sm text-ink-2 mb-4">Crie seu primeiro {t("robô")} para começar a automatizar conversas.</div>
         </div>
       ) : (
         <div className="border border-line bg-surface rounded-lg">
