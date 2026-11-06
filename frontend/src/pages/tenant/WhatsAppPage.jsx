@@ -333,6 +333,18 @@ function ConnectionCard({ conn, depts, bots, busy, editando, onEditar, onSalvarC
         </div>
       )}
 
+      {/* Canal não oficial: o motivo de estar fora vem do vigia da ponte
+          (servidor da WuzAPI sem responder) ou da reinstalação dela. Sem
+          isto a conexão aparecia só como "desconectado", e o cliente apagava
+          e recriava a conexão, que é a única coisa que não resolve. */}
+      {naoOficial && conn.status !== "conectado" && conn.status !== "pareando" && conn.ultimo_erro && (
+        <div className="mt-4 text-xs text-danger bg-danger-soft border border-danger p-3 rounded-lg flex gap-2"
+          data-testid={`conn-ponte-${conn.id}`}>
+          <WarningCircle size={16} weight="bold" className="shrink-0 mt-px" />
+          <div>{conn.ultimo_erro}</div>
+        </div>
+      )}
+
       {naoOficial && conn.aquecimento && (
         <div className="mt-4 text-xs text-warning bg-warning-soft border border-warning p-3 rounded-lg flex gap-2"
           data-testid={`conn-aquecimento-${conn.id}`}>

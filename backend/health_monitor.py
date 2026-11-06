@@ -38,7 +38,24 @@ logger = logging.getLogger("zappzen.health")
 
 INTERVALO = 15 * 60
 
+# Vigia da ponte inteira, separado da varredura por conexão. Nasceu da queda de
+# 03/11/2026: a WuzAPI foi apagada do servidor e, por três dias e meio, todas
+# as conexões do canal continuaram "conectado" na tela, porque `_probe_wuzapi`
+# (de propósito) não muda status em falha de rede. A falha de rede de uma
+# conexão não diz nada sobre o número; a ponte inteira sem responder diz tudo:
+# nada entra e nada sai por nenhum número do canal.
+#
+# 60s, e não os 15 min da varredura: é uma chamada só para a base inteira, e
+# lead que não entra no CRM é venda perdida a cada minuto.
+INTERVALO_PONTE = 60
+# Falhas seguidas antes de declarar a ponte fora: um reinício da WuzAPI ou do
+# túnel leva segundos, e marcar todo mundo desconectado por isso pausaria
+# campanhas sem motivo.
+FALHAS_PARA_ALERTA = 2
+
 _task: asyncio.Task | None = None
+_task_ponte: asyncio.Task | None = None
+_ponte = {"falhas": 0, "fora_desde": None, "motivo": None}
 
 
 def _now() -> str:
@@ -109,12 +126,75 @@ async def _probe_wuzapi(row: dict):
     # Durante o pareamento a sessão ainda não existe, e "desconectado" apagaria
     # o QR da tela de quem está escaneando.
     pareando = row.get("status") == "pareando" and not ligado
+    mudanca = {}
     if not pareando and row.get("status") != novo:
         logger.info("Conexão %s: %s -> %s", row["id"], row.get("status"), novo)
+        mudanca["status"] = novo
+    if ligado and row.get("ultimo_erro"):
+        # O aviso da ponte fora (ou da reinstalação) não vale mais para um
+        # número que está de pé.
+        mudanca["ultimo_erro"] = None
+    if mudanca:
         await db.whatsapp_connections.update_one(
-            {"id": row["id"]}, {"$set": {"status": novo, "updated_at": _now()}})
+            {"id": row["id"]}, {"$set": {**mudanca, "updated_at": _now()}})
     if ligado:
         await aquecimento.marcar_inicio(db, row["id"])
+
+
+def ponte_fora() -> dict | None:
+    """A ponte está fora? `{desde, motivo}` ou None. Lido pela tela."""
+    if _ponte["fora_desde"]:
+        return {"desde": _ponte["fora_desde"], "motivo": _ponte["motivo"]}
+    return None
+
+
+async def _vigiar_ponte():
+    """Uma rodada do vigia da ponte.
+
+    Fora: marca as conexões do canal como desconectadas, com o motivo em
+    `ultimo_erro`. É o status que já acende o alerta no painel da empresa e na
+    visão geral do super admin, e a tela de WhatsApp mostra o motivo. Status
+    desconectado também para os envios automáticos (lembrete, campanha), que
+    falhariam de qualquer jeito com a ponte fora.
+
+    De volta: reconsulta cada conexão na hora, em vez de esperar a varredura
+    de 15 min. A WuzAPI religa as sessões sozinha ao subir, e é a consulta que
+    devolve o "conectado" a quem voltou.
+    """
+    db = get_db()
+    if not await db.whatsapp_connections.find_one({"canal": "wuzapi"}, {"_id": 1}):
+        return
+    from wuzapi_client import ping
+    motivo = await ping()
+
+    if motivo is None:
+        _ponte["falhas"] = 0
+        if _ponte["fora_desde"]:
+            logger.warning("Ponte WuzAPI voltou (estava fora desde %s)", _ponte["fora_desde"])
+            _ponte["fora_desde"] = _ponte["motivo"] = None
+            async for row in db.whatsapp_connections.find({"canal": "wuzapi"}):
+                try:
+                    await _probe_wuzapi(row)
+                except Exception as e:
+                    logger.exception("Probe falhou para a conexão %s: %s", row.get("id"), e)
+        return
+
+    _ponte["falhas"] += 1
+    if _ponte["falhas"] < FALHAS_PARA_ALERTA or _ponte["fora_desde"]:
+        return
+    _ponte["fora_desde"] = _now()
+    _ponte["motivo"] = motivo
+    logger.error("PONTE WUZAPI FORA DO AR (%s): nenhuma conexão do canal recebe ou envia", motivo)
+    await db.whatsapp_connections.update_many(
+        {"canal": "wuzapi"},
+        {"$set": {
+            "status": "desconectado",
+            "ultimo_erro": ("O servidor que liga o sistema ao WhatsApp não está respondendo "
+                            f"({motivo}). Nenhuma mensagem entra nem sai por este número até ele "
+                            "voltar. Não apague a conexão: avise o suporte."),
+            "updated_at": _now(),
+        }},
+    )
 
 
 async def _sweep():
@@ -143,14 +223,28 @@ async def _loop():
         await asyncio.sleep(INTERVALO)
 
 
+async def _loop_ponte():
+    while True:
+        try:
+            await _vigiar_ponte()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("Vigia da ponte falhou: %s", e)
+        await asyncio.sleep(INTERVALO_PONTE)
+
+
 def start():
-    global _task
+    global _task, _task_ponte
     if _task is None or _task.done():
         _task = asyncio.create_task(_loop())
+    if _task_ponte is None or _task_ponte.done():
+        _task_ponte = asyncio.create_task(_loop_ponte())
 
 
 def stop():
-    global _task
-    if _task and not _task.done():
-        _task.cancel()
-        _task = None
+    global _task, _task_ponte
+    for t in (_task, _task_ponte):
+        if t and not t.done():
+            t.cancel()
+    _task = _task_ponte = None

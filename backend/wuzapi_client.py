@@ -139,6 +139,23 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+async def ping() -> str | None:
+    """A ponte está de pé? Devolve None se respondeu, ou o motivo da falha.
+
+    Uma ida só, sem o retry de `_request`, e nunca levanta: é o vigia da ponte
+    inteira (`health_monitor`), e quem decide o que fazer com a falha é ele.
+    Não leva token: o `/health` da WuzAPI é aberto, e é justamente o que se
+    quer saber antes de qualquer credencial: se há alguém do outro lado.
+    """
+    try:
+        resp = await _get_client().get(f"{_base()}/health", timeout=8.0)
+    except httpx.HTTPError as e:
+        return f"sem resposta ({type(e).__name__})"
+    if resp.status_code >= 400:
+        return f"HTTP {resp.status_code}"
+    return None
+
+
 async def close_client():
     """Fecha o pool no shutdown. Sem isto o encerramento deixa sockets abertos."""
     global _client

@@ -171,7 +171,13 @@ app.include_router(formularios_router)
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "zappzen"}
+    # A ponte do WhatsApp vai junto: um monitor de uptime apontado aqui pega
+    # a queda dela, que foi três dias e meio invisível em 03/11/2026. O
+    # status HTTP continua 200: o backend está de pé, e quem vigia decide.
+    fora = health_monitor.ponte_fora()
+    return {"status": "ok", "service": "zappzen",
+            "ponte_whatsapp": "fora" if fora else "ok",
+            **({"ponte_fora_desde": fora["desde"]} if fora else {})}
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
