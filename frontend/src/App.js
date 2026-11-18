@@ -12,6 +12,7 @@ import ContactsPage from "@/pages/tenant/ContactsPage";
 import CampanhasPage from "@/pages/tenant/CampanhasPage";
 import FunilPage from "@/pages/tenant/FunilPage";
 import AtividadesPage from "@/pages/tenant/AtividadesPage";
+import EstoquePage from "@/pages/tenant/EstoquePage";
 import AgendaPage from "@/pages/tenant/AgendaPage";
 import RelatoriosPage from "@/pages/tenant/RelatoriosPage";
 import InboxPage from "@/pages/tenant/InboxPage";
@@ -75,6 +76,9 @@ function App() {
             <Route path="funil" element={<ProtectedRoute roles={ADMIN_ONLY}><FunilPage /></ProtectedRoute>} />
             <Route path="atividades" element={<ProtectedRoute roles={ADMIN_ONLY}><AtividadesPage /></ProtectedRoute>} />
             <Route path="relatorios" element={<ProtectedRoute roles={ADMIN_ONLY}><RelatoriosPage /></ProtectedRoute>} />
+            {/* Leitura para toda a equipe (o vendedor acha o carro e manda ao
+                cliente); escrever é do admin, decidido na própria tela e na API. */}
+            <Route path="estoque" element={<EstoquePage />} />
             <Route path="agenda" element={<AgendaPage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="settings" element={<SettingsPage />} />

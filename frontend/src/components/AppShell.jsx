@@ -63,8 +63,14 @@ function tenantNav(role) {
     ],
   };
 
-  // Atendente ve um grupo so, e titulo de grupo unico e ruido: fica sem titulo.
-  if (role !== "tenant_admin") return [{ itens: atendimento.itens }];
+  // Atendente ve o atendimento e o estoque (para achar o carro e mandar ao
+  // cliente). Sem titulo no primeiro grupo: so tem ele de assunto principal.
+  if (role !== "tenant_admin") {
+    return [
+      { itens: atendimento.itens },
+      { titulo: "Pátio", itens: [{ to: "/app/estoque", icon: Car, label: "Estoque" }] },
+    ];
+  }
 
   return [
     { itens: [{ to: "/app", icon: House, label: "Painel", end: true }] },
@@ -72,7 +78,7 @@ function tenantNav(role) {
     {
       titulo: "Pátio",
       itens: [
-        { to: "/app/estoque", icon: Car, label: "Estoque", emBreve: true },
+        { to: "/app/estoque", icon: Car, label: "Estoque" },
         { to: "/app/catalogo", icon: LinkSimple, label: "Catálogo", emBreve: true },
       ],
     },

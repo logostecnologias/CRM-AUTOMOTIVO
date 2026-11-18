@@ -114,7 +114,10 @@ async def _purge_window(db, tenant_ids: list[str], days: int) -> int:
              # mesmo motivo e com consequência pior: é configuração, e
              # apagá-la deixaria a ligação muda depois de 90 dias. Quem a apaga
              # é a troca de áudio na tela de Telefone.
-             "uso": {"$nin": ["avatar", "voz"]}},
+             # A foto de veículo (`veiculo`) é o anúncio do carro: expirá-la
+             # deixaria a vitrine e o catálogo sem foto. Quem a apaga é a
+             # exclusão da foto ou do veículo, no estoque.
+             "uso": {"$nin": ["avatar", "voz", "veiculo"]}},
             {"_id": 0},
         ).limit(BATCH).to_list(BATCH)
         if not batch:

@@ -223,6 +223,8 @@ COLECOES_DA_EMPRESA = (
     # Formulários de site e cada envio recebido, com o que a pessoa digitou.
     "formularios",
     "formulario_respostas",
+    # Estoque de veículos. As fotos são `media_files` (já na lista acima).
+    "veiculos",
 )
 
 

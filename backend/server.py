@@ -35,6 +35,7 @@ from routes.scheduling import router as scheduling_router
 from routes.voz import router as voz_router
 from routes.formularios import router as formularios_router
 from routes.meta_conversoes import router as meta_conversoes_router
+from routes.estoque import router as estoque_router
 import agenda_worker
 import campaign_runner
 import health_monitor
@@ -160,6 +161,7 @@ app.include_router(media_router)
 app.include_router(campaigns_router)
 app.include_router(deals_router)
 app.include_router(meta_conversoes_router)
+app.include_router(estoque_router)
 app.include_router(activities_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
@@ -367,6 +369,10 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # A chave do upsert que soma cada resposta no acumulado do dia.
     ("ai_usage", [("tenant_id", 1), ("dia", 1), ("provedor", 1), ("modelo", 1),
                   ("origem", 1), ("agente_id", 1)], {}),
+
+    # Estoque de veículos: toda leitura é do pátio de uma empresa, e a ficha é
+    # aberta pelo id.
+    ("veiculos", [("tenant_id", 1), ("id", 1)], {}),
 
     ("impersonation_log", [("id", 1)], {}),
 
