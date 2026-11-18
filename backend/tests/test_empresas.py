@@ -168,11 +168,11 @@ async def etapa_criar():
 
 async def etapa_marca():
     """A marca e o que o cliente final ve no painel, e o erro que importa aqui e
-    silencioso: o cliente da R3 abrindo o painel com a marca da ZappZen, ou o
+    silencioso: o cliente da R3 abrindo o painel com as cores da Logos, ou o
     contrario. Ninguem ve erro, so a marca de outro parceiro."""
     print("\n[marca]")
     t = await rt.create_tenant(corpo(name="Sem escolha"))
-    check("sem escolha a empresa nasce ZappZen", t["marca"] == "zappzen", t)
+    check("sem escolha a empresa nasce Logos", t["marca"] == "logos", t)
 
     t2 = await rt.create_tenant(corpo(name="Cliente R3", admin_email="r3@x.com", marca="r3"))
     check("a escolhida fica gravada", (await DB.tenants.find_one({"id": t2["id"]}))["marca"] == "r3")
@@ -187,20 +187,36 @@ async def etapa_marca():
     me = await auth.me({**dono, "role": "tenant_admin"})
     check("quem e da empresa R3 recebe a marca R3", me["marca"] == "r3", me)
     me = await auth.me({"id": "sa", "email": "sa@x", "name": "SA", "role": "super_admin"})
-    check("super admin fora do modo suporte ve a padrao", me["marca"] == "zappzen", me)
+    check("super admin fora do modo suporte ve a padrao", me["marca"] == "logos", me)
     me = await auth.me({"id": "sa", "email": "sa@x", "name": "SA", "role": "tenant_admin",
                         "tenant_id": t2["id"], "impersonation_id": "imp"})
     check("no modo suporte ve a marca da empresa visitada", me["marca"] == "r3", me)
 
-    # Empresa anterior ao campo nao tem `marca` gravada, e e ZappZen.
+    # Empresa anterior ao campo nao tem `marca` gravada, e e Logos.
     await DB.tenants.update_one({"id": t["id"]}, {"$unset": {"marca": ""}})
     dono = await DB.users.find_one({"tenant_id": t["id"]})
-    check("empresa sem o campo e ZappZen", (await auth.me(dono))["marca"] == "zappzen")
+    check("empresa sem o campo e Logos", (await auth.me(dono))["marca"] == "logos")
+
+    # Marcas que deixaram de existir em 18/11/2026: o banco continua com o
+    # valor antigo (ninguem reescreve dado de cliente em producao) e a leitura
+    # traduz para a padrao.
+    for antiga in ("zappzen", "nexa"):
+        await DB.tenants.update_one({"id": t["id"]}, {"$set": {"marca": antiga}})
+        check(f"empresa gravada como {antiga} abre na Logos",
+              (await auth.me(dono))["marca"] == "logos")
+        check(f"o valor {antiga} fica intacto no banco",
+              (await DB.tenants.find_one({"id": t["id"]}))["marca"] == antiga)
 
     novo = await rt.update_tenant(t["id"], rt.TenantUpdate(marca="r3"), {"id": "sa"})
     check("a marca troca depois de criada", novo["marca"] == "r3", novo)
-    novo = await rt.update_tenant(t["id"], rt.TenantUpdate(marca="nexa"), {"id": "sa"})
-    check("a Nexa e uma marca aceita", novo["marca"] == "nexa", novo)
+    novo = await rt.update_tenant(t["id"], rt.TenantUpdate(marca="logos"), {"id": "sa"})
+    check("e volta para a Logos", novo["marca"] == "logos", novo)
+    for antiga in ("zappzen", "nexa"):
+        try:
+            rt.TenantUpdate(marca=antiga)
+            check(f"{antiga} nao e mais aceita", False, "passou")
+        except ValidationError:
+            check(f"{antiga} nao e mais aceita", True)
 
     await DB.tenants.delete_many({})
     await DB.users.delete_many({})

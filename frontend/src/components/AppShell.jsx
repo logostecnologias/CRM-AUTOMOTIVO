@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import { useAtividadesAtrasadas } from "@/hooks/useAtividadesAtrasadas";
@@ -9,17 +10,20 @@ import {
   House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
   ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
-  CalendarCheck, Phone, ClipboardText,
+  CalendarCheck, Phone, ClipboardText, Car, LinkSimple, Globe, CaretRight,
 } from "@phosphor-icons/react";
 
-// A barra lateral e uma lista de grupos, nao uma lista de itens: com 15 telas
-// em sequencia, "Departamentos" e "Funil" ficavam vizinhos sem nada em comum, e
-// achar uma tela era ler a lista inteira. O grupo sem titulo existe para o
-// Painel, que nao pertence a nenhum assunto.
+// A barra lateral e uma lista de grupos, nao uma lista de itens: com quase 20
+// telas em sequencia, achar uma tela seria ler a lista inteira. Os grupos
+// seguem o dia de uma revenda: atender, o patio (o estoque), vender, captar
+// lead, automatizar e analisar. O grupo sem titulo existe para o Painel, que
+// nao pertence a nenhum assunto.
 //
-// `label` e `titulo` sao o texto da ZappZen e a chave de `lib/textos.js`: a
-// tela mostra `t(label)`, e o `data-testid` continua saindo do texto da
-// ZappZen, para nao mudar com a marca.
+// `label` e `titulo` sao a chave de `lib/textos.js`: a tela mostra `t(label)`,
+// e o `data-testid` continua saindo da chave, para nao mudar com o vocabulario.
+//
+// `emBreve` marca a tela que ainda nao existe: aparece no menu para mostrar o
+// caminho do produto, mas nao e link.
 const adminNav = [
   {
     itens: [
@@ -29,6 +33,22 @@ const adminNav = [
     ],
   },
 ];
+
+// Configuracao fica recolhida: o dia a dia nao passa por ali, e aberta ela
+// empurraria o resto do menu para baixo da dobra. Abre sozinha quando a tela
+// atual e uma das dela.
+const CONFIGURACAO = {
+  titulo: "Configuração",
+  recolhivel: true,
+  icon: Gear,
+  itens: [
+    { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
+    { to: "/app/telefone", icon: Phone, label: "Telefone" },
+    { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
+    { to: "/app/users", icon: Users, label: "Usuários" },
+    { to: "/app/settings", icon: Gear, label: "Ajustes" },
+  ],
+};
 
 function tenantNav(role) {
   const atendimento = {
@@ -50,6 +70,30 @@ function tenantNav(role) {
     { itens: [{ to: "/app", icon: House, label: "Painel", end: true }] },
     atendimento,
     {
+      titulo: "Pátio",
+      itens: [
+        { to: "/app/estoque", icon: Car, label: "Estoque", emBreve: true },
+        { to: "/app/catalogo", icon: LinkSimple, label: "Catálogo", emBreve: true },
+      ],
+    },
+    {
+      titulo: "Vendas",
+      itens: [
+        { to: "/app/funil", icon: Funnel, label: "Funil" },
+        { to: "/app/contacts", icon: UsersThree, label: "Contatos" },
+        { to: "/app/atividades", icon: CheckSquareOffset, label: "Atividades" },
+      ],
+    },
+    {
+      // De onde vem o lead.
+      titulo: "Captação",
+      itens: [
+        { to: "/app/campanhas", icon: Megaphone, label: "Campanhas" },
+        { to: "/app/formularios", icon: ClipboardText, label: "Formulários" },
+        { to: "/app/portais", icon: Globe, label: "Portais", emBreve: true },
+      ],
+    },
+    {
       titulo: "Automação",
       itens: [
         { to: "/app/bots", icon: Robot, label: "Robôs" },
@@ -57,31 +101,84 @@ function tenantNav(role) {
       ],
     },
     {
-      titulo: "Clientes e vendas",
-      itens: [
-        { to: "/app/contacts", icon: UsersThree, label: "Contatos" },
-        { to: "/app/funil", icon: Funnel, label: "Funil" },
-        { to: "/app/atividades", icon: CheckSquareOffset, label: "Atividades" },
-        { to: "/app/campanhas", icon: Megaphone, label: "Campanhas" },
-        // Perto de Campanhas: as duas são sobre de onde vem o lead.
-        { to: "/app/formularios", icon: ClipboardText, label: "Formulários" },
-      ],
-    },
-    {
       titulo: "Análise",
       itens: [{ to: "/app/relatorios", icon: ChartBar, label: "Relatórios" }],
     },
-    {
-      titulo: "Configuração",
-      itens: [
-        { to: "/app/whatsapp", icon: WhatsappLogo, label: "WhatsApp" },
-        { to: "/app/telefone", icon: Phone, label: "Telefone" },
-        { to: "/app/departments", icon: StackSimple, label: "Departamentos" },
-        { to: "/app/users", icon: Users, label: "Usuários" },
-        { to: "/app/settings", icon: Gear, label: "Ajustes" },
-      ],
-    },
+    CONFIGURACAO,
   ];
+}
+
+const testId = (texto) => texto.toLowerCase().replace(/\s/g, "-");
+
+const iniciais = (nome = "") =>
+  nome.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase() || "?";
+
+function ItemMenu({ item, atrasadas, aguardando }) {
+  const Icone = item.icon;
+  if (item.emBreve) {
+    return (
+      <div className="zz-nav-item em-breve" aria-disabled="true" data-testid={`nav-${testId(item.label)}`}
+        title="Em construção">
+        <Icone size={18} />
+        <span>{t(item.label)}</span>
+        <span className="zz-nav-selo">Em breve</span>
+      </div>
+    );
+  }
+  return (
+    <NavLink
+      to={item.to}
+      end={item.end}
+      data-testid={`nav-${testId(item.label)}`}
+      className={({ isActive }) => `zz-nav-item ${isActive ? "active" : ""}`}
+    >
+      <Icone size={18} />
+      <span className="truncate">{t(item.label)}</span>
+      {item.to === "/app/atividades" && atrasadas > 0 && (
+        <span
+          className="zz-queue-badge ml-auto"
+          data-testid="nav-atividades-badge"
+          title={`${atrasadas} ${t("atividade")}(s) atrasada(s)`}
+        >
+          {atrasadas > 99 ? "99+" : atrasadas}
+        </span>
+      )}
+      {item.to === "/app/inbox" && aguardando > 0 && (
+        <span
+          className="zz-queue-badge zz-alert-pulse ml-auto"
+          data-testid="nav-queue-badge"
+          title={`${aguardando} conversa(s) aguardando atendimento`}
+        >
+          {aguardando > 99 ? "99+" : aguardando}
+        </span>
+      )}
+    </NavLink>
+  );
+}
+
+function GrupoRecolhivel({ grupo, children }) {
+  const { pathname } = useLocation();
+  const contemAtual = grupo.itens.some((i) => pathname === i.to || pathname.startsWith(`${i.to}/`));
+  const [aberto, setAberto] = useState(contemAtual);
+  useEffect(() => { if (contemAtual) setAberto(true); }, [contemAtual]);
+  const Icone = grupo.icon;
+  return (
+    <div>
+      <div className="zz-nav-sep" />
+      <button
+        type="button"
+        className="zz-nav-item w-[calc(100%-1.5rem)] text-left"
+        aria-expanded={aberto}
+        onClick={() => setAberto((a) => !a)}
+        data-testid={`nav-grupo-${testId(grupo.titulo)}`}
+      >
+        <Icone size={18} />
+        <span>{t(grupo.titulo)}</span>
+        <CaretRight size={12} weight="bold" className={`zz-nav-seta ${aberto ? "aberta" : ""}`} />
+      </button>
+      {aberto && <div className="pl-3">{children}</div>}
+    </div>
+  );
 }
 
 export default function AppShell({ variant = "tenant" }) {
@@ -90,6 +187,7 @@ export default function AppShell({ variant = "tenant" }) {
   const nav = variant === "admin" ? adminNav : tenantNav(user?.role);
   const { aguardando } = useUnreadNotifier(variant === "tenant");
   const atrasadas = useAtividadesAtrasadas(variant === "tenant" && user?.role === "tenant_admin");
+  const papel = variant === "admin" ? "Super Admin" : (user?.role === "agent" ? "Atendente" : "Admin");
 
   const handleLogout = async () => {
     await logout();
@@ -115,66 +213,52 @@ export default function AppShell({ variant = "tenant" }) {
       )}
 
       <div className="flex flex-1 min-h-0">
-        <aside className="w-60 border-r border-line bg-surface flex flex-col" data-testid="sidebar">
-          <div className="px-5 py-6 border-b border-line">
-            <LogoMarca
-              marca={marca}
-              legenda={variant === "admin" ? "Super Admin" : (user?.role === "agent" ? "Atendente" : "Admin")}
-            />
+        <aside className="zz-sidebar w-[248px] shrink-0 flex flex-col" data-testid="sidebar">
+          <div className="px-6 pt-7 pb-4">
+            <LogoMarca marca={marca} legenda={papel} />
           </div>
 
-          <nav className="flex-1 py-3 overflow-y-auto">
-            {nav.map((grupo, i) => (
-              <div key={grupo.titulo || `grupo-${i}`} className={i > 0 ? "mt-4" : ""}>
-                {grupo.titulo && (
-                  <div
-                    className="zz-nav-grupo"
-                    data-testid={`nav-grupo-${grupo.titulo.toLowerCase().replace(/\s/g, "-")}`}
-                  >
-                    {t(grupo.titulo)}
-                  </div>
-                )}
-                {grupo.itens.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end={item.end}
-                    data-testid={`nav-${item.label.toLowerCase().replace(/\s/g, "-")}`}
-                    className={({ isActive }) => `zz-nav-item ${isActive ? "active" : ""}`}
-                  >
-                    <item.icon size={18} weight="bold" />
-                    <span>{t(item.label)}</span>
-                    {item.to === "/app/atividades" && atrasadas > 0 && (
-                      <span
-                        className="zz-queue-badge ml-auto"
-                        data-testid="nav-atividades-badge"
-                        title={`${atrasadas} ${t("atividade")}(s) atrasada(s)`}
-                      >
-                        {atrasadas > 99 ? "99+" : atrasadas}
-                      </span>
-                    )}
-                    {item.to === "/app/inbox" && aguardando > 0 && (
-                      <span
-                        className="zz-queue-badge zz-alert-pulse ml-auto"
-                        data-testid="nav-queue-badge"
-                        title={`${aguardando} conversa(s) aguardando atendimento`}
-                      >
-                        {aguardando > 99 ? "99+" : aguardando}
-                      </span>
-                    )}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
+          <nav className="flex-1 pb-4 overflow-y-auto">
+            {nav.map((grupo, i) => {
+              const itens = grupo.itens.map((item) => (
+                <ItemMenu key={item.to} item={item} atrasadas={atrasadas} aguardando={aguardando} />
+              ));
+              if (grupo.recolhivel) {
+                return <GrupoRecolhivel key={grupo.titulo} grupo={grupo}>{itens}</GrupoRecolhivel>;
+              }
+              return (
+                <div key={grupo.titulo || `grupo-${i}`}>
+                  {grupo.titulo && (
+                    <div className="zz-nav-grupo" data-testid={`nav-grupo-${testId(grupo.titulo)}`}>
+                      {t(grupo.titulo)}
+                    </div>
+                  )}
+                  {itens}
+                </div>
+              );
+            })}
           </nav>
 
-          <div className="border-t border-line p-3">
-            <div className="text-xs text-ink-3 mb-2 truncate">{user?.email}</div>
-            <div className="flex items-center gap-2">
-              <button data-testid="logout-btn" onClick={handleLogout} className="zz-btn zz-btn-secondary flex-1 justify-center">
-                <SignOut size={16} weight="bold" /> Sair
-              </button>
+          <div className="zz-nav-rodape px-4 py-4">
+            <div className="flex items-center gap-3">
+              <div className="zz-nav-avatar" aria-hidden>{iniciais(user?.name || user?.email)}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[0.8rem] font-semibold truncate" style={{ color: "var(--nav-fg-forte)" }}>
+                  {user?.name || user?.email}
+                </div>
+                <div className="text-[0.7rem] truncate" title={user?.email}>{user?.email}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-3">
               <BotaoTema />
+              <button
+                type="button"
+                data-testid="logout-btn"
+                onClick={handleLogout}
+                className="zz-btn-icon flex-1 !w-auto !rounded-[10px] gap-2 text-[0.8rem] font-medium"
+              >
+                <SignOut size={15} /> Sair
+              </button>
             </div>
           </div>
         </aside>

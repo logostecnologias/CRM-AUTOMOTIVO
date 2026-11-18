@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import { formatBRL } from "@/lib/currency";
-import { MARCAS, PADRAO as MARCA_PADRAO } from "@/lib/marca";
+import { MARCAS, valida as validaMarca } from "@/lib/marca";
 import { haQuanto, plural } from "@/components/painel/Indicadores";
 import NovaEmpresa from "@/components/superadmin/NovaEmpresa";
 import EmpresaDetalhe from "@/components/superadmin/EmpresaDetalhe";
@@ -130,7 +130,7 @@ export default function TenantsPage() {
       if (filtro === "atencao" && !(t.status === "active" && precisaAtencao(t))) return false;
       if (filtro === "ativas" && t.status !== "active") return false;
       if (filtro === "suspensas" && t.status === "active") return false;
-      if (marca && (t.marca || MARCA_PADRAO) !== marca) return false;
+      if (marca && validaMarca(t.marca) !== marca) return false;
       if (!q) return true;
       // Busca também pelo email de quem administra: "qual empresa é a do
       // joao@...?" é tão comum quanto procurar pelo nome.

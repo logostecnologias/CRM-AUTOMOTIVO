@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
+import { PRODUTO } from "@/lib/marca";
 import { playNotificationSound, playQueueAlert } from "@/lib/notification-sound";
 
-const BASE_TITLE = "ZappZen";
+const BASE_TITLE = PRODUTO;
 
 // Polls for new incoming messages and for the size of the human queue,
 // regardless of which page is open, as long as the tenant shell (AppShell)

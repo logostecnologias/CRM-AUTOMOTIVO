@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import { formatBRL } from "@/lib/currency";
-import { MARCAS, PADRAO as MARCA_PADRAO } from "@/lib/marca";
+import { MARCAS, PADRAO as MARCA_PADRAO, valida as validaMarca } from "@/lib/marca";
 import { toast } from "sonner";
 import {
   ArrowsClockwise, Buildings, CheckCircle, Copy, Eye, EyeSlash,
@@ -336,7 +336,7 @@ function Acesso({ dados, onFechar, onEntrar }) {
           <Linha rotulo="Plano" valor={tenant.plan
             ? `${tenant.plan.nome} · ${formatBRL(tenant.plan.preco_mensal)}/mês`
             : "sem plano vinculado"} />
-          <Linha rotulo="Marca" valor={MARCAS[tenant.marca]?.nome || MARCAS[MARCA_PADRAO].nome} />
+          <Linha rotulo="Marca" valor={MARCAS[validaMarca(tenant.marca)].nome} />
           <Linha rotulo="Endereço" valor={endereco} />
           <Linha rotulo="E-mail" valor={dados.admin_email} mono />
           <Linha rotulo="Senha" valor={dados.admin_password} mono destaque />

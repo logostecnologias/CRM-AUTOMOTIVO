@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
 import { useAuth } from "@/context/AuthContext";
-import { MARCAS, PADRAO as MARCA_PADRAO } from "@/lib/marca";
+import { MARCAS, valida as validaMarca } from "@/lib/marca";
 import { haQuanto, plural } from "@/components/painel/Indicadores";
 
 /**
@@ -86,7 +86,7 @@ export function rotuloDoProblema(p) {
 
 /** Selo da marca da empresa, com a amostra de cor de cada uma. */
 export function SeloMarca({ marca }) {
-  const m = MARCAS[marca] || MARCAS[MARCA_PADRAO];
+  const m = MARCAS[validaMarca(marca)];
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-ink-2 whitespace-nowrap">
       <span className="w-2.5 h-2.5 rounded-full border border-line shrink-0"

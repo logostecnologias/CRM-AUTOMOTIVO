@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
 from pymongo.errors import DuplicateKeyError
@@ -26,14 +26,8 @@ SENHA_MIN = 8
 # nome de dois caracteres, e a empresa nasceria sem nome legível na lista.
 Nome = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=120)]
 
-# A marca que o cliente da empresa vê: cores, logo e nome no painel. O sistema
-# é um só e é revendido por mais de um parceiro, cada um para a própria
-# carteira, e o cliente final enxerga a marca de quem vendeu. `zappzen` é o
-# padrão, e empresa sem o campo gravado (anterior a ele) também é ZappZen.
-# Marca nova entra aqui e em `frontend/src/lib/marca.js`, junto com os tokens
-# dela em `index.css`.
-Marca = Literal["zappzen", "r3", "nexa"]
-MARCA_PADRAO = "zappzen"
+# A marca que o cliente da empresa vê: ver `marcas.py`.
+from marcas import Marca, MARCA_PADRAO  # noqa: E402
 
 
 class TenantCreate(BaseModel):

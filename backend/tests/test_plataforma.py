@@ -131,6 +131,8 @@ async def etapa_visao():
           v["receita"]["mensal"])
     marcas = {m["marca"]: m for m in v["receita"]["por_marca"]}
     check("receita por marca", marcas["r3"]["receita"] == 400.0, marcas)
+    # As semeadas como "zappzen" (marca que deixou de existir) contam na Logos.
+    check("marca antiga soma na padrao", "zappzen" not in marcas and marcas["logos"]["receita"] == 400.0, marcas)
     check("mensagens da semana somadas", v["semana"]["mensagens"] == 4, v["semana"])
     tipos = [a["tipo"] for a in v["alertas"]]
     check("alerta alto vem antes do medio", tipos.index("conexoes") < tipos.index("parada"), tipos)

@@ -212,10 +212,11 @@ async def _marca(db, user: dict) -> str:
     marca padrão. No modo suporte o `tenant_id` já é o da empresa visitada,
     então ele vê o painel como o cliente vê, que é o ponto do modo suporte.
     """
+    from marcas import MARCA_PADRAO, normaliza_marca
     if not user.get("tenant_id") or user.get("role") == "super_admin":
-        return "zappzen"
+        return MARCA_PADRAO
     tenant = await db.tenants.find_one({"id": user["tenant_id"]}, {"_id": 0, "marca": 1})
-    return (tenant or {}).get("marca") or "zappzen"
+    return normaliza_marca((tenant or {}).get("marca"))
 
 
 def _client_ip(request: Request) -> str:

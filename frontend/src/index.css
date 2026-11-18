@@ -2,269 +2,258 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+/* Poppins (títulos da Logos), Inter (texto, nas duas marcas) e JetBrains Mono.
+   A Manrope dos títulos da R3 é buscada por `lib/marca.js` só quando a marca é
+   aplicada: quem é Logos não espera por ela. */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import '@xyflow/react/dist/style.css';
 
 /* ===========================================================================
-   Tokens
+   AUTO · direção "Showroom"
    ---------------------------------------------------------------------------
-   O desenho anterior era brutalista de propósito: canto reto, borda preta de
-   1px e sombra dura deslocada 4px. Esta é a versão suave — mesma tipografia e
-   mesma família de cor, mas raio arredondado, borda cinza e sombra difusa.
+   O painel se comporta como o salão de uma concessionária: claro, silencioso,
+   organizado, e quem dá cor à tela são as fotos dos carros. A interface é 95%
+   neutra; a cor da marca aparece em detalhe (o traço do logo, o item ativo do
+   menu, o ícone do botão principal), nunca em bloco.
 
-   Toda cor mora aqui, em variável, porque é o que torna o tema escuro possível:
-   cor cravada no JSX (`bg-white`, `text-slate-500`) não tem equivalente escuro,
-   e era exatamente o que travava o tema antes. O JSX usa os tokens do Tailwind
-   (`bg-surface`, `text-ink-3`, `border-line`), que apontam para estas variáveis.
+   Duas marcas, e só duas (18/11/2026): Logos, a padrão, e R3. Cada uma define
+   o claro e o escuro. Regras que valem para as duas:
 
-   O par claro/escuro de cada papel é escolhido junto — tema escuro não é o
-   claro invertido.
+   - O sólido de marca (`--brand`) é a cor escura da marca no claro e um quase
+     branco no escuro: bloco escuro sobre fundo escuro não se destaca.
+   - O acento (`--acento`) é o detalhe de luxo: laranja na Logos, lima na R3.
+     Ele vive sobre superfície escura (menu, botão sólido). Sobre fundo claro
+     ele reprova em contraste, e ali entra `--acento-texto`, a versão escura.
+   - A barra lateral é escura nos dois temas (`--nav-*`): é a "moldura" do
+     salão, e é onde o acento brilha.
+   - Perigo, sucesso e aviso são sóbrios e nunca se confundem com o acento.
+
+   Toda cor mora aqui, em variável. O JSX usa os tokens do Tailwind
+   (`bg-surface`, `text-ink-3`, `border-line`), que apontam para estas.
    =========================================================================== */
+
+/* --- Logos · claro ------------------------------------------------------- */
 :root {
   color-scheme: light;
 
-  --bg: #F6F7F9;
+  --bg: #F5F4F2;
   --surface: #FFFFFF;
-  --surface-2: #F8FAFC;
-  --surface-3: #EEF2F7;
+  --surface-2: #FAF9F7;
+  --surface-3: #EFEDE9;
 
-  --line: #E3E8EF;
-  --line-strong: #CBD5E1;
+  --line: #E7E5E1;
+  --line-strong: #D4D1CB;
 
-  --text: #0F172A;
-  --text-2: #475569;
-  --text-3: #64748B;
-  --text-4: #7E8B9E;
+  --text: #0E0E10;
+  --text-2: #45454E;
+  --text-3: #63636F;
+  --text-4: #8A8A96;
 
-  /* O botão sólido continua azul-marinho no claro. No escuro ele vira azul:
-     um bloco quase preto sobre fundo escuro não se destaca de nada. */
-  --brand: #0F172A;
+  --brand: #0E0E10;
   --brand-fg: #FFFFFF;
-  --brand-soft: #EEF2F7;
+  --brand-soft: #EFEDE9;
 
-  --danger: #C81E1E;
-  --danger-soft: #FEF2F2;
-  /* `-solid` e o preenchimento cheio (barra de alerta, selo). Vem com o próprio
-     `-fg` porque no tema escuro o vermelho/verde legível é claro, e texto
-     branco sobre ele daria contraste de ~2:1 — o erro clássico de tema escuro
-     feito por inversão. */
-  --danger-solid: #DC2626;
+  --acento: #F77C20;
+  --acento-texto: #B4540A;   /* o laranja que se lê sobre branco (4,9:1) */
+  --acento-fg: #0E0E10;      /* texto sobre o laranja cheio (7,1:1) */
+  --acento-no-brand: #F77C20;/* ícone dentro do botão sólido */
+
+  --danger: #B42318;
+  --danger-soft: #FDF2F1;
+  /* `-solid` é o preenchimento cheio (barra de alerta, selo) e vem com o
+     próprio `-fg`: no escuro o vermelho/verde legível é claro, e texto branco
+     sobre ele reprova. */
+  --danger-solid: #C8322A;
   --danger-fg: #FFFFFF;
-  --success: #15803D;
-  --success-soft: #F0FDF4;
-  --success-solid: #15803D;
+  --success: #1F7A4D;
+  --success-soft: #EEF7F1;
+  --success-solid: #1F7A4D;
   --success-fg: #FFFFFF;
-  --warning: #B45309;
-  --warning-soft: #FFFBEB;
-  --warning-solid: #FBBF24;
-  --warning-fg: #0F172A;   /* texto sobre o amarelo cheio, igual nos dois temas */
-  --info: #2563EB;
-  --info-soft: #EFF6FF;
+  /* Aviso em âmbar escuro, puxado para o dourado: o laranja é da marca. */
+  --warning: #8A6206;
+  --warning-soft: #FBF6E8;
+  --warning-solid: #F2C14E;
+  --warning-fg: #0E0E10;
+  /* Informação, foco e seleção seguem a marca: um azul fixo destoaria
+     justamente no anel de foco de todo campo. */
+  --info: #B4540A;
+  --info-soft: #FDF1E7;
 
-  /* Séries do gráfico. Validadas pelo validador de paleta contra a superfície
-     de cada tema (banda de luminosidade, piso de croma, separação para
-     daltonismo e contraste >= 3:1) — nunca escolhidas a olho. Os passos claros
-     são os que já existiam no produto; os escuros foram escolhidos para a
-     `--surface` do tema escuro, onde os claros reprovam na banda. */
-  --serie-1: #2563EB;
-  --serie-2: #EA580C;
-  --grade: #E2E8F0;
-  --eixo: #7E8B9E;
+  --serie-1: #2E2E35;
+  --serie-2: #F77C20;
+  --grade: #ECEAE6;
+  --eixo: #8A8A96;
 
-  --sombra-1: rgba(15, 23, 42, 0.06);
-  --sombra-2: rgba(15, 23, 42, 0.18);
+  --sombra-1: rgba(14, 14, 16, 0.05);
+  --sombra-2: rgba(14, 14, 16, 0.16);
 
-  --radius: 10px;   /* consumido pelos componentes shadcn em components/ui/ */
+  /* Barra lateral */
+  --nav-bg: #0E0E10;
+  --nav-fg: #A8A8B3;
+  --nav-fg-forte: #FFFFFF;
+  --nav-grupo: #7C7C88;
+  --nav-hover: #18181C;
+  --nav-ativo: #1F1F24;
+  --nav-linha: #232328;
 
-  --font-heading: 'Cabinet Grotesk', 'IBM Plex Sans', system-ui, sans-serif;
-  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --radius: 12px;   /* consumido pelos componentes shadcn em components/ui/ */
+
+  --font-heading: 'Poppins', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
 
+/* --- Logos · escuro ("salão à noite") ------------------------------------ */
 .dark {
   color-scheme: dark;
 
-  --bg: #0B1020;
-  --surface: #141B2D;
-  --surface-2: #1B2438;
-  --surface-3: #253048;
+  --bg: #0B0B0D;
+  --surface: #141417;
+  --surface-2: #19191D;
+  --surface-3: #222227;
 
-  --line: #2A3550;
-  --line-strong: #3C4A6B;
+  --line: #26262C;
+  --line-strong: #37373F;
 
-  --text: #E8EDF6;
-  --text-2: #B6C2D6;
-  --text-3: #8B97AD;
-  --text-4: #6C7791;
+  --text: #F2F1EF;
+  --text-2: #C6C6CE;
+  --text-3: #9C9CA8;
+  --text-4: #75757F;
 
-  --brand: #2F6FE4;
-  --brand-fg: #FFFFFF;
-  --brand-soft: #1B2A4A;
+  --brand: #F2F1EF;
+  --brand-fg: #0E0E10;
+  --brand-soft: #222227;
 
-  --danger: #F87171;
-  --danger-soft: #3A1D22;
+  --acento: #FF9A45;
+  --acento-texto: #FF9A45;
+  --acento-fg: #0E0E10;
+  --acento-no-brand: #C9600E;
+
+  --danger: #F28B82;
+  --danger-soft: #33191A;
   --danger-solid: #B42318;
   --danger-fg: #FFFFFF;
-  --success: #4ADE80;
-  --success-soft: #14301F;
-  --success-solid: #4ADE80;
-  --success-fg: #06251A;
-  --warning: #FBBF24;
-  --warning-soft: #36270B;
-  --warning-solid: #FBBF24;
-  --warning-fg: #0F172A;
-  --info: #60A5FA;
-  --info-soft: #16253F;
+  --success: #5BC78E;
+  --success-soft: #12291D;
+  --success-solid: #5BC78E;
+  --success-fg: #062314;
+  --warning: #F2C14E;
+  --warning-soft: #2E2610;
+  --warning-solid: #F2C14E;
+  --warning-fg: #0E0E10;
+  --info: #FF9A45;
+  --info-soft: #2B1E13;
 
-  --serie-1: #3B82F6;
-  --serie-2: #E06D1F;
-  --grade: #2A3550;
-  --eixo: #4A5878;
+  --serie-1: #D9D9DF;
+  --serie-2: #FF9A45;
+  --grade: #26262C;
+  --eixo: #5E5E68;
 
-  /* No escuro a sombra preta é quase invisível; o relevo vem da borda mais
-     clara, e a sombra fica só como profundidade de sobreposição. */
   --sombra-1: rgba(0, 0, 0, 0.30);
   --sombra-2: rgba(0, 0, 0, 0.55);
+
+  --nav-bg: #08080A;
+  --nav-fg: #9C9CA8;
+  --nav-fg-forte: #FFFFFF;
+  --nav-grupo: #6F6F7B;
+  --nav-hover: #121215;
+  --nav-ativo: #19191D;
+  --nav-linha: #1C1C21;
 }
 
-/* ===========================================================================
-   Marca R3
-   ---------------------------------------------------------------------------
-   O sistema é revendido por mais de um parceiro, e o cliente final vê a marca
-   de quem vendeu (`tenants.marca`, aplicada em `lib/marca.js`). A marca troca
-   só a família de cor: superfície, texto, linha, o sólido de marca e o azul de
-   foco/seleção. Perigo, sucesso e aviso não mudam, porque vermelho tem de
-   continuar querendo dizer erro em qualquer marca. As séries de gráfico também
-   ficam: foram validadas como par, e trocar uma delas exigiria validar de novo.
-
-   Paleta do manual da R3: petróleo #00333D, lima #D6E30F, gelo #F1EEEE. No
-   claro o sólido é o petróleo com texto lima, como na logo (9,6:1); no escuro
-   inverte, lima com texto petróleo, pelo mesmo motivo do azul da ZappZen: bloco
-   escuro sobre fundo escuro não se destaca. Os tons de texto são o petróleo
-   dessaturado, conferidos contra a superfície de cada tema no mesmo patamar dos
-   tokens da ZappZen (texto 13,6:1 / 11,8:1; secundário 8,4:1 / 9,1:1).
-
+/* --- R3 · claro -----------------------------------------------------------
+   Paleta do manual da R3: petróleo #00333D, lima #D6E30F, gelo #F1EEEE. O
+   petróleo faz o papel do preto; o gelo é o piso; a lima é o acento e só
+   aparece sobre o petróleo. Os tons de texto são o petróleo dessaturado.
    `html[data-marca]` pesa (0,1,1) e ganha de `:root` e de `.dark` (0,1,0); o
-   escuro da marca, `html.dark[data-marca]`, pesa (0,2,1) e ganha dos três.
-   =========================================================================== */
+   escuro da marca, `html.dark[data-marca]`, pesa (0,2,1) e ganha dos três. */
 html[data-marca="r3"] {
   --bg: #F1EEEE;
   --surface: #FFFFFF;
   --surface-2: #F8F6F6;
   --surface-3: #E9E4E4;
 
-  --line: #E2DCDC;
+  --line: #E5E0E0;
   --line-strong: #CCC4C4;
 
-  --text: #00333D;
+  --text: #00262E;
   --text-2: #2F535B;
-  --text-3: #506E75;
+  --text-3: #4A6970;
   --text-4: #6B8389;
 
   --brand: #00333D;
-  --brand-fg: #D6E30F;
+  --brand-fg: #F7F5F5;
   --brand-soft: #E3ECEC;
+
+  --acento: #D6E30F;
+  --acento-texto: #0A6A7B;
+  --acento-fg: #00333D;
+  --acento-no-brand: #D6E30F;
 
   --info: #0A6A7B;
   --info-soft: #E3F1F3;
 
-  --sombra-1: rgba(0, 51, 61, 0.07);
-  --sombra-2: rgba(0, 51, 61, 0.20);
+  --serie-1: #0A6A7B;
+  --serie-2: #C9701C;
+  --grade: #E9E4E4;
+  --eixo: #6B8389;
+
+  --sombra-1: rgba(0, 51, 61, 0.06);
+  --sombra-2: rgba(0, 51, 61, 0.18);
+
+  --nav-bg: #00333D;
+  --nav-fg: #A9BEC2;
+  --nav-fg-forte: #FFFFFF;
+  --nav-grupo: #86A3A8;
+  --nav-hover: #043A45;
+  --nav-ativo: #08434F;
+  --nav-linha: #12505C;
+
+  --font-heading: 'Manrope', 'Inter', system-ui, sans-serif;
 }
 
+/* --- R3 · escuro --------------------------------------------------------- */
 html.dark[data-marca="r3"] {
   --bg: #00262E;
-  --surface: #00333D;
-  --surface-2: #063D48;
-  --surface-3: #0E4A56;
+  --surface: #00313B;
+  --surface-2: #063A45;
+  --surface-3: #0E4652;
 
-  --line: #1A5561;
-  --line-strong: #2C6874;
+  --line: #164F5A;
+  --line-strong: #29636F;
 
   --text: #F1EEEE;
   --text-2: #C7D6D8;
   --text-3: #9DB4B8;
   --text-4: #86A0A5;
 
-  --brand: #D6E30F;
+  --brand: #F1EEEE;
   --brand-fg: #00333D;
-  --brand-soft: #1F4A3C;
+  --brand-soft: #0E4652;
+
+  --acento: #D6E30F;
+  --acento-texto: #D6E30F;
+  --acento-fg: #00333D;
+  --acento-no-brand: #0A6A7B;
 
   --info: #7CCFDC;
   --info-soft: #0C4752;
 
-  --grade: #1A5561;
+  --serie-1: #7CCFDC;
+  --serie-2: #D6E30F;
+  --grade: #164F5A;
   --eixo: #6B8C92;
 
   --sombra-1: rgba(0, 0, 0, 0.30);
   --sombra-2: rgba(0, 0, 0, 0.55);
-}
 
-/* ===========================================================================
-   Marca Nexa
-   ---------------------------------------------------------------------------
-   A versão do produto para clínicas (projeto "LOGOS - IA de atendimento"),
-   com a paleta padrão dela, a Sálvia: neutros esverdeados, sólido sálvia e
-   serifa só nos títulos. É a única marca que troca também a tipografia; as
-   fontes são buscadas por `lib/marca.js` só quando ela é aplicada.
-
-   Informação/foco/seleção seguem a marca, como na Nexa: um azul fixo destoaria
-   justamente no anel de foco de todo campo.
-   =========================================================================== */
-html[data-marca="nexa"] {
-  --bg: #F5F6F2;
-  --surface: #FFFFFF;
-  --surface-2: #F7F9F6;
-  --surface-3: #ECEFE9;
-
-  --line: #DFE4DC;
-  --line-strong: #BCC3BA;
-
-  --text: #1C221D;
-  --text-2: #4D584E;
-  --text-3: #636E64;
-  --text-4: #7F8880;
-
-  --brand: #4A5F4B;
-  --brand-fg: #FFFFFF;
-  --brand-soft: #EBF0EA;
-
-  --info: #4A5F4B;
-  --info-soft: #EBF0EA;
-
-  --sombra-1: rgba(28, 34, 29, 0.06);
-  --sombra-2: rgba(28, 34, 29, 0.18);
-
-  --font-heading: 'Fraunces', Georgia, serif;
-  --font-body: 'Figtree', system-ui, sans-serif;
-}
-
-html.dark[data-marca="nexa"] {
-  --bg: #0F1210;
-  --surface: #161B17;
-  --surface-2: #1C221D;
-  --surface-3: #232B24;
-
-  --line: #2A322B;
-  --line-strong: #3F483F;
-
-  --text: #E7EBE6;
-  --text-2: #B5BEB4;
-  --text-3: #8A9488;
-  --text-4: #737C71;
-
-  --brand: #8FAF8E;
-  --brand-fg: #102012;
-  --brand-soft: #1E2A1F;
-
-  --info: #8FAF8E;
-  --info-soft: #1E2A1F;
-
-  --grade: #2A322B;
-  --eixo: #737C71;
-
-  --sombra-1: rgba(0, 0, 0, 0.30);
-  --sombra-2: rgba(0, 0, 0, 0.55);
+  --nav-bg: #001D23;
+  --nav-fg: #9DB4B8;
+  --nav-fg-forte: #FFFFFF;
+  --nav-grupo: #759399;
+  --nav-hover: #022A32;
+  --nav-ativo: #05323B;
+  --nav-linha: #0B3A44;
 }
 
 body {
@@ -274,6 +263,7 @@ body {
   color: var(--text);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* A troca de tema anima só cor. Com `transition: all` a transição pegaria
@@ -282,20 +272,51 @@ body, .zz-panel, .zz-panel-hard, .zz-input, .zz-btn, .zz-nav-item {
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 
-.font-heading { font-family: var(--font-heading); letter-spacing: -0.02em; }
-
-/* As telas usam `font-heading font-black tracking-tighter`, feito para a
-   grotesca da ZappZen. A Fraunces da Nexa não tem peso 900 (o navegador
-   inventaria um negrito borrado) e serifa apertada fica ilegível, então na
-   Nexa o título é 500 com espaçamento quase normal. */
-html[data-marca="nexa"] .font-heading,
-html[data-marca="nexa"] .font-heading.tracking-tighter,
-html[data-marca="nexa"] .font-heading.tracking-tight { letter-spacing: -0.01em; }
-html[data-marca="nexa"] .font-heading.font-black, html[data-marca="nexa"] .font-heading.font-extrabold,
-html[data-marca="nexa"] .font-heading.font-bold, html[data-marca="nexa"] .font-heading.font-semibold {
-  font-weight: 500;
+/* ---------------------------------------------------------------------------
+   Títulos
+   As telas foram escritas para uma grotesca em peso black com espaçamento bem
+   apertado (`font-heading font-black tracking-tighter`). No AUTO o título é
+   elegante, não gritado: peso 600, espaçamento levemente fechado. A troca é
+   aqui, e não tela por tela, para valer em todas de uma vez.
+   --------------------------------------------------------------------------- */
+.font-heading { font-family: var(--font-heading); letter-spacing: -0.015em; }
+.font-heading.font-black, .font-heading.font-extrabold, .font-heading.font-bold {
+  font-weight: 600;
 }
+.font-heading.tracking-tighter { letter-spacing: -0.02em; }
+.font-heading.tracking-tight { letter-spacing: -0.012em; }
 .font-mono { font-family: var(--font-mono); }
+
+/* Números que se comparam em coluna (preço, km, contagem) alinham pelo dígito. */
+.num, table td { font-variant-numeric: tabular-nums; }
+
+/* Rótulo pequeno em caixa alta espaçada: o "sobretítulo" da ficha técnica. */
+.zz-sobre {
+  font-size: 0.66rem; font-weight: 600; letter-spacing: 0.18em;
+  text-transform: uppercase; color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------------------
+   Marca: "AUTO" em versalete espaçado, com o traço do acento. Sobre fundo
+   claro o traço usa a versão legível do acento; dentro da barra lateral, o
+   acento puro.
+   --------------------------------------------------------------------------- */
+.zz-wordmark {
+  display: inline-flex; align-items: center; gap: 0.7rem;
+  font-family: var(--font-heading); font-weight: 700;
+  letter-spacing: 0.34em; line-height: 1; color: var(--text);
+}
+.zz-wordmark-traco {
+  display: inline-block; width: 1.1rem; height: 2px; border-radius: 2px;
+  background: var(--acento-texto); margin-left: -0.34em;
+}
+.zz-sidebar .zz-wordmark { color: var(--nav-fg-forte); }
+.zz-nav-legenda {
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.zz-sidebar .zz-nav-legenda { color: var(--nav-grupo); }
+.zz-sidebar .zz-wordmark-traco { background: var(--acento); }
 
 /* ===========================================================================
    Contêiner de página
@@ -348,36 +369,48 @@ html[data-marca="nexa"] .font-heading.font-bold, html[data-marca="nexa"] .font-h
 
 /* ===========================================================================
    Superfícies
+   ---------------------------------------------------------------------------
+   Cartão branco com borda fina e sombra quase invisível, como a luz difusa de
+   um salão. O relevo vem do contraste com o piso (`--bg`), não da sombra.
    =========================================================================== */
 .zz-panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 16px;
 }
 /* Continua chamado `-hard` porque é o painel de destaque e o nome está em ~22
    telas; o que era sombra dura deslocada virou sombra difusa. */
 .zz-panel-hard {
   background: var(--surface);
-  border-radius: 14px;
-  box-shadow: 0 1px 2px var(--sombra-1), 0 8px 24px -14px var(--sombra-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px var(--sombra-1), 0 12px 32px -20px var(--sombra-2);
 }
 
 /* ===========================================================================
    Controles
    =========================================================================== */
-.zz-input {
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  padding: 0.6rem 0.8rem;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 0.875rem;
-  font-family: inherit;
-  width: 100%;
-  outline: none;
-  transition: border-color .12s, box-shadow .12s, background-color .15s;
+/* A base do campo fica na camada de componentes do Tailwind, e não solta no
+   arquivo: assim uma utilidade escrita na tela (`pl-8` para abrir espaço à
+   lupa, `h-9`, `text-sm`) ganha dela, que é o que quem escreveu quis. Solta,
+   ela vinha depois das utilidades e o `padding` daqui apagava o `pl-8`, e a
+   lupa ficava por cima do texto. */
+@layer components {
+  .zz-input {
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    padding: 0.62rem 0.85rem;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.875rem;
+    font-family: inherit;
+    width: 100%;
+    outline: none;
+    transition: border-color .12s, box-shadow .12s, background-color .15s;
+  }
 }
 .zz-input::placeholder { color: var(--text-4); }
+.zz-input:hover:not(:disabled):not(:focus) { border-color: var(--text-4); }
 
 /* As setinhas de `input[type=number]` são desenhadas pelo navegador, não por
    nós: não seguem os tokens de cor, aparecem só no hover em alguns navegadores
@@ -392,27 +425,31 @@ html[data-marca="nexa"] .font-heading.font-bold, html[data-marca="nexa"] .font-h
   margin: 0;
 }
 .zz-input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
-/* O foco era borda preta + anel preto de 2px. Agora é o azul de informação com
-   anel translúcido — mesma força de sinal, sem o peso do contorno cheio. */
+/* Foco na cor de informação da marca, com anel translúcido. */
 .zz-input:focus {
   border-color: var(--info);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 22%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 20%, transparent);
 }
 .zz-input:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }
 select.zz-input { cursor: pointer; }
 textarea.zz-input { line-height: 1.55; }
 
+/* Botão principal: sólido na cor escura da marca, com o ícone no acento — o
+   mesmo gesto do logo. No escuro o sólido é quase branco e o ícone usa a
+   versão do acento que se lê sobre ele. */
 .zz-btn {
   display: inline-flex; align-items: center; gap: .5rem;
-  padding: 0.6rem 1.1rem; font-weight: 600; font-size: 0.85rem;
-  font-family: inherit;
+  padding: 0.62rem 1.15rem; font-weight: 600; font-size: 0.85rem;
+  font-family: inherit; letter-spacing: 0.005em;
   border: 1px solid var(--brand); background: var(--brand); color: var(--brand-fg);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 1px 2px var(--sombra-1);
   transition: background .12s, box-shadow .12s, transform .1s, border-color .12s, filter .12s;
   cursor: pointer;
 }
-.zz-btn:hover { box-shadow: 0 2px 8px -2px var(--sombra-2); filter: brightness(1.12); }
+.zz-btn:not(.zz-btn-secondary):not(.zz-btn-danger) > svg { color: var(--acento-no-brand); }
+.zz-btn:hover { box-shadow: 0 4px 14px -6px var(--sombra-2); filter: brightness(1.18); }
+.dark .zz-btn:hover { filter: brightness(0.94); }
 /* O empurrãozinho de 1px no clique era a única parte tátil do desenho antigo
    que valia manter. */
 .zz-btn:active { transform: translateY(1px); box-shadow: none; filter: none; }
@@ -425,11 +462,13 @@ textarea.zz-input { line-height: 1.55; }
 
 .zz-btn-secondary {
   background: var(--surface); color: var(--text); border-color: var(--line-strong);
+  box-shadow: none;
 }
-.zz-btn-secondary:hover { background: var(--surface-2); border-color: var(--text-4); filter: none; }
+.zz-btn-secondary:hover { background: var(--surface-2); border-color: var(--text-4); filter: none; box-shadow: none; }
+.dark .zz-btn-secondary:hover { filter: none; }
 .zz-btn-danger { background: var(--danger-solid); border-color: var(--danger-solid); color: var(--danger-fg); }
 
-/* Botão-pílula para ação redonda de barra (seletor de tema, por exemplo). */
+/* Botão redondo de ação de barra (seletor de tema, por exemplo). */
 .zz-btn-icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 2.25rem; height: 2.25rem; padding: 0;
@@ -440,40 +479,172 @@ textarea.zz-input { line-height: 1.55; }
   transition: background .12s, color .12s, border-color .12s;
 }
 .zz-btn-icon:hover { background: var(--surface-3); color: var(--text); border-color: var(--line-strong); }
+.zz-btn-icon:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 35%, transparent); }
 
 /* ===========================================================================
-   Navegação
+   Barra lateral
    ---------------------------------------------------------------------------
-   O item ativo era marcado por uma barra reta de 2px na borda esquerda. Agora é
-   uma pílula preenchida — mesmo sinal, coerente com o resto arredondado.
+   Escura nos dois temas: é a moldura do salão, e o único lugar onde o acento
+   aparece com frequência. O item ativo é um fundo um tom acima, com um traço
+   do acento na borda esquerda e o ícone no acento — sinal claro sem bloco de
+   cor. Grupos têm título pequeno em caixa alta espaçada; a cor (`--nav-grupo`)
+   passa de 4,5:1 sobre o fundo da barra nas duas marcas.
    =========================================================================== */
-.zz-nav-item {
-  display:flex; align-items:center; gap:0.75rem;
-  margin: 0.15rem 0.6rem;
-  padding: 0.6rem 0.8rem;
-  border-radius: 10px;
-  color: var(--text-3); font-size: 0.875rem; font-weight: 500;
-  cursor: pointer; transition: background .12s, color .12s;
+.zz-sidebar {
+  background: var(--nav-bg);
+  color: var(--nav-fg);
 }
-.zz-nav-item:hover { background: var(--surface-3); color: var(--text); }
-.zz-nav-item.active { color: var(--brand-fg); background: var(--brand); font-weight: 600; }
-.zz-nav-item.active:hover { background: var(--brand); color: var(--brand-fg); }
+.zz-nav-item {
+  position: relative;
+  display: flex; align-items: center; gap: 0.75rem;
+  margin: 1px 0.75rem;
+  padding: 0.44rem 0.75rem;
+  border-radius: 10px;
+  color: var(--nav-fg); font-size: 0.845rem; font-weight: 500;
+  cursor: pointer; transition: background .12s, color .12s;
+  outline: none;
+}
+.zz-nav-item > svg { flex: none; }
+.zz-nav-item:hover { background: var(--nav-hover); color: var(--nav-fg-forte); }
+.zz-nav-item:focus-visible { box-shadow: 0 0 0 2px var(--acento); }
+.zz-nav-item.active { color: var(--nav-fg-forte); background: var(--nav-ativo); font-weight: 600; }
+.zz-nav-item.active:hover { background: var(--nav-ativo); }
+.zz-nav-item.active::before {
+  content: ""; position: absolute; left: -0.75rem; top: 0.55rem; bottom: 0.55rem;
+  width: 2px; border-radius: 0 2px 2px 0; background: var(--acento);
+}
+.zz-nav-item.active > svg { color: var(--acento); }
 
-/* Subtitulo de grupo da barra lateral. Nao e item clicavel, entao nao pode
-   competir com eles: caixa alta pequena, sem fundo e sem icone. A cor e
-   `--text-3`, a mesma dos itens, e nao o `--text-4` que seria o natural para
-   texto secundario: a 10px isto e texto pequeno, e `--text-4` reprova nos dois
-   temas (3,46:1 no claro, 3,83:1 no escuro). O que separa o titulo do item e o
-   tamanho e a caixa alta, nao a cor. O recuo alinha com o rotulo do item
-   (0.6rem de margem do item mais 0.8rem de padding), nao com a borda da barra,
-   senao o titulo parece de outra coluna. */
+/* Tela que ainda não existe: aparece no menu para mostrar o caminho, mas não é
+   link. Sem hover, para não prometer clique. */
+.zz-nav-item.em-breve { cursor: default; color: color-mix(in srgb, var(--nav-fg) 62%, transparent); }
+.zz-nav-item.em-breve:hover { background: transparent; color: color-mix(in srgb, var(--nav-fg) 62%, transparent); }
+
+.zz-nav-selo {
+  margin-left: auto;
+  font-size: 0.56rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 0.18rem 0.42rem; border-radius: 6px;
+  background: color-mix(in srgb, var(--acento) 16%, transparent);
+  color: var(--acento);
+}
+.zz-nav-cont { margin-left: auto; font-size: 0.7rem; color: var(--nav-grupo); }
+
 .zz-nav-grupo {
-  padding: 0.35rem 1.4rem;
-  font-size: 0.625rem;
-  font-weight: 700;
+  padding: 0.95rem 1.5rem 0.35rem;
+  font-size: 0.6rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: var(--text-3);
+  letter-spacing: 0.2em;
+  color: var(--nav-grupo);
+}
+.zz-nav-sep { height: 1px; background: var(--nav-linha); margin: 0.9rem 1.25rem; }
+.zz-nav-seta { margin-left: auto; transition: transform .15s ease; color: var(--nav-grupo); }
+.zz-nav-seta.aberta { transform: rotate(90deg); }
+
+/* Rodapé da barra: quem está logado, tema e sair. */
+.zz-nav-rodape { border-top: 1px solid var(--nav-linha); }
+.zz-nav-avatar {
+  width: 2.1rem; height: 2.1rem; border-radius: 9999px; flex: none;
+  display: grid; place-items: center;
+  background: var(--acento); color: var(--acento-fg);
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+}
+.zz-sidebar .zz-btn-icon {
+  background: transparent; border-color: var(--nav-linha); color: var(--nav-fg);
+}
+.zz-sidebar .zz-btn-icon:hover { background: var(--nav-hover); color: var(--nav-fg-forte); border-color: var(--nav-linha); }
+.zz-sidebar .zz-btn-icon:focus-visible { box-shadow: 0 0 0 2px var(--acento); }
+
+/* ===========================================================================
+   Entrada (tela de login): o showroom
+   ---------------------------------------------------------------------------
+   Salão escuro (as cores da barra lateral), um holofote fixo sobre o carro e
+   outro que segue o mouse (`--mx`/`--my`, escritos por CarroShowroom), e o
+   carro em traço fino. O carro respira (suspensão), um brilho corre pelo
+   contorno, e as classes do palco mudam o resto: `farol`, `andando`, `erro`.
+   =========================================================================== */
+.zz-palco {
+  --mx: 60%; --my: 45%; --px: 0;
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  color: var(--nav-fg-forte);
+  background:
+    radial-gradient(520px circle at var(--mx) var(--my), color-mix(in srgb, var(--nav-fg-forte) 7%, transparent), transparent 62%),
+    radial-gradient(ellipse 55% 42% at 50% 38%, color-mix(in srgb, var(--nav-fg-forte) 8%, transparent), transparent 70%);
+}
+/* No celular o logo ocupa o topo do palco: o carro desce para não encostar. */
+@media (max-width: 1023px) { .zz-palco { padding-top: 4.5rem; } }
+.zz-palco-luz {
+  position: absolute; left: 50%; top: 0; width: 46%; height: 70%;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nav-fg-forte) 7%, transparent), transparent 80%);
+  clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
+  filter: blur(18px);
+  pointer-events: none;
+}
+.zz-palco-carro {
+  position: relative; width: min(86%, 760px);
+  background: none; border: 0; padding: 0; cursor: pointer;
+  transform: translateX(calc(var(--px) * 18px));
+  transition: transform .5s cubic-bezier(.2,.7,.2,1);
+  outline: none;
+}
+.zz-palco-carro:focus-visible { box-shadow: 0 0 0 2px var(--acento); border-radius: 16px; }
+.zz-palco-carro svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+.zz-carro { animation: zz-respira 4.5s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes zz-respira { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+
+.zz-carro-corpo { fill: color-mix(in srgb, var(--nav-fg-forte) 4%, transparent); stroke: var(--nav-fg-forte); stroke-width: 1.6; stroke-linejoin: round; }
+.zz-carro-vidro { fill: color-mix(in srgb, var(--nav-fg-forte) 9%, transparent); stroke: var(--nav-fg-forte); stroke-width: 1.2; stroke-opacity: .7; stroke-linejoin: round; }
+.zz-carro-traco { fill: none; stroke: var(--nav-fg-forte); stroke-width: 1.4; stroke-opacity: .85; }
+.zz-carro-traco.fino { stroke-width: 1; stroke-opacity: .55; }
+.zz-carro-traco.suave { stroke-opacity: .3; }
+.zz-carro-pneu { fill: var(--nav-bg); stroke: var(--nav-fg-forte); stroke-width: 2.4; }
+.zz-carro-cubo { fill: var(--acento); }
+.zz-carro-lanterna { fill: #C8322A; opacity: .75; }
+.zz-carro-farol { fill: color-mix(in srgb, var(--nav-fg-forte) 18%, transparent); stroke: var(--nav-fg-forte); stroke-width: 1; transition: fill .25s ease, filter .25s ease; }
+.zz-carro-facho { fill: url(#zz-facho); opacity: 0; transition: opacity .3s ease; }
+.zz-palco.farol .zz-carro-farol { fill: #FFF6E0; filter: drop-shadow(0 0 6px #FFE7B0); }
+.zz-palco.farol .zz-carro-facho { opacity: 1; }
+
+/* O reflexo das luzes do salão correndo pelo contorno. */
+.zz-carro-brilho {
+  fill: none; stroke: var(--acento); stroke-width: 2.2; stroke-linecap: round;
+  stroke-dasharray: 70 930; stroke-dashoffset: 1000;
+  filter: drop-shadow(0 0 4px var(--acento));
+  animation: zz-brilho 6s cubic-bezier(.45,.05,.35,1) infinite;
+}
+@keyframes zz-brilho { 0% { stroke-dashoffset: 1000; opacity: 0; } 8% { opacity: 1; } 70% { opacity: 1; } 85%, 100% { stroke-dashoffset: 0; opacity: 0; } }
+
+/* Rodas: giram um pouco a cada tecla (`--giro`) e sem parar ao entrar. */
+.zz-carro-roda { transform-box: fill-box; transform-origin: center; transform: rotate(var(--giro, 0deg)); transition: transform .45s cubic-bezier(.2,.7,.2,1); }
+.zz-palco.andando .zz-carro-roda { animation: zz-gira .45s linear infinite; }
+@keyframes zz-gira { from { transform: rotate(var(--giro, 0deg)); } to { transform: rotate(calc(var(--giro, 0deg) + 360deg)); } }
+.zz-palco.andando .zz-carro { animation: zz-arranca .9s ease-in-out infinite; }
+@keyframes zz-arranca { 0%, 100% { transform: translate(0, 0) rotate(0); } 50% { transform: translate(3px, -1px) rotate(-0.3deg); } }
+
+.zz-carro-vento line { stroke: var(--nav-fg-forte); stroke-width: 1; stroke-linecap: round; opacity: 0; }
+.zz-palco.andando .zz-carro-vento line { animation: zz-vento .7s linear infinite; }
+.zz-palco.andando .zz-carro-vento line:nth-child(2) { animation-delay: .2s; }
+.zz-palco.andando .zz-carro-vento line:nth-child(3) { animation-delay: .4s; }
+@keyframes zz-vento { 0% { transform: translateX(40px); opacity: 0; } 30% { opacity: .5; } 100% { transform: translateX(-40px); opacity: 0; } }
+
+.zz-palco.erro .zz-palco-carro { animation: zz-tranco .45s cubic-bezier(.36,.07,.19,.97); }
+@keyframes zz-tranco { 20%, 60% { translate: -6px 0; } 40%, 80% { translate: 6px 0; } }
+
+.zz-carro-reflexo { opacity: .14; pointer-events: none; }
+.zz-carro-reflexo .zz-carro-brilho { display: none; }
+
+/* O formulário entra de leve, uma vez. */
+.zz-entrada { animation: zz-surge .6s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes zz-surge { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .zz-carro, .zz-carro-brilho, .zz-palco.andando .zz-carro-roda, .zz-palco.andando .zz-carro,
+  .zz-palco.andando .zz-carro-vento line, .zz-palco.erro .zz-palco-carro, .zz-entrada { animation: none; }
+  .zz-carro-brilho { opacity: 0; }
+  .zz-palco-carro, .zz-carro-roda { transition: none; transform: none; }
 }
 
 /* Sinalização de fila — conversas aguardando atendimento precisam saltar aos
@@ -491,7 +662,7 @@ textarea.zz-input { line-height: 1.55; }
 .zz-queue-badge {
   display:inline-flex; align-items:center; justify-content:center;
   min-width:1.35rem; height:1.35rem; padding:0 0.35rem;
-  background:#EF4444; color:#fff; font-size:0.7rem; font-weight:800;
+  background:var(--danger-solid); color:var(--danger-fg); font-size:0.68rem; font-weight:700;
   border-radius:999px; line-height:1;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -600,101 +771,75 @@ textarea.zz-input { line-height: 1.55; }
    conjunto de componentes espera. Espelham os tokens acima.
    =========================================================================== */
 @layer base {
+  /* Logos */
   :root {
     --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --primary: 222 47% 11%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 217 91% 60%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-  }
-
-  .dark {
-    --background: 224 48% 8%;
-    --foreground: 216 44% 94%;
-    --primary: 217 76% 54%;
+    --foreground: 240 7% 6%;
+    --primary: 240 7% 6%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 222 33% 16%;
-    --secondary-foreground: 216 44% 94%;
-    --muted: 222 33% 16%;
-    --muted-foreground: 218 15% 62%;
-    --border: 222 31% 24%;
-    --input: 222 31% 24%;
-    --ring: 217 89% 68%;
-    --card: 223 37% 13%;
-    --card-foreground: 216 44% 94%;
-    --popover: 223 37% 13%;
-    --popover-foreground: 216 44% 94%;
-    --accent: 222 33% 20%;
-    --accent-foreground: 216 44% 94%;
-    --destructive: 0 74% 60%;
+    --secondary: 40 13% 93%;
+    --secondary-foreground: 240 7% 6%;
+    --muted: 40 13% 93%;
+    --muted-foreground: 240 6% 41%;
+    --border: 40 10% 89%;
+    --input: 40 10% 89%;
+    --ring: 26 89% 37%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 7% 6%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 7% 6%;
+    --accent: 40 13% 93%;
+    --accent-foreground: 240 7% 6%;
+    --destructive: 3 65% 47%;
     --destructive-foreground: 0 0% 100%;
   }
 
-  /* Marca R3: os mesmos papéis dos tokens acima, em HSL. */
+  .dark {
+    --background: 240 5% 8%;
+    --foreground: 40 9% 94%;
+    --primary: 40 9% 94%;
+    --primary-foreground: 240 7% 6%;
+    --secondary: 240 6% 14%;
+    --secondary-foreground: 40 9% 94%;
+    --muted: 240 6% 14%;
+    --muted-foreground: 240 6% 64%;
+    --border: 240 7% 16%;
+    --input: 240 7% 16%;
+    --ring: 28 100% 64%;
+    --card: 240 5% 8%;
+    --card-foreground: 40 9% 94%;
+    --popover: 240 5% 8%;
+    --popover-foreground: 40 9% 94%;
+    --accent: 240 6% 14%;
+    --accent-foreground: 40 9% 94%;
+    --destructive: 4 76% 40%;
+    --destructive-foreground: 0 0% 100%;
+  }
+
+  /* R3: os mesmos papéis, em HSL. */
   html[data-marca="r3"] {
     --background: 0 0% 100%;
-    --foreground: 190 100% 12%;
+    --foreground: 190 100% 9%;
     --primary: 190 100% 12%;
-    --primary-foreground: 63 88% 47%;
+    --primary-foreground: 0 9% 96%;
     --ring: 189 85% 26%;
-    --border: 0 9% 88%;
-    --input: 0 9% 88%;
-    --card-foreground: 190 100% 12%;
-    --popover-foreground: 190 100% 12%;
+    --border: 0 8% 89%;
+    --input: 0 8% 89%;
+    --card-foreground: 190 100% 9%;
+    --popover-foreground: 190 100% 9%;
   }
 
   html.dark[data-marca="r3"] {
-    --background: 190 100% 9%;
+    --background: 190 100% 12%;
     --foreground: 0 10% 94%;
-    --primary: 63 88% 47%;
+    --primary: 0 10% 94%;
     --primary-foreground: 190 100% 12%;
     --ring: 188 57% 68%;
-    --border: 190 58% 22%;
-    --input: 190 58% 22%;
+    --border: 190 61% 22%;
+    --input: 190 61% 22%;
     --card: 190 100% 12%;
     --card-foreground: 0 10% 94%;
     --popover: 190 100% 12%;
     --popover-foreground: 0 10% 94%;
-  }
-
-  /* Marca Nexa: os mesmos papéis dos tokens acima, em HSL. */
-  html[data-marca="nexa"] {
-    --background: 0 0% 100%;
-    --foreground: 130 10% 12%;
-    --primary: 123 12% 33%;
-    --primary-foreground: 0 0% 100%;
-    --ring: 123 12% 33%;
-    --border: 98 13% 88%;
-    --input: 98 13% 88%;
-    --card-foreground: 130 10% 12%;
-    --popover-foreground: 130 10% 12%;
-  }
-
-  html.dark[data-marca="nexa"] {
-    --background: 140 9% 6%;
-    --foreground: 108 11% 91%;
-    --primary: 118 17% 62%;
-    --primary-foreground: 128 33% 9%;
-    --ring: 118 17% 62%;
-    --border: 128 9% 18%;
-    --input: 128 9% 18%;
-    --card: 132 10% 10%;
-    --card-foreground: 108 11% 91%;
-    --popover: 132 10% 10%;
-    --popover-foreground: 108 11% 91%;
   }
 }

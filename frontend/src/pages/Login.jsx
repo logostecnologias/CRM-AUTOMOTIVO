@@ -1,33 +1,44 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { formatApiErrorDetail } from "@/lib/api";
-import {
-  ArrowRight, Headset, Sparkle, Robot,
-  UsersThree, CalendarCheck, Megaphone,
-} from "@phosphor-icons/react";
+import { ArrowRight, Eye, EyeSlash } from "@phosphor-icons/react";
 import BotaoTema from "@/components/BotaoTema";
 import LogoMarca from "@/components/LogoMarca";
-import { t } from "@/lib/textos";
+import CarroShowroom from "@/components/login/CarroShowroom";
 
-// Funcao, nao constante: o texto depende da marca, e uma lista no topo do
-// modulo ficaria na marca de quando o arquivo carregou.
-const recursos = () => [
-  { icone: Headset, titulo: "Central de Atendimento", linha: "Fila, times e histórico de cada conversa" },
-  { icone: Sparkle, titulo: t("Agentes de IA"), linha: "Respondem sozinhos e chamam gente na hora certa" },
-  { icone: Robot, titulo: "Fluxos automáticos", linha: "Editor visual, menus e integrações" },
-  { icone: UsersThree, titulo: t("CRM e funil"), linha: `Ficha do ${t("contato")}, ${t("negócios")} e próximo passo` },
-  { icone: CalendarCheck, titulo: "Agenda", linha: "Horário marcado pelo WhatsApp, com lembrete" },
-  { icone: Megaphone, titulo: "Campanhas", linha: "Disparo por modelo aprovado, com métrica" },
-];
-
+// A entrada é o showroom: o carro à esquerda, o formulário à direita, e quase
+// nenhum texto. O carro reage ao formulário (farol, rodas, arranque) e é o
+// que dá vida à tela; quem só quer entrar não precisa olhar para ele.
 export default function LoginPage() {
   const { login, marca } = useAuth();
   const nav = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [verSenha, setVerSenha] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [foco, setFoco] = useState(false);
+  const [piscando, setPiscando] = useState(false);
+  const [giro, setGiro] = useState(0);
+  const [tranco, setTranco] = useState(false);
+  const timers = useRef([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  const depois = (fn, ms) => timers.current.push(setTimeout(fn, ms));
+
+  // Cada tecla gira as rodas um pouco: o carro "anda" junto com quem digita.
+  const digitou = (setter) => (e) => {
+    setter(e.target.value);
+    setGiro((g) => g + 40);
+  };
+
+  const piscar = () => {
+    setPiscando(true);
+    depois(() => setPiscando(false), 180);
+    depois(() => setPiscando(true), 320);
+    depois(() => setPiscando(false), 500);
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -39,86 +50,79 @@ export default function LoginPage() {
       else nav("/app");
     } catch (ex) {
       setErr(formatApiErrorDetail(ex.response?.data?.detail) || ex.message);
+      setTranco(true);
+      depois(() => setTranco(false), 500);
     } finally { setLoading(false); }
   };
 
+  const farolAceso = (foco || loading) !== piscando;
+
   return (
-    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
-      {/* Left brand panel */}
-      <div className="hidden lg:flex flex-col justify-between p-12 border-r border-line bg-surface">
-        <LogoMarca marca={marca} grande />
-
-        <div>
-          <h1 className="font-heading text-4xl xl:text-5xl font-black tracking-tighter leading-[0.95] mb-5">
-            Todo o WhatsApp da sua<br/>{t("empresa")} em <span className="text-info">um só painel.</span>
-          </h1>
-          <p className="text-ink-2 text-base leading-relaxed max-w-md mb-8">
-            Atendimento em equipe, {t("agentes de IA")}, {t("CRM com funil")}, agenda e campanhas. Várias {t("empresas")} no mesmo lugar.
-          </p>
-
-          {/* O que a tela mostra e o que o produto faz, nao uma funcionalidade
-              dele. Ate 2026-09-23 o painel vendia so o editor de fluxos
-              ("canvas visual", "10 tipos de no"), que hoje e um item entre
-              seis: quem chega procurando atendimento, CRM ou agenda lia uma
-              pagina sobre outra coisa. Os itens seguem os grupos da barra
-              lateral, entao a promessa da tela publica e o menu de dentro
-              dizem a mesma coisa. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 max-w-lg">
-            {recursos().map(({ icone: Icone, titulo, linha }) => (
-              <div key={titulo} className="flex gap-2.5">
-                <Icone size={17} weight="bold" className="text-ink-3 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-sm font-bold text-ink leading-tight">{titulo}</div>
-                  <div className="text-xs text-ink-3 leading-snug mt-0.5">{linha}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-[1.35fr_1fr] bg-canvas">
+      {/* Showroom */}
+      <div className="zz-sidebar relative flex flex-col justify-between min-h-[300px] lg:min-h-screen p-8 lg:p-12 overflow-hidden">
+        <div className="relative z-10">
+          <LogoMarca marca={marca} grande />
         </div>
 
-        <div className="font-mono text-[11px] text-ink-3 tracking-wide">
-          {t("Multiempresa")} · Em português
+        <div className="absolute inset-0">
+          <CarroShowroom farol={farolAceso} giro={giro} andando={loading} erro={tranco} onPiscar={piscar} />
+        </div>
+
+        <div className="relative z-10 hidden lg:block zz-nav-legenda">
+          Seu pátio, sem ponto morto.
         </div>
       </div>
 
-      {/* Right form */}
-      <div className="relative flex items-center justify-center p-6 lg:p-12 bg-canvas">
+      {/* Entrada */}
+      <div className="relative flex items-center justify-center p-6 py-10 lg:p-12">
         <div className="absolute top-5 right-5">
           <BotaoTema />
         </div>
-        <div className="w-full max-w-md">
-          <div className="mb-8">
-            <div className="text-xs font-bold tracking-[0.2em] uppercase text-ink-3 mb-2">Bem-vindo</div>
-            <h2 className="font-heading text-3xl font-black tracking-tighter">Entre na sua conta</h2>
-            <p className="text-sm text-ink-2 mt-2">Toda a equipe entra por aqui.</p>
-          </div>
+        <div className="w-full max-w-sm zz-entrada">
+          <h1 className="font-heading text-[2rem] font-semibold tracking-tight leading-tight">Entrar</h1>
+          <p className="text-sm text-ink-3 mt-1.5 mb-8">Bem-vindo de volta.</p>
 
-          <form onSubmit={submit} className="space-y-4" data-testid="login-form">
+          <form onSubmit={submit} className="space-y-4" data-testid="login-form"
+            onFocus={() => setFoco(true)}
+            /* Passar do e-mail para a senha também é "blur": sem conferir para
+               onde o foco foi, o farol piscaria a cada troca de campo. */
+            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setFoco(false); }}>
             <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Email</label>
+              <label htmlFor="login-email" className="text-xs font-medium text-ink-2 block mb-1.5">E-mail</label>
               <input
+                id="login-email"
                 data-testid="login-email"
-                type="email" required autoFocus
-                className="zz-input"
+                type="email" required autoFocus autoComplete="username"
+                className="zz-input h-12"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={t("voce@empresa.com")}
+                onChange={digitou(setEmail)}
+                placeholder="voce@suarevenda.com.br"
               />
             </div>
             <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-ink-2 block mb-1.5">Senha</label>
-              <input
-                data-testid="login-password"
-                type="password" required
-                className="zz-input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-              />
+              <label htmlFor="login-password" className="text-xs font-medium text-ink-2 block mb-1.5">Senha</label>
+              <div className="relative">
+                <input
+                  id="login-password"
+                  data-testid="login-password"
+                  type={verSenha ? "text" : "password"} required autoComplete="current-password"
+                  className="zz-input h-12 pr-11"
+                  value={password}
+                  onChange={digitou(setPassword)}
+                  placeholder="••••••••"
+                />
+                <button type="button" onClick={() => setVerSenha((v) => !v)}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-9 h-9 grid place-items-center rounded-lg text-ink-3 hover:text-ink hover:bg-surface-3 transition-colors"
+                  aria-label={verSenha ? "Esconder senha" : "Mostrar senha"} data-testid="login-ver-senha">
+                  {verSenha ? <EyeSlash size={17} /> : <Eye size={17} />}
+                </button>
+              </div>
             </div>
 
             {err && (
-              <div data-testid="login-error" className="text-sm text-danger bg-danger-soft border border-danger p-2.5 rounded-lg">
+              <div data-testid="login-error" role="alert"
+                className="text-sm text-danger bg-danger-soft border border-danger/30 px-3 py-2.5 rounded-xl">
                 {err}
               </div>
             )}
@@ -126,28 +130,24 @@ export default function LoginPage() {
             <button
               data-testid="login-submit"
               type="submit" disabled={loading}
-              className="zz-btn w-full justify-center"
+              className="zz-btn w-full justify-center h-12 mt-2 group"
             >
-              {loading ? "Entrando..." : "Entrar"} <ArrowRight size={16} weight="bold" />
+              {loading ? "Entrando…" : "Entrar"}
+              <ArrowRight size={16} weight="bold" className="transition-transform group-hover:translate-x-0.5" />
             </button>
           </form>
 
           {/* Nada de credencial de exemplo aqui. Esta é a única tela pública do
               produto: o que aparece nela está na internet, indexável, e ia no
-              bundle de produção. O e-mail do super admin é real e continua
-              sendo — publicá-lo entrega metade do login de quem pode entrar em
-              qualquer empresa, e deixa o resto por conta da força bruta. Havia
-              uma linha igual com o usuário comum, tirada em 222679c. */}
+              bundle de produção.
 
-          {/* Âncora comum, não Link do React Router: as páginas legais são
-              arquivos estáticos servidos pelo Caddy, fora do SPA. Um Link
-              tentaria resolvê-las como rota e cairia no fallback do index.html.
-
-              Ficam aqui porque é a única tela pública do produto, e a revisão
-              da Meta espera alcançar a política de privacidade a partir dela. */}
-          <div className="mt-4 text-xs text-ink-3 flex gap-4">
-            <a href="/privacidade.html" className="hover:text-ink">Privacidade</a>
-            <a href="/termos.html" className="hover:text-ink">Termos de Uso</a>
+              Âncora comum, não Link do React Router: as páginas legais são
+              arquivos estáticos servidos pelo Caddy, fora do SPA. Ficam aqui
+              porque é a única tela pública do produto, e a revisão da Meta
+              espera alcançar a política de privacidade a partir dela. */}
+          <div className="mt-10 text-xs text-ink-3 flex gap-5">
+            <a href="/privacidade.html" className="hover:text-ink transition-colors">Privacidade</a>
+            <a href="/termos.html" className="hover:text-ink transition-colors">Termos de Uso</a>
           </div>
         </div>
       </div>

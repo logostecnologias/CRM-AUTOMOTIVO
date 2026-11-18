@@ -5,7 +5,7 @@ import Modal from "@/components/ui/Modal";
 import { useAcao } from "@/hooks/useAcao";
 import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL } from "@/lib/currency";
-import { MARCAS, PADRAO as MARCA_PADRAO } from "@/lib/marca";
+import { MARCAS, valida as validaMarca } from "@/lib/marca";
 import { rotuloPapel } from "@/lib/papeis";
 import { haQuanto, plural } from "@/components/painel/Indicadores";
 import { rotuloDoProblema } from "@/components/superadmin/comum";
@@ -233,9 +233,9 @@ export default function EmpresaDetalhe({ id, plans, onFechar, onMudou, entrar, e
           </select>
         </Secao>
         <Secao titulo="Marca">
-          <select className="zz-input h-9 text-sm" value={e.marca || MARCA_PADRAO} disabled={mudando}
+          <select className="zz-input h-9 text-sm" value={validaMarca(e.marca)} disabled={mudando}
             data-testid="empresa-marca"
-            onChange={(ev) => ev.target.value !== (e.marca || MARCA_PADRAO)
+            onChange={(ev) => ev.target.value !== validaMarca(e.marca)
               && mudar({ marca: ev.target.value },
                 `${e.name} agora vê o painel ${MARCAS[ev.target.value].nome}. Vale no próximo carregamento de quem estiver dentro.`)}>
             {Object.values(MARCAS).map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}

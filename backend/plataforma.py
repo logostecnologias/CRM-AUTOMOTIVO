@@ -25,6 +25,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from plan_limits import LIMITS
+from marcas import normaliza_marca
 
 DIAS_SERIE = 14
 # Sem mensagem nenhuma por tantos dias, a empresa conta como parada. Uma semana
@@ -246,7 +247,7 @@ def visao(tenants: list[dict], saude_por_id: dict, serie_dias: list[dict]) -> di
     for t in ativas:
         preco = float((t.get("plan") or {}).get("preco_mensal") or 0)
         receita += preco
-        m = t.get("marca") or "zappzen"
+        m = normaliza_marca(t.get("marca"))
         linha = por_marca.setdefault(m, {"marca": m, "empresas": 0, "receita": 0.0})
         linha["empresas"] += 1
         linha["receita"] += preco
@@ -298,7 +299,7 @@ def visao(tenants: list[dict], saude_por_id: dict, serie_dias: list[dict]) -> di
         },
         "serie": serie_dias,
         "alertas": lista_alertas,
-        "top": [{"id": t["id"], "name": t["name"], "marca": t.get("marca") or "zappzen",
+        "top": [{"id": t["id"], "name": t["name"], "marca": normaliza_marca(t.get("marca")),
                  "mensagens_7d": saude_por_id[t["id"]]["mensagens_7d"],
                  "mensagens_7d_anterior": saude_por_id[t["id"]]["mensagens_7d_anterior"]}
                 for t in top],
