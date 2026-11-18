@@ -29,6 +29,7 @@ import agenda
 import ai_credentials
 import ai_documentos
 import ai_estoque
+import ai_veiculos
 import ai_funil
 import ai_midia
 import ai_runtime
@@ -644,9 +645,20 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
         return {"transferiu": True, "texto": ai_agents.AVISO_CONFIRMACAO, "segurada": texto,
                 "motivo": ("O agente ia confirmar um horário que não está gravado na Agenda. "
                            "A mensagem foi segurada e a conversa iria para uma pessoa confirmar")}
+    # As etiquetas de foto viram as fotos que o contato receberia: sem isto o
+    # teste mostrava "[CARRO:AB12CD]" escrito na bolha, e o admin não tinha como
+    # conferir se a foto era do carro certo.
+    if await ai_veiculos.ativo(db, user["tenant_id"]):
+        texto, docs = await ai_veiculos.extrair_fotos(db, user["tenant_id"], texto)
+        texto, _ = ai_agents.extrair_fotos(texto, [])
+        fotos = [d["id"] for d in docs]
+    else:
+        texto, escolhidas = ai_agents.extrair_fotos(texto, agente.get("midias") or [])
+        fotos = [f.get("media_id") for f in escolhidas if f.get("media_id")]
     return {
         "transferiu": False,
         "texto": texto,
+        "fotos": fotos,
         "tokens": (resposta.tokens_entrada + resposta.tokens_saida
                    + resposta.tokens_cache_leitura + resposta.tokens_cache_escrita),
         # Quais ferramentas ele chegou a usar. É o que mostra, no teste, que o

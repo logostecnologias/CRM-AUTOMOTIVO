@@ -1024,6 +1024,108 @@ async def etapa_estoque():
     check("excluir o agente leva o estoque junto", await DB.ai_estoque.count_documents({}) == 0)
 
 
+async def etapa_estoque_veiculos():
+    """O estoque da tela de Estoque é a única fonte da IA sobre carros.
+
+    O erro de verdade que motivou isto: com a planilha e o catálogo de fotos por
+    descrição ("Argo drive 2025" para três Argos), o agente errava preço e
+    mandava foto de outro carro. Aqui: a planilha e o catálogo saem do prompt,
+    a consulta só devolve carro à venda (sem placa), e a foto é a do carro
+    pedido pelo código.
+    """
+    print()
+    print("[estoque de veiculos como fonte unica]")
+    import ai_veiculos
+    import ai_estoque
+    await semear(agente={
+        "midias": [{"id": "f1", "media_id": "m-agente", "descricao": "Argo drive 2025"}],
+        "estoque": {"total": 3, "versao": "v1", "colunas": ["VEICULO", "PRECO"],
+                    "exemplos": [{"VEICULO": "ARGO", "PRECO": "99999"}]},
+    })
+    for vid, f in (("m-agente", "agente.jpg"),):
+        await DB.media_files.insert_one({"id": vid, "tenant_id": TENANT, "stored_name": f,
+                                         "mime": "image/jpeg", "kind": "image", "size": 1})
+
+    async def foto(nome):
+        doc = await media_store.store_upload(DB, TENANT, None, "u-1", nome, "image/jpeg", b"jpg-" + nome.encode(), kind="image")
+        await DB.media_files.update_one({"id": doc["id"]}, {"$set": {"uso": "veiculo"}})
+        return doc["id"]
+
+    a1, a2 = await foto("argo-frente.jpg"), await foto("argo-traseira.jpg")
+    p1 = await foto("pulse.jpg")
+    base = {"tenant_id": TENANT, "marca": "Fiat", "categoria": "hatch", "cambio": "manual",
+            "combustivel": "flex", "ano_modelo": 2025, "destaque": False}
+    carros = {
+        "argo1": {**base, "id": "aaaa1111-0000", "modelo": "Argo", "versao": "Drive 1.0", "cor": "Branco",
+                  "km": 40792, "preco": 71990.0, "preco_anterior": 74990.0, "placa": "SYZ4A38",
+                  "status": "disponivel", "fotos": [a1, a2]},
+        "argo2": {**base, "id": "bbbb2222-0000", "modelo": "Argo", "versao": "Drive 1.0", "cor": "Cinza",
+                  "km": 46479, "preco": 75900.0, "placa": "TER4E42", "status": "disponivel", "fotos": []},
+        "pulse": {**base, "id": "cccc3333-0000", "modelo": "Pulse", "versao": "Audace", "categoria": "suv",
+                  "km": 31138, "preco": 99990.0, "placa": "UAI6C53", "status": "vendido", "fotos": [p1]},
+        "hilux": {**base, "id": "dddd4444-0000", "marca": "Toyota", "modelo": "Hilux", "versao": "CD",
+                  "categoria": "picape", "km": 95783, "preco": 194990.0, "placa": "ROY8B62",
+                  "status": "reservado", "fotos": []},
+    }
+    for v in carros.values():
+        await DB.veiculos.insert_one(dict(v))
+    cod = {k: ai_veiculos.codigo(v) for k, v in carros.items()}
+
+    # --- a consulta ---
+    IA.chamar = ("consultar_estoque", {"busca": "argo"})
+    IA.proxima = f"Tenho sim, olha esse Argo branco: [CARRO:{cod['argo1']}]"
+    await receber("tem argo?")
+    ch = IA.chamadas[-1]
+    check("o prompt usa o estoque de veiculos", ai_veiculos.INSTRUCOES in ch["instrucoes"])
+    check("a planilha da IA sai do prompt",
+          ai_estoque.bloco_de_instrucoes({"estoque": {"total": 3, "colunas": ["VEICULO", "PRECO"],
+                                                       "exemplos": [{"VEICULO": "ARGO", "PRECO": "99999"}]}})
+          not in ch["instrucoes"] and "99999" not in ch["instrucoes"])
+    check("o catalogo de fotos por descricao sai do prompt",
+          "[FOTO:1]" not in ch["instrucoes"] and "Argo drive 2025" not in ch["instrucoes"])
+    nomes = {f.nome for f in ch["ferramentas"]}
+    check("a ferramenta e a do estoque de veiculos", "consultar_estoque" in nomes)
+    res = ch["resultado_ferramenta"]
+    check("os dois Argos a venda aparecem com o codigo de cada um",
+          f"[CARRO:{cod['argo1']}]" in res and f"[CARRO:{cod['argo2']}]" in res, res)
+    check("preco exato e o de/por", "R$ 71.990" in res and "era R$ 74.990" in res, res)
+    check("a placa nao vai para a IA", "SYZ4A38" not in res and "TER4E42" not in res, res)
+    check("carro sem foto vem marcado", "sem foto" in res, res)
+    check("a resposta chega sem a etiqueta",
+          ENVIADOS[-1][1] == "Tenho sim, olha esse Argo branco:", ENVIADOS[-1])
+    check("e as fotos sao as DESSE carro, as duas", len(MIDIAS_ENVIADAS) == 2, MIDIAS_ENVIADAS)
+
+    # --- vendido e reservado ---
+    executar = ai_veiculos.executor(DB, TENANT)
+    tudo = await executar("consultar_estoque", {})
+    check("vendido nao aparece na consulta", cod["pulse"] not in tudo and "Pulse" not in tudo, tudo)
+    check("reservado aparece marcado", "Hilux" in tudo and "RESERVADO" in tudo, tudo)
+    teto = await executar("consultar_estoque", {"preco_max": 72000})
+    check("preco maximo filtra", cod["argo1"] in teto and cod["argo2"] not in teto, teto)
+
+    antes = len(MIDIAS_ENVIADAS)
+    IA.chamar = None
+    IA.proxima = f"Olha o Pulse [CARRO:{cod['pulse']}] e esse [CARRO:XXXXXX]"
+    await receber("e o pulse?")
+    check("foto de carro vendido ou codigo inventado nao sai", len(MIDIAS_ENVIADAS) == antes, MIDIAS_ENVIADAS[antes:])
+    check("e as etiquetas somem do texto", "CARRO" not in ENVIADOS[-1][1], ENVIADOS[-1])
+
+    IA.proxima = "Mais alguma duvida?"
+    await receber("ok")
+    hist = IA.chamadas[-1]["historico"]
+    assistente = " ".join(t["content"] for t in hist if t["role"] == "assistant")
+    check("o historico mostra qual carro ja teve foto enviada",
+          f"[CARRO:{cod['argo1']}]" in assistente and "[FOTO:" not in assistente, assistente)
+
+    # --- empresa sem veiculo nenhum: tudo como antes ---
+    await DB.veiculos.delete_many({"tenant_id": TENANT})
+    IA.proxima = "ok"
+    await receber("oi de novo")
+    check("sem veiculo cadastrado, o catalogo antigo continua valendo",
+          "[FOTO:1] Argo drive 2025" in IA.chamadas[-1]["instrucoes"]
+          and ai_veiculos.INSTRUCOES not in IA.chamadas[-1]["instrucoes"])
+
+
 async def etapa_finalizar():
     print()
     print("[agente finaliza o atendimento]")
@@ -1328,6 +1430,7 @@ def test_suite():
         await etapa_upload_de_fotos()
         await etapa_treinamento()
         await etapa_estoque()
+        await etapa_estoque_veiculos()
         await etapa_finalizar()
         await etapa_funil()
         await etapa_documentos()

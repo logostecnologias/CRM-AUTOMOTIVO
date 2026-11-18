@@ -43,6 +43,7 @@ import agenda
 import ai_atendimento
 import ai_documentos
 import ai_estoque
+import ai_veiculos
 import ai_funil
 import ai_midia
 import ai_runtime
@@ -211,7 +212,8 @@ def catalogo_publico() -> dict:
 # Prompt
 # ---------------------------------------------------------------------------
 
-def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "") -> str:
+def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "",
+                      bloco_estoque: str = "") -> str:
     """O bloco estável que vai para o cache de prompt.
 
     Estável é requisito, não estilo: é o prefixo idêntico entre chamadas que o
@@ -223,6 +225,9 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "
     `ai_tools`. Chega pronto em vez de ser buscado aqui porque esta função é
     síncrona e sem banco, e é chamada também pela tela que mostra o prompt.
     `bloco_funil` (as etapas do funil, de `ai_funil`) chega pelo mesmo motivo.
+    `bloco_estoque` também: é o estoque de veículos (`ai_veiculos`), e quando
+    ele vem, a planilha e o catálogo de fotos do agente ficam de fora — a IA
+    passa a ter uma fonte só sobre os carros.
     """
     nome = (agente.get("nome") or "Assistente").strip()
     empresa = (agente.get("empresa_nome") or "").strip()
@@ -277,7 +282,7 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "
     )
     partes.append("Como escrever:\n" + " ".join(estilo))
 
-    tem_estoque = bool((agente.get("estoque") or {}).get("total"))
+    tem_estoque = bool(bloco_estoque) or bool((agente.get("estoque") or {}).get("total"))
     regras = [
         ("Não invente informação. Se não estiver na base de conhecimento abaixo nem no "
          "que a consulta ao estoque devolver, você não sabe." if tem_estoque else
@@ -343,7 +348,7 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "
     # O catálogo de fotos. A descrição escrita pela empresa é a **única** coisa
     # que o modelo sabe sobre cada imagem: ele é de texto e não enxerga o
     # arquivo. Descrição ruim produz foto enviada na hora errada.
-    fotos = agente.get("midias") or []
+    fotos = [] if bloco_estoque else (agente.get("midias") or [])
     if fotos:
         linhas = "\n".join(
             f"[FOTO:{i + 1}] {(f.get('descricao') or 'sem descrição').strip()}"
@@ -366,7 +371,9 @@ def montar_instrucoes(agente: dict, bloco_agenda: str = "", bloco_funil: str = "
 
     # O estoque entra só como formato (colunas, total, exemplo); as linhas vêm
     # da ferramenta `consultar_estoque`. Ver `ai_estoque`.
-    if tem_estoque:
+    if bloco_estoque:
+        partes.append(bloco_estoque)
+    elif tem_estoque:
         partes.append(ai_estoque.bloco_de_instrucoes(agente))
     if agente.get("finalizar_ativo"):
         partes.append(ai_atendimento.INSTRUCOES)
@@ -462,7 +469,8 @@ async def agente_da_conexao(db, tenant_id: str, conexao_id: str | None) -> dict 
 async def montar_historico(db, session_id: str, tenant_id: str,
                            contato: dict | None = None, *,
                            visao: bool | None = False,
-                           catalogo: list[dict] | None = None) -> list[dict]:
+                           catalogo: list[dict] | None = None,
+                           fotos_carro: dict[str, str] | None = None) -> list[dict]:
     """A conversa recente, no formato que os dois provedores aceitam.
 
     Ordena por `timestamp` **e `_id`** pelo mesmo motivo que todo histórico
@@ -517,8 +525,12 @@ async def montar_historico(db, session_id: str, tenant_id: str,
                 nome=meta["media"].get("filename"), imagem_vai=bool(img))
         elif d["direction"] == "enviada" and meta.get("media"):
             n = indice_foto.get(meta["media"].get("id"))
+            carro = (fotos_carro or {}).get(meta["media"].get("id"))
             if n:
                 conteudo = f"{conteudo}\n[FOTO:{n}]".strip()
+            elif carro and f"[CARRO:{carro}]" not in conteudo:
+                # Foto de veículo do estoque: volta como o código do carro.
+                conteudo = f"{conteudo}\n[CARRO:{carro}]".strip()
         if not conteudo and not img:
             continue
         papel = "user" if d["direction"] == "recebida" else "assistant"
@@ -714,7 +726,11 @@ async def preparar_ferramentas(db, tenant_id: str, agente: dict, contato: dict =
         db, tenant_id, agente, contato, session, simulado=simulado)
     bloco_funil, ferr_funil, exec_funil = await ai_funil.preparar(
         db, tenant_id, agente, contato, session, simulado=simulado)
-    blocos = {"bloco_agenda": bloco_agenda, "bloco_funil": bloco_funil}
+    # Empresa com veículo cadastrado na tela de Estoque: ele é a fonte única
+    # sobre os carros, no lugar da planilha e do catálogo de fotos.
+    usa_veiculos = await ai_veiculos.ativo(db, tenant_id)
+    blocos = {"bloco_agenda": bloco_agenda, "bloco_funil": bloco_funil,
+              "bloco_estoque": ai_veiculos.INSTRUCOES if usa_veiculos else ""}
     if contato is None:
         return blocos, None, None
 
@@ -723,7 +739,9 @@ async def preparar_ferramentas(db, tenant_id: str, agente: dict, contato: dict =
         fontes.append((ferr_agenda, exec_agenda))
     if ferr_funil:
         fontes.append((ferr_funil, exec_funil))
-    if (agente.get("estoque") or {}).get("total"):
+    if usa_veiculos:
+        fontes.append((ai_veiculos.FERRAMENTAS, ai_veiculos.executor(db, tenant_id)))
+    elif (agente.get("estoque") or {}).get("total"):
         fontes.append((ai_estoque.FERRAMENTAS, ai_estoque.executor(db, tenant_id, agente)))
     if agente.get("finalizar_ativo"):
         fontes.append((ai_atendimento.FERRAMENTAS,
@@ -919,8 +937,11 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
     # ignorado. `ia_respostas` continua sendo contado na sessão, só não barra.
     # O que segura o custo é o teto de tokens do plano (`ai_runtime`).
 
-    historico = await montar_historico(db, session_id, tenant_id, contato, visao=visao,
-                                       catalogo=agente.get("midias") or [])
+    usa_veiculos = await ai_veiculos.ativo(db, tenant_id)
+    historico = await montar_historico(
+        db, session_id, tenant_id, contato, visao=visao,
+        catalogo=[] if usa_veiculos else (agente.get("midias") or []),
+        fotos_carro=await ai_veiculos.fotos_por_midia(db, tenant_id) if usa_veiculos else None)
     if not historico:
         return await escalar("Sem histórico utilizável para o agente de IA — "
                              "encaminhado para atendimento humano")
@@ -977,9 +998,16 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
 
     # As etiquetas saem do texto antes de qualquer coisa: se sobrarem, o contato
     # lê "[FOTO:1]" na bolha.
-    texto_resposta, fotos = extrair_fotos(texto_resposta, agente.get("midias") or [])
+    docs_carro = []
+    if usa_veiculos:
+        # As fotos saem do carro do estoque. Etiqueta [FOTO:n] que sobrar (o
+        # modelo imitando conversa antiga) só é apagada: o catálogo não vale mais.
+        texto_resposta, docs_carro = await ai_veiculos.extrair_fotos(db, tenant_id, texto_resposta)
+        texto_resposta, fotos = extrair_fotos(texto_resposta, [])
+    else:
+        texto_resposta, fotos = extrair_fotos(texto_resposta, agente.get("midias") or [])
 
-    if not texto_resposta and not fotos:
+    if not texto_resposta and not fotos and not docs_carro:
         return await escalar("Agente de IA respondeu só com etiquetas inválidas — "
                              "encaminhado para atendimento humano")
 
@@ -996,6 +1024,9 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
             # não pode derrubar a resposta que já foi montada.
             logger.warning("Foto %s do agente %s indisponível", foto.get("media_id"), agente.get("id"))
             continue
+        outputs.append({"type": "media", "doc": doc,
+                        "media_type": doc.get("kind", "image"), "caption": ""})
+    for doc in docs_carro:
         outputs.append({"type": "media", "doc": doc,
                         "media_type": doc.get("kind", "image"), "caption": ""})
 

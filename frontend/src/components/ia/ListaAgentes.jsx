@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import api, { formatApiErrorDetail } from "@/lib/api";
+import api, { API, formatApiErrorDetail } from "@/lib/api";
 import {
   Plus, PencilSimple, Trash, ChatCircleDots, Robot, PaperPlaneRight, Code,
   DotsThree, MagnifyingGlass, PlugsConnected, Warning, Brain, Paperclip, Microphone,
@@ -122,7 +122,7 @@ function ChatTeste({ agente, onFechar }) {
           : []),
         data.transferiu
           ? { role: "sistema", content: `Transferido para atendimento humano — ${data.motivo}` }
-          : { role: "assistant", content: data.texto },
+          : { role: "assistant", content: data.texto, fotos: data.fotos || [] },
         // No teste nada é gravado; numa conversa real ela terminaria aqui.
         ...(data.finalizou
           ? [{ role: "sistema", content: `O ${t("agente")} finalizou o atendimento (no teste nada é gravado).` }]
@@ -179,6 +179,15 @@ function ChatTeste({ agente, onFechar }) {
               }`}>
                 {m.anexo && <AnexoTeste anexo={m.anexo} />}
                 {m.content}
+                {m.fotos?.length > 0 && (
+                  // As fotos que o contato receberia, na ordem em que iriam.
+                  <div className={`grid gap-1.5 ${m.content ? "mt-2" : ""} ${m.fotos.length > 1 ? "grid-cols-2" : ""}`}>
+                    {m.fotos.map((id) => (
+                      <img key={id} src={`${API}/media/${id}`} alt="" loading="lazy"
+                        className="w-full aspect-[4/3] object-cover rounded-xl bg-surface-3" />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
