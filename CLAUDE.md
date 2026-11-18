@@ -1,5 +1,13 @@
 # ZappZen — Contexto do Projeto
 
+> **Esta pasta é o CRM Automotivo** (repo `logostecnologias/CRM-AUTOMOTIVO`),
+> derivado do ZappZen, e **é a dona da produção na Oracle** desde 18/11/2026:
+> servidor `WuzAPI`, `/opt/zappzen`, banco no `bancos-db` e o domínio. Os nomes
+> `zappzen` ficaram da origem. A pasta `LOGOS - ZappZen` foi desligada destes
+> servidores. Há cliente usando produção, e o `start-dev.ps1` sobe o backend
+> local contra o **banco de produção** (migrações, campanhas e agenda rodam
+> sobre dados reais) — cuidado redobrado com mudanças de estrutura.
+
 ## Visão Geral
 
 ZappZen é uma plataforma **SaaS multi-tenant** de criação de chatbots para WhatsApp, com um **editor visual de fluxos** (tipo n8n/Typebot: retângulos conectados por linhas) e uma **Central de Atendimento** unificada para múltiplas conexões de WhatsApp.

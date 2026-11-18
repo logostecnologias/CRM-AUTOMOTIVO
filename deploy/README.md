@@ -1,5 +1,10 @@
 # Produção
 
+> **Desde 18/11/2026 esta produção pertence ao CRM Automotivo** (esta pasta). Os
+> nomes `zappzen` no servidor (serviço, `/opt/zappzen`, banco, domínio) ficaram
+> da origem do projeto. A pasta `LOGOS - ZappZen` foi desligada destes servidores
+> e não publica mais aqui.
+
 Subido em 27/08/2026 em `zappzen.atendimentoautomatizado.com.br`.
 
 ## Onde as coisas estão

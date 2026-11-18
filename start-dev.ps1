@@ -1,5 +1,51 @@
 $ErrorActionPreference = "Stop"
 
+# O webpack recusa caminho com "!" (reservado para a sintaxe de loader), e a
+# pasta do projeto fica dentro de "!LOGOS TECNOLOGIAS": o frontend morre com
+# "Invalid configuration object ... contains exclamation mark". Em vez de
+# renomear a pasta (OneDrive, atalhos e outros projetos dependem do caminho),
+# mapeamos o projeto numa letra de unidade com subst e rodamos este mesmo
+# script a partir dela. Dentro da unidade o caminho nao tem "!", entao a
+# chamada interna nao entra aqui de novo. O mapeamento e desfeito no fim,
+# inclusive com Ctrl+C (o finally roda nesse caso).
+if ($PSScriptRoot -match '!') {
+    $drive = $null
+    # Reaproveita um mapeamento que tenha sobrado de uma execucao interrompida.
+    foreach ($linha in (subst)) {
+        if ($linha -match '^([A-Z]):\\: => (.+)$' -and $Matches[2].TrimEnd('\') -eq $PSScriptRoot.TrimEnd('\')) {
+            $drive = $Matches[1]
+            break
+        }
+    }
+    if (-not $drive) {
+        $usadas = (Get-PSDrive -PSProvider FileSystem).Name
+        $drive = [char[]]'ZYXWVUTSRQP' | Where-Object { $usadas -notcontains "$_" } | Select-Object -First 1
+        if (-not $drive) {
+            Write-Host "Nenhuma letra de unidade livre (P-Z) para contornar o '!' no caminho." -ForegroundColor Red
+            exit 1
+        }
+        subst "${drive}:" "$PSScriptRoot"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Falha ao mapear ${drive}: para o projeto." -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    Write-Host "Caminho com '!' (o webpack nao aceita). Rodando a partir de ${drive}:\ ..." -ForegroundColor Cyan
+    $origem = Get-Location
+    $codigo = 0
+    try {
+        Set-Location "${drive}:\"
+        & "${drive}:\start-dev.ps1"
+        $codigo = $LASTEXITCODE
+    }
+    finally {
+        Set-Location $origem
+        subst "${drive}:" /D | Out-Null
+    }
+    exit $codigo
+}
+
 $CloudflaredLogOut = Join-Path $env:TEMP "zappzen-cloudflared.out.log"
 $CloudflaredLogErr = Join-Path $env:TEMP "zappzen-cloudflared.err.log"
 
@@ -34,6 +80,15 @@ function Stop-StaleProcesses {
                 if ($p) {
                     Write-Host "Matando processo preso na porta $port ($($p.ProcessName), PID $staleId)..." -ForegroundColor Yellow
                     Stop-Process -Id $staleId -Force -ErrorAction SilentlyContinue
+                }
+                # Com `uvicorn --reload` no Windows a porta aparece no nome do
+                # processo PAI (o reloader), mas quem atende e o filho (o
+                # worker do multiprocessing). Se o pai ja morreu, matar so ele
+                # nao faz nada e o worker orfao continua respondendo na 8000,
+                # sem tunel para o banco: o login falha sem erro claro.
+                Get-CimInstance Win32_Process -Filter "ParentProcessId = $staleId" -ErrorAction SilentlyContinue | ForEach-Object {
+                    Write-Host "Matando processo filho preso na porta $port ($($_.Name), PID $($_.ProcessId))..." -ForegroundColor Yellow
+                    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
                 }
             }
         }
