@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Buildings, ChartBar, Lock, User, Warning } from "@phosphor-icons/react";
+import { Buildings, ChartBar, Lock, Megaphone, User, Warning } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { formatBRL } from "@/lib/currency";
@@ -269,7 +269,156 @@ function Empresa() {
   );
 }
 
+const NOME_EVENTO = {
+  LeadSubmitted: "Lead", QualifiedLead: "Lead qualificado",
+  InitiateCheckout: "Proposta", Purchase: "Compra",
+};
+
+/**
+ * Conversions API do Meta: o funil devolve ao Meta quem virou lead e quem
+ * comprou, para a campanha otimizar pelo perfil do comprador e não só por
+ * quem manda mensagem. Qual etapa dispara qual evento fica na configuração do
+ * funil; aqui fica a conexão.
+ */
+function MetaConversoes() {
+  const [cfg, setCfg] = useState(null);
+  const [form, setForm] = useState({ ativo: false, dataset_id: "", token: "", test_event_code: "" });
+  const [salvando, setSalvando] = useState(false);
+  const [testando, setTestando] = useState(false);
+  const [eventos, setEventos] = useState([]);
+
+  const carregarEventos = () =>
+    api.get("/meta-conversoes/eventos").then((r) => setEventos(r.data.items)).catch(() => {});
+
+  useEffect(() => {
+    api.get("/meta-conversoes").then((r) => {
+      setCfg(r.data);
+      setForm({ ativo: r.data.ativo, dataset_id: r.data.dataset_id, token: "",
+                test_event_code: r.data.test_event_code });
+    }).catch(() => setCfg(false));
+    carregarEventos();
+  }, []);
+
+  const salvar = async (e) => {
+    e.preventDefault();
+    setSalvando(true);
+    try {
+      // Token em branco = manter o gravado. Para apagar existe o link próprio.
+      const corpo = { ...form, token: form.token.trim() ? form.token.trim() : undefined };
+      const r = await api.put("/meta-conversoes", corpo);
+      setCfg(r.data);
+      setForm({ ...form, token: "" });
+      toast.success(form.ativo ? "Integração com o Meta ligada" : "Configuração salva");
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Não foi possível salvar");
+    } finally {
+      setSalvando(false);
+    }
+  };
+
+  const apagarToken = async () => {
+    try {
+      const r = await api.put("/meta-conversoes", { ...form, token: "" });
+      setCfg(r.data);
+      toast.success("Token removido: passa a usar o da conexão de WhatsApp");
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Não foi possível remover");
+    }
+  };
+
+  const testar = async () => {
+    setTestando(true);
+    try {
+      await api.post("/meta-conversoes/testar");
+      toast.success("O Meta recebeu o evento de teste. Confira em Testar eventos.");
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Falha no teste");
+    } finally {
+      setTestando(false);
+    }
+  };
+
+  if (cfg === false) return null;
+
+  return (
+    <Bloco icone={Megaphone} titulo="Meta Ads · conversões do funil"
+      hint={`Quando um ${t("negócio")} entra numa etapa, o Meta recebe o evento dela (Lead, Lead qualificado, Compra com valor). Com isso a campanha passa a procurar gente com o perfil de quem compra, não só de quem manda mensagem. Qual etapa envia qual evento se escolhe em Funil → Etapas.`}>
+      {!cfg ? <div className="text-sm text-ink-3">Carregando…</div> : (
+        <>
+          <form onSubmit={salvar} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Campo label="ID do dataset (pixel)"
+              hint="Gerenciador de Eventos → Fontes de dados → o número do conjunto de dados ligado ao seu WhatsApp.">
+              <input className="zz-input font-mono" inputMode="numeric" value={form.dataset_id}
+                data-testid="meta-dataset" placeholder="ex.: 123456789012345"
+                onChange={(e) => setForm({ ...form, dataset_id: e.target.value })} />
+            </Campo>
+            <Campo label="Token de acesso"
+              hint={cfg.token
+                ? <>Gravado: <span className="font-mono">{cfg.token}</span> · <button type="button" className="underline" onClick={apagarToken}>remover</button></>
+                : "Opcional. Em branco, usa o token da conexão de WhatsApp (precisa da permissão de eventos)."}>
+              <input type="password" className="zz-input font-mono" value={form.token}
+                autoComplete="off" data-testid="meta-token"
+                placeholder={cfg.token ? "manter o gravado" : "EAA…"}
+                onChange={(e) => setForm({ ...form, token: e.target.value })} />
+            </Campo>
+            <Campo label="Código de teste"
+              hint="Opcional. Com ele, os eventos aparecem só em Testar eventos e não contam nos resultados. Apague quando terminar de testar.">
+              <input className="zz-input font-mono" value={form.test_event_code}
+                data-testid="meta-teste" placeholder="TEST12345"
+                onChange={(e) => setForm({ ...form, test_event_code: e.target.value })} />
+            </Campo>
+            <Campo label="Envio">
+              <label className="flex items-center gap-2 text-sm pt-2">
+                <input type="checkbox" checked={form.ativo} data-testid="meta-ativo"
+                  onChange={(e) => setForm({ ...form, ativo: e.target.checked })} />
+                Enviar eventos do funil ao Meta
+              </label>
+            </Campo>
+            <div className="sm:col-span-2 flex justify-end gap-2">
+              <button type="button" className="zz-btn zz-btn-secondary" onClick={testar}
+                disabled={testando || !cfg.dataset_id} data-testid="meta-testar">
+                {testando ? "Testando…" : "Enviar evento de teste"}
+              </button>
+              <button type="submit" className="zz-btn" disabled={salvando} data-testid="meta-salvar">
+                {salvando ? "Salvando…" : "Salvar"}
+              </button>
+            </div>
+          </form>
+
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink-2">Últimos envios</h3>
+              <button type="button" className="text-xs underline text-ink-3" onClick={carregarEventos}>atualizar</button>
+            </div>
+            {eventos.length === 0 ? (
+              <div className="text-xs text-ink-3">Nenhum evento enviado ainda.</div>
+            ) : (
+              <div className="border border-line rounded-lg divide-y divide-line text-xs" data-testid="meta-eventos">
+                {eventos.map((ev) => (
+                  <div key={ev.id} className="flex items-center gap-3 px-3 py-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${ev.status === "enviado" ? "bg-success" : "bg-danger"}`} />
+                    <span className="font-semibold w-28 shrink-0">{NOME_EVENTO[ev.evento] || ev.evento}</span>
+                    <span className="text-ink-2 truncate flex-1">
+                      {ev.etapa}
+                      {ev.valor ? ` · ${formatBRL(ev.valor)}` : ""}
+                      {" · "}{ev.canal === "business_messaging" ? "clique do anúncio" : "telefone/e-mail"}
+                      {ev.teste ? " · teste" : ""}
+                      {ev.erro && <span className="text-danger"> · {ev.erro}</span>}
+                    </span>
+                    <span className="text-ink-3 shrink-0">{new Date(ev.created_at).toLocaleString("pt-BR")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </Bloco>
+  );
+}
+
 export default function SettingsPage() {
+  const { user } = useAuth();
   return (
     <div className="zz-page-form" data-testid="settings-page">
       <div className="mb-8">
@@ -277,6 +426,7 @@ export default function SettingsPage() {
       </div>
       <MinhaConta />
       <Empresa />
+      {user?.role === "tenant_admin" && <MetaConversoes />}
     </div>
   );
 }

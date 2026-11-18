@@ -34,6 +34,7 @@ from routes.settings import router as settings_router
 from routes.scheduling import router as scheduling_router
 from routes.voz import router as voz_router
 from routes.formularios import router as formularios_router
+from routes.meta_conversoes import router as meta_conversoes_router
 import agenda_worker
 import campaign_runner
 import health_monitor
@@ -158,6 +159,7 @@ app.include_router(plans_router)
 app.include_router(media_router)
 app.include_router(campaigns_router)
 app.include_router(deals_router)
+app.include_router(meta_conversoes_router)
 app.include_router(activities_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
@@ -252,6 +254,11 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # Histórico do negócio. `_id` entra porque entra no sort: dois eventos do
     # mesmo salvamento compartilham o `created_at`.
     ("deal_events", [("tenant_id", 1), ("deal_id", 1), ("created_at", -1), ("_id", -1)], {}),
+    # Conversions API: um documento por empresa, e o registro de envios, que
+    # é consultado a cada mudança de etapa ("este evento já saiu?").
+    ("meta_conversoes", [("tenant_id", 1)], {"unique": True}),
+    ("meta_eventos", [("tenant_id", 1), ("deal_id", 1), ("evento", 1), ("status", 1)], {}),
+    ("meta_eventos", [("tenant_id", 1), ("created_at", -1)], {}),
 
     # A agenda de um responsável: pendentes, na ordem de vencimento. É a
     # consulta que abre a tela de Atividades e alimenta o selo do menu.

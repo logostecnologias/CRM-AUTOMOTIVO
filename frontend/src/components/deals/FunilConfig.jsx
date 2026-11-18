@@ -8,6 +8,24 @@ import { t } from "@/lib/textos";
 const CORES = ["#64748B", "#2563EB", "#F97316", "#8B5CF6", "#10B981", "#EF4444", "#0F172A", "#F59E0B"];
 const TIPOS = [["aberta", "Em aberto"], ["ganho", "Ganho"], ["perdido", "Perdido"]];
 
+// Evento enviado ao Meta quando o negócio entra na etapa (ver
+// backend/meta_conversoes.py). Só tem efeito com a integração ligada em Ajustes.
+const EVENTOS_META = [
+  ["", "Meta: nenhum"],
+  ["LeadSubmitted", "Meta: Lead"],
+  ["QualifiedLead", "Meta: Lead qualificado"],
+  ["InitiateCheckout", "Meta: Proposta"],
+  ["Purchase", "Meta: Compra"],
+];
+
+/** Mesmo padrão do backend para etapa que nunca foi configurada: a primeira
+ * etapa em aberto é o lead, a de ganho é a compra. */
+function eventoPadrao(etapa, i) {
+  if (etapa.tipo === "ganho") return "Purchase";
+  if (i === 0 && etapa.tipo === "aberta") return "LeadSubmitted";
+  return "";
+}
+
 export default function FunilConfig({ pipeline, onClose, onSaved }) {
   const [nome, setNome] = useState(pipeline.nome);
   const [etapas, setEtapas] = useState([]);
@@ -16,7 +34,9 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
 
   useEffect(() => {
     setNome(pipeline.nome);
-    setEtapas((pipeline.etapas || []).map((e) => ({ ...e })));
+    setEtapas((pipeline.etapas || []).map((e, i) => ({
+      ...e, evento_meta: "evento_meta" in e ? e.evento_meta || "" : eventoPadrao(e, i),
+    })));
     setConflito(null);
     setMoverPara("");
   }, [pipeline]);
@@ -33,7 +53,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
   };
 
   const adicionar = () =>
-    setEtapas([...etapas, { id: null, nome: "Nova etapa", cor: CORES[0], tipo: "aberta" }]);
+    setEtapas([...etapas, { id: null, nome: "Nova etapa", cor: CORES[0], tipo: "aberta", evento_meta: "" }]);
 
   const remover = (i) => setEtapas(etapas.filter((_, j) => j !== i));
 
@@ -41,7 +61,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
   const salvar = async () => {
     try {
       await api.patch(`/pipelines/${pipeline.id}`,
-        { nome, etapas: etapas.map(({ id, nome: n, cor, tipo }) => ({ id, nome: n, cor, tipo })) },
+        { nome, etapas: etapas.map(({ id, nome: n, cor, tipo, evento_meta }) => ({ id, nome: n, cor, tipo, evento_meta: evento_meta || "" })) },
         { params: moverPara ? { mover_para: moverPara } : {} });
       toast.success(t("Funil salvo"));
       setConflito(null);
@@ -60,7 +80,7 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
 
   return (
     <Modal titulo={`Etapas do ${t("funil")}`} largo
-      descricao={`A etapa marcada como ${t("Ganho")} ou ${t("Perdido")} é a que fecha o ${t("negócio")} e alimenta os relatórios de conversão.`}
+      descricao={`A etapa marcada como ${t("Ganho")} ou ${t("Perdido")} é a que fecha o ${t("negócio")} e alimenta os relatórios de conversão. O evento do Meta é enviado quando o ${t("negócio")} entra na etapa, se a integração estiver ligada em Ajustes.`}
       onFechar={onClose} onSalvar={salvar} testId="funil-config"
       rodape={(
         <button type="button" onClick={adicionar} className="zz-btn zz-btn-secondary mr-auto"
@@ -92,6 +112,12 @@ export default function FunilConfig({ pipeline, onClose, onSaved }) {
             <select className="zz-input h-8 text-xs w-32" value={etapa.tipo}
               onChange={(ev) => alterar(i, { tipo: ev.target.value })}>
               {TIPOS.map(([v, r]) => <option key={v} value={v}>{t(r)}</option>)}
+            </select>
+            <select className="zz-input h-8 text-xs w-40" value={etapa.evento_meta || ""}
+              title="Evento enviado ao Meta quando o negócio entra nesta etapa"
+              data-testid={`etapa-evento-meta-${i}`}
+              onChange={(ev) => alterar(i, { evento_meta: ev.target.value })}>
+              {EVENTOS_META.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
             </select>
             <div className="flex gap-0.5">
               {CORES.map((c) => (

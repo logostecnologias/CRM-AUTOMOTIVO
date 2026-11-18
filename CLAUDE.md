@@ -156,6 +156,15 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - **Trocar o tipo de uma etapa leva os negócios dela junto**, cada um por `aplicar_etapa` e com o próprio `ciclo_dias`. Antes, transformar "Fechamento" em etapa de Ganho deixava os cartões dali em `aberto`: na coluna de ganho, fora de todo relatório de venda
 - `deals.funis_da_empresa` é o único lugar que semeia o funil padrão: a tela e o agente de IA (que precisa de funil mesmo sem ninguém ter aberto a tela) leem por ele
 
+### Funil → Meta Ads: Conversions API (18/11/2026)
+- **Para quê:** o anúncio de "Clique para WhatsApp" otimiza por conversa iniciada. Devolver ao Meta quem virou lead e quem comprou (com valor) faz a campanha procurar o perfil do comprador. `meta_conversoes.py` + `routes/meta_conversoes.py`; configuração em Ajustes (só admin), um documento por empresa em `meta_conversoes` (dataset, token cifrado opcional, código de teste)
+- **Gatilho único: `deals.registrar_evento`** com tipo `criado`/`etapa`/`ganho`/`perdido`, que agenda `meta_conversoes.agendar` em tarefa própria. Tela, agente de IA e formulário passam todos por ali depois de gravar o negócio. A troca de tipo de etapa em massa (`update_pipeline`) **não** dispara: reclassificar coluna não é conversão
+- **Evento por etapa** em `etapa.evento_meta` (`LeadSubmitted`, `QualifiedLead`, `InitiateCheckout`, `Purchase` ou vazio = nenhum). Chave ausente = padrão: primeira etapa aberta é Lead, etapa de ganho é Purchase. Perdido não tem evento por padrão: o Meta não tem sinal negativo que afaste um perfil
+- **O clique do anúncio decide o formato.** A primeira mensagem vinda de anúncio traz `referral.ctwa_clid`; o webhook grava em `contacts.anuncio` (o mais recente vale, com `waba_id` da conexão e data). Clique com menos de 7 dias → `action_source=business_messaging` ligado ao clique; senão → `system_generated` com telefone/e-mail em SHA-256, `external_id` e `fbc` do `fbclid` do formulário de site, quando o negócio veio de um
+- **Uma vez por (negócio, evento):** `event_id` fixo (`{deal_id}:{evento}`) e o registro `meta_eventos` com status `enviado` barram o reenvio. Arrastar de "Ganho" para trás e de volta não vira duas vendas
+- **Nunca levanta**: falha do Meta vai para `meta_eventos` com o erro, e a tela de Ajustes mostra os últimos envios. Sem token próprio usa o da conexão de WhatsApp, que precisa da permissão `whatsapp_business_manage_events`
+- **Verificado só por teste** (`test_meta_conversoes.py`, `_request` espionado). Falta um envio real a um dataset e conferir em "Testar eventos" do Gerenciador de Eventos
+
 
 ### Atividades e follow-up
 - Ficha e funil guardam o que **já** aconteceu; atividade guarda o que ainda precisa acontecer. Sem isso o próximo passo mora na cabeça do vendedor, e o CRM vira cadastro morto

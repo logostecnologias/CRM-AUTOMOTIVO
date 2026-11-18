@@ -144,6 +144,11 @@ async def registrar_evento(db, deal: dict, tipo: str, autor: dict, **extra):
         })
     except Exception as e:
         logger.warning("Falha ao registrar evento %s do negócio %s: %s", tipo, deal.get("id"), e)
+    # Entrada numa etapa (criação ou movimento) é o que o Meta precisa saber.
+    # Todo caminho que muda etapa passa por aqui, depois de gravar o negócio.
+    if tipo in ("criado", "etapa", "ganho", "perdido"):
+        import meta_conversoes  # tardio: o módulo puxa o cliente do WhatsApp
+        meta_conversoes.agendar(db, deal["tenant_id"], deal["id"])
 
 
 async def atribuir_origem(db, tenant_id: str, contact_id: str,

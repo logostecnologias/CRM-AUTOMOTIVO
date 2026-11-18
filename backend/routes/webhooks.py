@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 
+import meta_conversoes
 from db import get_db
 from flow_runtime import handle_incoming_message
 
@@ -254,8 +255,14 @@ async def _processar_change(db, value: dict, bg: BackgroundTasks) -> int:
         texto = _texto_da_mensagem(msg, midia, escolha)
         if not texto and not midia and not escolha:
             continue
+        # Mensagem vinda de anúncio "Clique para WhatsApp" traz `referral` com
+        # o id do clique. É ele que liga a venda, lá no funil, ao anúncio que
+        # a trouxe (ver meta_conversoes). Só existe nesta mensagem: perdido
+        # aqui, não há como recuperar depois.
+        anuncio = meta_conversoes.anuncio_do_referral(msg.get("referral"), conn.get("waba_id"))
+        extra = {"anuncio": anuncio} if anuncio else {}
         bg.add_task(handle_incoming_message, tenant_id, numero, texto, wamid,
-                    conn_id, perfis.get(numero), midia, escolha)
+                    conn_id, perfis.get(numero), midia, escolha, **extra)
         eventos += 1
 
     for status in value.get("statuses") or []:

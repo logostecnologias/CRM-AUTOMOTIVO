@@ -208,6 +208,8 @@ COLECOES_DA_EMPRESA = (
     "pipelines",
     "deals",
     "deal_events",
+    "meta_conversoes",
+    "meta_eventos",
     "activities",
     # Agenda: grade, catálogo e o que estava marcado. O `agenda_worker` varre
     # os agendamentos de todas as empresas de uma vez, então lembrete de

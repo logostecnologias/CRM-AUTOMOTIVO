@@ -583,7 +583,7 @@ async def _uma_por_vez(chave: str):
 async def handle_incoming_message(tenant_id: str, from_number: str, text: str,
                                   message_id: str, connection_id: str | None = None,
                                   push_name: str | None = None, media: dict | None = None,
-                                  escolha: dict | None = None):
+                                  escolha: dict | None = None, anuncio: dict | None = None):
     """Ponto de entrada do webhook, uma mensagem por vez em cada conversa.
 
     A chave é (empresa, conexão, número), que é a mesma identidade que
@@ -592,10 +592,10 @@ async def handle_incoming_message(tenant_id: str, from_number: str, text: str,
     """
     async with _uma_por_vez(f"{tenant_id}:{connection_id or '-'}:{from_number}"):
         return await _processar_mensagem(tenant_id, from_number, text, message_id,
-                                         connection_id, push_name, media, escolha)
+                                         connection_id, push_name, media, escolha, anuncio)
 
 
-async def _processar_mensagem(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None, escolha: dict | None = None):
+async def _processar_mensagem(tenant_id: str, from_number: str, text: str, message_id: str, connection_id: str | None = None, push_name: str | None = None, media: dict | None = None, escolha: dict | None = None, anuncio: dict | None = None):
     """Called from webhook. Advances the conversation for this contact.
 
     `connection_id` identifies exactly which whatsapp_connection (and thus
@@ -655,9 +655,11 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             "nome": push_name or from_number,
             # Origem preenchida na criação: é campo da ficha, e depois não há
             # como saber se o contato entrou por mensagem ou por cadastro.
-            "origem": "mensagem recebida",
+            "origem": "anúncio do Meta" if anuncio else "mensagem recebida",
             "created_at": _now(),
         }
+        if anuncio:
+            contact["anuncio"] = anuncio
         await db.contacts.insert_one(contact)
     else:
         updates = {}
@@ -665,6 +667,11 @@ async def _processar_mensagem(tenant_id: str, from_number: str, text: str, messa
             updates["nome"] = push_name
         if contact.get("wa_id") != from_number:
             updates["wa_id"] = from_number
+        # O clique mais recente vale: é ele que o Meta atribui ao anúncio, e
+        # quem já era contato e voltou por um anúncio é exatamente o caso que
+        # a campanha quer contar.
+        if anuncio:
+            updates["anuncio"] = anuncio
         if updates:
             await db.contacts.update_one({"id": contact["id"]}, {"$set": updates})
             contact.update(updates)

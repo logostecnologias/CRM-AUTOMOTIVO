@@ -31,6 +31,10 @@ class EtapaIn(BaseModel):
     nome: str
     cor: str = Field(default="#64748B", pattern=r"^#[0-9A-Fa-f]{6}$")
     tipo: str = Field(default="aberta", pattern="^(aberta|ganho|perdido)$")
+    # Evento do Meta que a etapa dispara (ver meta_conversoes). Ausente = o
+    # padrão da etapa; vazio = nenhum, escolhido por quem configurou.
+    evento_meta: str | None = Field(
+        default=None, pattern="^(|LeadSubmitted|QualifiedLead|InitiateCheckout|Purchase)$")
 
 
 class PipelineIn(BaseModel):
@@ -100,11 +104,14 @@ async def list_pipelines(user=Depends(require_tenant_member)):
 
 
 def _monta_etapas(entradas: list[EtapaIn]) -> list[dict]:
-    return [
-        {"id": e.id or str(uuid.uuid4()), "nome": e.nome.strip() or "Etapa",
-         "cor": e.cor, "tipo": e.tipo, "ordem": i}
-        for i, e in enumerate(entradas)
-    ]
+    etapas = []
+    for i, e in enumerate(entradas):
+        etapa = {"id": e.id or str(uuid.uuid4()), "nome": e.nome.strip() or "Etapa",
+                 "cor": e.cor, "tipo": e.tipo, "ordem": i}
+        if e.evento_meta is not None:
+            etapa["evento_meta"] = e.evento_meta
+        etapas.append(etapa)
+    return etapas
 
 
 @router.post("/pipelines")
