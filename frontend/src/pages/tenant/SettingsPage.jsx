@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Buildings, ChartBar, Lock, Megaphone, User, Warning } from "@phosphor-icons/react";
+import { Buildings, Lock, Megaphone, User, Warning } from "@phosphor-icons/react";
 import api from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { formatBRL } from "@/lib/currency";
@@ -8,9 +8,6 @@ import { rotuloPapel } from "@/lib/papeis";
 import { t } from "@/lib/textos";
 
 const SENHA_MINIMA = 8;
-
-/** Acima daqui a barra muda de cor: o teto deixa de ser informação e vira aviso. */
-const ALERTA = 0.8;
 
 function Bloco({ icone: Icone, titulo, hint, children }) {
   return (
@@ -42,50 +39,6 @@ function Campo({ label, children, hint }) {
  * vazia sugeriria um teto que não existe, que é justamente o que esta tela
  * veio corrigir.
  */
-function LinhaUso({ linha }) {
-  const { usado, limite, label, janela, nota } = linha;
-  const ilimitado = limite === null || limite === undefined;
-  const pct = ilimitado ? 0 : Math.min(100, Math.round((usado / limite) * 100));
-  const estourou = !ilimitado && usado >= limite;
-  const perto = !ilimitado && !estourou && usado / limite >= ALERTA;
-  const cor = estourou ? "bg-danger" : perto ? "bg-warning" : "bg-brand";
-
-  return (
-    <div data-testid={`uso-${linha.chave}`}>
-      <div className="flex items-baseline justify-between gap-3 mb-1">
-        <span className="text-sm text-ink">
-          {label}
-          {janela && <span className="text-ink-3 text-xs"> · no {janela}</span>}
-        </span>
-        <span className="text-xs font-mono text-ink-2 shrink-0">
-          {usado.toLocaleString("pt-BR")}{" "}
-          <span className="text-ink-3">
-            {ilimitado ? "· ilimitado" : `de ${limite.toLocaleString("pt-BR")}`}
-          </span>
-        </span>
-      </div>
-
-      {!ilimitado && (
-        <div className="h-2 bg-surface-3 border border-line rounded-full overflow-hidden">
-          <div className={`h-full ${cor}`} style={{ width: `${pct}%` }} />
-        </div>
-      )}
-
-      {(estourou || perto || nota) && (
-        <div className={`text-[10px] mt-1 ${
-          estourou ? "text-danger font-bold" : perto ? "text-warning" : "text-ink-3"
-        }`}>
-          {estourou
-            ? "Limite atingido — novas criações são recusadas."
-            : perto
-              ? "Perto do limite do plano."
-              : nota}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MinhaConta() {
   const { user, refresh, impersonatedFrom } = useAuth();
   const [nome, setNome] = useState(user?.name || "");
@@ -198,14 +151,6 @@ function MinhaConta() {
   );
 }
 
-function retencaoLabel(plano) {
-  if (!plano) return "padrão do servidor";
-  const d = plano.retencao_midia_dias;
-  if (d === null || d === undefined) return "padrão do servidor";
-  if (d === 0) return "sem expiração";
-  return `${d} dias`;
-}
-
 function Empresa() {
   const [dados, setDados] = useState(null);
   const [erro, setErro] = useState(null);
@@ -223,7 +168,7 @@ function Empresa() {
     return <Bloco icone={Buildings} titulo={t("Empresa")}><div className="text-sm text-ink-3">Carregando…</div></Bloco>;
   }
 
-  const { empresa, plano, uso } = dados;
+  const { empresa } = dados;
 
   return (
     <>
@@ -237,17 +182,9 @@ function Empresa() {
             <span className="text-ink-3">Cliente desde</span>
             <span>{empresa.criada_em ? new Date(empresa.criada_em).toLocaleDateString("pt-BR") : "—"}</span>
           </div>
-          <div className="flex justify-between border-b border-line pb-2">
-            <span className="text-ink-3">Plano</span>
-            <span data-testid="empresa-plano">
-              {plano
-                ? <>{plano.nome} <span className="text-ink-3">· {formatBRL(plano.preco_mensal)}/mês</span></>
-                : <span className="text-ink-3">nenhum plano vinculado</span>}
-            </span>
-          </div>
           <div className="flex justify-between">
-            <span className="text-ink-3">Retenção de mídia</span>
-            <span>{retencaoLabel(plano)}</span>
+            <span className="text-ink-3">Situação</span>
+            <span>{empresa.status === "active" ? "Ativa" : "Suspensa"}</span>
           </div>
         </div>
 
@@ -259,12 +196,6 @@ function Empresa() {
         )}
       </Bloco>
 
-      <Bloco icone={ChartBar} titulo="Uso do plano"
-        hint="O que já foi consumido de cada limite. Ao bater o teto a criação é recusada — este painel existe para você ver isso chegando.">
-        <div className="space-y-4">
-          {uso.map((l) => <LinhaUso key={l.chave} linha={l} />)}
-        </div>
-      </Bloco>
     </>
   );
 }

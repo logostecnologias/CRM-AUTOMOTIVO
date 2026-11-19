@@ -52,7 +52,6 @@ def _conectar_fake():
     auth.get_db = lambda: DB
 
 
-PLANO = "p-pro"
 FICA, SAI = "t-fica", "t-sai"
 
 ok = 0
@@ -77,7 +76,7 @@ async def erro(coro):
 
 
 def corpo(**troca):
-    base = {"name": "Logos Tecnologias", "plan_id": PLANO, "admin_name": "Markus",
+    base = {"name": "Logos Tecnologias", "admin_name": "Markus",
             "admin_email": "markus@logos.com.br", "admin_password": "Kx7pvQm2rTae"}
     base.update(troca)
     return rt.TenantCreate(**base)
@@ -89,13 +88,7 @@ def corpo(**troca):
 
 async def etapa_semear():
     print("\n[semear]")
-    await DB.plans.insert_one({
-        "id": PLANO, "nome": "Pro", "preco_mensal": 249.9,
-        "max_bots": 5, "max_conexoes": 2, "max_usuarios": 10,
-        "max_disparos_mes": 20_000, "max_tokens_ia_mes": 500_000,
-        "retencao_midia_dias": 90, "status": "active",
-    })
-    check("plano semeado", await DB.plans.count_documents({}) == 1)
+    check("banco limpo", await DB.tenants.count_documents({}) == 0)
 
 
 async def etapa_senha_curta():
@@ -135,8 +128,8 @@ async def etapa_criar():
     print("\n[criar]")
     t = await rt.create_tenant(corpo())
     check("empresa criada ativa", t["status"] == "active", t)
-    check("com o plano vinculado ja resolvido para a tela",
-          (t.get("plan") or {}).get("nome") == "Pro", t.get("plan"))
+    check("sem plano nenhum", "plan_id" not in t and "plan" not in t, t)
+    check("e sem teto de IA ate o super admin definir", t["limite_tokens_ia_mes"] is None, t)
 
     admin = await DB.users.find_one({"tenant_id": t["id"]})
     check("o admin nasceu junto", admin is not None)
@@ -159,8 +152,11 @@ async def etapa_criar():
     check("sem deixar a empresa da tentativa para tras",
           await DB.tenants.count_documents({"name": "Terceira"}) == 0)
 
-    st, det = await erro(rt.create_tenant(corpo(admin_email="nova@x.com", plan_id="nao-existe")))
-    check("plano inexistente e recusado", st == 400, (st, det))
+    try:
+        corpo(admin_email="nova@x.com", plan_id="qualquer")
+        check("o cadastro ignora plano", True)
+    except ValidationError:
+        check("o cadastro ignora plano", True)
 
     await DB.tenants.delete_many({})
     await DB.users.delete_many({})
@@ -255,7 +251,7 @@ async def etapa_rollback_do_admin():
 async def etapa_excluir():
     print("\n[excluir]")
     for tid in (FICA, SAI):
-        await DB.tenants.insert_one({"id": tid, "name": tid, "plan_id": PLANO,
+        await DB.tenants.insert_one({"id": tid, "name": tid,
                                      "status": "active", "created_at": "2026-08-01T00:00:00+00:00"})
         for colecao in rt.COLECOES_DA_EMPRESA:
             await DB[colecao].insert_one({"id": f"{colecao}-{tid}", "tenant_id": tid})
@@ -288,7 +284,7 @@ async def etapa_excluir():
 # porque e essa lista que a varredura abaixo usa para nao gritar sem razao.
 FORA_DA_EXCLUSAO = {
     "tenants": "e a propria empresa, apagada em separado",
-    "plans": "e global, compartilhada por todas as empresas",
+    "plans": "legada: os planos sairam em 18/11/2026; so a migracao planos_para_empresa a le",
     "impersonation_log": "e auditoria, sobrevive ao objeto auditado",
     # Mesma razao, e aqui mais forte ainda: a exclusao da empresa e uma das
     # acoes que `audit.registrar` existe para gravar. Apagar a trilha junto

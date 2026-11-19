@@ -15,7 +15,7 @@ credencial na empresa forçaria os dois a dividirem uma chave só.
 
 **Duas origens.** A chave do próprio agente vem primeiro, e aí o consumo é do
 cliente e não tem teto nosso. Sem ela, cai na chave da plataforma, com o
-consumo medido e limitado pelo plano — é o que faz o agente funcionar para quem
+consumo medido e limitado pelo teto da empresa — é o que faz o agente funcionar para quem
 nunca ouviu falar de token.
 
 **O consumo é gravado sempre**, nas duas origens. Na chave da plataforma
@@ -71,7 +71,7 @@ async def resolver_credencial(db, tenant_id: str, agente: dict,
     """Qual conta paga a resposta deste agente. A dele vem primeiro.
 
     Levanta 400/403 com texto que a tela pode mostrar — quem chama não precisa
-    distinguir "não configurou" de "estourou o plano".
+    distinguir "não configurou" de "estourou o teto".
 
     Credencial marcada como `erro` **não** é usada: já se sabe que ela não
     funciona, e insistir só produz a mesma falha mais devagar. Cai na chave da
@@ -102,35 +102,35 @@ async def resolver_credencial(db, tenant_id: str, agente: dict,
 
 
 # ---------------------------------------------------------------------------
-# Cota do plano (só vale para a chave da plataforma)
+# Teto de IA da empresa (só vale para a chave da plataforma)
 # ---------------------------------------------------------------------------
 
 async def _checar_cota(db, tenant_id: str):
     """Teto de tokens no mês, quando quem paga somos nós.
 
-    Não entra na tabela `LIMITS` do `plan_limits.py` pelo mesmo motivo que
-    `max_disparos_mes` não entra: aquele helper conta documentos existentes por
-    tenant, e este limite é sobre uma janela de tempo.
+    Os planos saíram em 18/11/2026; o teto ficou, como campo da própria
+    empresa (`tenants.limite_tokens_ia_mes`), definido pelo super admin na
+    ficha. Nulo ou 0 é ilimitado.
+
+    Conta só o consumo de origem `plataforma`: o que a empresa gasta na conta
+    própria dela não é custo nosso, e não pode comer o teto que existe para
+    proteger o nosso. A ficha lê o mesmo número (`consumo_do_mes` com
+    `origem`), então tela e recusa não divergem.
 
     Conta tokens, e não mensagens, porque é token que custa: uma conversa longa
     com base de conhecimento grande consome dez vezes o de uma pergunta seca, e
     um teto por mensagem cobraria as duas igual.
     """
-    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "plan_id": 1})
-    if not tenant or not tenant.get("plan_id"):
-        return
-    plano = await db.plans.find_one({"id": tenant["plan_id"]}, {"_id": 0})
-    if not plano:
-        return
-    teto = plano.get("max_tokens_ia_mes")
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "limite_tokens_ia_mes": 1})
+    teto = (tenant or {}).get("limite_tokens_ia_mes")
     if not teto:  # None ou 0 = ilimitado
         return
-    usados = await consumo_do_mes(db, tenant_id)
+    usados = await consumo_do_mes(db, tenant_id, origem=ORIGEM_PLATAFORMA)
     if usados["tokens"] >= teto:
         raise HTTPException(
             status_code=403,
             detail=(
-                f"Limite de IA do plano \"{plano['nome']}\" atingido "
+                "Limite mensal de IA da empresa atingido "
                 f"({usados['tokens']:,} de {teto:,} tokens no mês). "
                 "Informe uma chave de IA própria no agente para continuar sem limite."
             ).replace(",", "."),
@@ -181,15 +181,22 @@ async def registrar_uso(db, tenant_id: str, origem: str, provedor: str,
         logger.warning("Falha ao registrar consumo de IA do tenant %s: %s", tenant_id, e)
 
 
-async def consumo_do_mes(db, tenant_id: str, mes: str | None = None) -> dict:
+async def consumo_do_mes(db, tenant_id: str, mes: str | None = None,
+                         origem: str | None = None) -> dict:
     """Total do mês corrente (ou do mês pedido), por empresa.
+
+    `origem` restringe a quem pagou (`plataforma` ou `cliente`): o teto de IA
+    da empresa conta só o que a plataforma pagou.
 
     Uma agregação, não uma contagem por modelo somada em Python: o que domina
     aqui é a ida e volta pelo túnel, não o volume de documentos.
     """
     mes = mes or _mes_atual()
+    filtro = {"tenant_id": tenant_id, "mes": mes}
+    if origem:
+        filtro["origem"] = origem
     cursor = db.ai_usage.aggregate([
-        {"$match": {"tenant_id": tenant_id, "mes": mes}},
+        {"$match": filtro},
         {"$group": {
             "_id": None,
             "chamadas": {"$sum": "$chamadas"},
@@ -223,7 +230,7 @@ async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str
 
     Com `ferramentas`, o consumo medido é o do **laço inteiro** (consultar a
     agenda e marcar são duas chamadas ao provedor, não uma): `ai_client` soma as
-    voltas antes de devolver, senão a cota do plano contaria menos do que a
+    voltas antes de devolver, senão o teto da empresa contaria menos do que a
     fatura cobra.
     """
     cred = await resolver_credencial(db, tenant_id, agente, propria)
@@ -270,12 +277,12 @@ async def resolver_transcricao(db, tenant_id: str, agente: dict) -> dict:
     Com `AI_TRANSCRICAO_KEY` configurada, é ela para todo mundo (16/10/2026):
     a transcrição passou a ser um serviço da plataforma, que não depende de o
     cliente ter uma chave da Groq ou da OpenAI no agente. Custa ~US$ 0,04 por
-    hora de áudio, e por isso não passa pela cota de tokens do plano: barrar a
+    hora de áudio, e por isso não passa pelo teto de tokens da empresa: barrar a
     nota de voz de um contato por um teto de outra unidade mandaria para a
     fila uma mensagem que a plataforma sabe ler.
 
     Sem ela, vale a chave do agente quando o provedor dela transcreve, e por
-    último a chave de conversa da plataforma, com a cota do plano.
+    último a chave de conversa da plataforma, com o teto da empresa.
 
     Levanta `ai_client.IAError` com texto para o histórico quando não há conta
     nenhuma: é o motivo que o atendente lê ao receber a conversa.

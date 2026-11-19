@@ -1,12 +1,11 @@
-"""Tela de Configurações da empresa: a própria conta e o plano contratado.
+"""Tela de Configurações da empresa: a própria conta e os dados da empresa.
 
-Duas coisas que não existiam em lugar nenhum:
+**Trocar a própria senha.** `/api/users` inteiro é `require_tenant_admin` e
+edita *outro* usuário — não havia caminho para alguém trocar a sua, nem
+conferência da senha atual.
 
-1. **Trocar a própria senha.** `/api/users` inteiro é `require_tenant_admin` e
-   edita *outro* usuário — não havia caminho para alguém trocar a sua, nem
-   conferência da senha atual.
-2. **Ver o plano.** Os cinco limites já eram aplicados, mas nenhum aparecia em
-   tela: o cliente descobria o teto levando um 403 ao criar o quarto robô.
+Até 18/11/2026 a tela também mostrava o plano contratado e o uso contra cada
+limite. Os planos saíram do sistema; a empresa fica só com os dados dela.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -14,7 +13,6 @@ from pydantic import BaseModel, Field
 from auth import (get_current_user, require_tenant_admin,
                   hash_password, verify_password)
 from db import get_db
-from plan_limits import uso_do_plano
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -90,28 +88,18 @@ async def trocar_senha(body: SenhaIn, user=Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# Empresa e plano
+# Empresa
 # ---------------------------------------------------------------------------
 
 @router.get("/empresa")
 async def empresa(user=Depends(require_tenant_admin)):
-    """Nome da empresa, plano e uso contra cada limite.
-
-    Uma chamada, não três: o painel mostra os três blocos juntos, e o que
-    domina aqui é a ida e volta pelo túnel SSH, não o volume.
-    """
+    """Nome, situação e data de cadastro da empresa."""
     db = get_db()
     tenant = await db.tenants.find_one(
-        {"id": user["tenant_id"]}, {"_id": 0, "id": 1, "name": 1, "status": 1,
-                                    "created_at": 1, "plan_id": 1}
+        {"id": user["tenant_id"]}, {"_id": 0, "id": 1, "name": 1, "status": 1, "created_at": 1}
     )
     if not tenant:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
-
-    plano = None
-    if tenant.get("plan_id"):
-        plano = await db.plans.find_one({"id": tenant["plan_id"]}, {"_id": 0})
-
     return {
         "empresa": {
             "id": tenant["id"],
@@ -119,10 +107,4 @@ async def empresa(user=Depends(require_tenant_admin)):
             "status": tenant.get("status"),
             "criada_em": tenant.get("created_at"),
         },
-        "plano": None if not plano else {
-            "nome": plano.get("nome"),
-            "preco_mensal": plano.get("preco_mensal", 0),
-            "retencao_midia_dias": plano.get("retencao_midia_dias"),
-        },
-        "uso": await uso_do_plano(db, user["tenant_id"], plano),
     }

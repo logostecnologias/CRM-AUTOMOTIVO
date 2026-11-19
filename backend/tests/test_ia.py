@@ -1,5 +1,5 @@
 """Teste da credencial de IA: cifra, validacao antes de gravar, resolucao
-(chave do agente x chave da plataforma), cota do plano e permissoes.
+(chave do agente x chave da plataforma), teto de IA da empresa e permissoes.
 
 A credencial e do AGENTE, nao da empresa — um cliente pode ter uma chave da
 Anthropic no agente de suporte e uma da OpenAI no de vendas.
@@ -342,12 +342,11 @@ async def etapa_medicao():
     check("medicao com modelo desconhecido nao levanta", True)
 
 
-async def etapa_cota_do_plano():
-    print("\n[cota do plano]")
-    await DB.plans.insert_one({"id": "p-1", "nome": "Essencial", "max_tokens_ia_mes": 1000})
-    await DB.tenants.update_one({"id": TENANT_B}, {"$set": {"plan_id": "p-1"}})
+async def etapa_teto_da_empresa():
+    print("\n[teto de IA da empresa]")
+    await DB.tenants.update_one({"id": TENANT_B}, {"$set": {"limite_tokens_ia_mes": 1000}})
     os.environ["AI_PLATFORM_KEY"] = "sk-plataforma"
-    # Agente sem chave propria: e ele que consome a cota do plano.
+    # Agente sem chave propria: e ele que consome o teto da empresa.
     sem_chave = {"id": "ag-sem", "nome": "Sem chave", "tenant_id": TENANT_B}
     agente_a = await DB.ai_agents.find_one({"id": AGENTE_A["id"]}, {"_id": 0})
 
@@ -356,27 +355,38 @@ async def etapa_cota_do_plano():
     check("abaixo do teto a plataforma responde",
           cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA)
 
-    # Estoura o teto.
+    # Consumo na conta propria da empresa nao come o teto da plataforma.
     grande = ai_client.Resposta(texto="x", modelo="gpt-5-nano",
                                 tokens_entrada=2000, tokens_saida=0)
+    await ai_runtime.registrar_uso(DB, TENANT_B, ai_runtime.ORIGEM_CLIENTE,
+                                   "openai", "gpt-5-nano", grande)
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave)
+    check("consumo na conta da empresa nao conta no teto",
+          cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA, cred)
+
+    # Estoura o teto com consumo pago pela plataforma.
     await ai_runtime.registrar_uso(DB, TENANT_B, ai_runtime.ORIGEM_PLATAFORMA,
                                    "openai", "gpt-5-nano", grande)
     st, det = await erro(ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave))
-    check("acima do teto o plano barra", st == 403, (st, det))
+    check("acima do teto a empresa e barrada", st == 403, (st, det))
     check("a mensagem sugere usar chave propria", "chave de IA propria" in det.replace("ó", "o"), det)
 
     # Agente com chave propria nao tem teto nosso, mesmo com a empresa estourada.
-    await DB.tenants.update_one({"id": TENANT_A}, {"$set": {"plan_id": "p-1"}})
-    await ai_runtime.registrar_uso(DB, TENANT_A, ai_runtime.ORIGEM_CLIENTE,
+    await DB.tenants.update_one({"id": TENANT_A}, {"$set": {"limite_tokens_ia_mes": 1000}})
+    await ai_runtime.registrar_uso(DB, TENANT_A, ai_runtime.ORIGEM_PLATAFORMA,
                                    "openai", "gpt-5-nano", grande)
     cred = await ai_runtime.resolver_credencial(DB, TENANT_A, agente_a)
-    check("chave propria nao tem teto do plano",
+    check("chave propria nao tem teto",
           cred["origem"] == ai_runtime.ORIGEM_CLIENTE, cred["origem"])
 
-    # Teto 0 = ilimitado.
-    await DB.plans.update_one({"id": "p-1"}, {"$set": {"max_tokens_ia_mes": 0}})
+    # Teto 0 = ilimitado; nulo tambem.
+    await DB.tenants.update_one({"id": TENANT_B}, {"$set": {"limite_tokens_ia_mes": 0}})
     cred = await ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave)
     check("teto 0 significa ilimitado",
+          cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA, cred)
+    await DB.tenants.update_one({"id": TENANT_B}, {"$set": {"limite_tokens_ia_mes": None}})
+    cred = await ai_runtime.resolver_credencial(DB, TENANT_B, sem_chave)
+    check("teto nulo significa ilimitado",
           cred["origem"] == ai_runtime.ORIGEM_PLATAFORMA, cred)
 
     os.environ.pop("AI_PLATFORM_KEY", None)
@@ -793,7 +803,7 @@ def test_suite():
         await etapa_teste_de_conexao()
         await etapa_resolucao_de_credencial()
         await etapa_medicao()
-        await etapa_cota_do_plano()
+        await etapa_teto_da_empresa()
         await etapa_barreira_de_permissao()
         await etapa_catalogo()
         await etapa_provedores_compativeis()

@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 import bcrypt
@@ -8,6 +9,8 @@ from pydantic import BaseModel, EmailStr
 
 from db import get_db
 import login_guard
+
+logger = logging.getLogger("zappzen.auth")
 
 JWT_ALGORITHM = "HS256"
 
@@ -247,6 +250,7 @@ async def login(body: LoginIn, response: Response, request: Request):
                                  user.get("tenant_id"), token_version=user.get("token_version", 0))
     refresh = create_refresh_token(user["id"], user.get("token_version", 0))
     _set_auth_cookies(response, access, refresh)
+    await _marcar_acesso(db, user["id"])
     return {
         "id": user["id"],
         "email": user["email"],
@@ -255,6 +259,21 @@ async def login(body: LoginIn, response: Response, request: Request):
         "tenant_id": user.get("tenant_id"),
         "marca": await _marca(db, user),
     }
+
+
+async def _marcar_acesso(db, user_id: str):
+    """Quando a pessoa usou o sistema pela última vez: login ou renovação da
+    sessão. É o que o super admin lê para saber se a equipe de uma empresa
+    ainda entra ("o cliente parou de usar?") sem precisar perguntar.
+
+    Nunca derruba o login: perder a marca é ruim, impedir a entrada é pior.
+    """
+    try:
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"ultimo_acesso": datetime.now(timezone.utc).isoformat()}})
+    except Exception:
+        logger.warning("Falha ao marcar último acesso de %s", user_id)
 
 
 @router.post("/logout")
@@ -306,6 +325,7 @@ async def refresh(request: Request, response: Response):
                                  user.get("tenant_id"), token_version=tv)
     novo_refresh = create_refresh_token(user["id"], tv)
     _set_auth_cookies(response, access, novo_refresh)
+    await _marcar_acesso(db, user["id"])
     return {"ok": True}
 
 

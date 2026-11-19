@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
 from pymongo.errors import DuplicateKeyError
@@ -9,7 +9,8 @@ from pymongo.errors import DuplicateKeyError
 from db import get_db
 from auth import (require_super_admin, hash_password, create_access_token,
                   create_refresh_token, _set_auth_cookies, _cookie_secure)
-from plan_limits import plan_excess, uso_do_plano
+import ai_runtime
+import campaigns as campanhas
 import plataforma
 import whatsapp_client as whatsapp
 import audit
@@ -29,10 +30,14 @@ Nome = Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max
 # A marca que o cliente da empresa vê: ver `marcas.py`.
 from marcas import Marca, MARCA_PADRAO  # noqa: E402
 
+# Os planos saíram em 18/11/2026. O que sobrou deles são dois campos da própria
+# empresa, definidos aqui pelo super admin: o teto de tokens de IA (custo da
+# chave da plataforma, ver `ai_runtime._checar_cota`) e a retenção de mídia
+# (ver `media_retention`). Nulo é "sem teto" / "padrão do servidor".
+
 
 class TenantCreate(BaseModel):
     name: Nome
-    plan_id: str | None = None
     admin_name: Nome
     admin_email: EmailStr
     admin_password: str = Field(min_length=SENHA_MIN, max_length=128)
@@ -40,74 +45,105 @@ class TenantCreate(BaseModel):
 
 
 class TenantUpdate(BaseModel):
-    name: str | None = None
-    plan_id: str | None = None
-    status: str | None = None
+    name: Nome | None = None
+    status: Literal["active", "suspended"] | None = None
     marca: Marca | None = None
+    # Enviado como `null` limpa o campo (sem teto / padrão do servidor). Por
+    # isso a rota lê só o que veio no corpo (`exclude_unset`), em vez de
+    # descartar os nulos.
+    limite_tokens_ia_mes: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    retencao_midia_dias: int | None = Field(default=None, ge=0, le=3650)
 
 
-async def _enrich_plan(db, tenants: list[dict]):
-    plan_ids = list({t["plan_id"] for t in tenants if t.get("plan_id")})
-    plans = {p["id"]: p async for p in db.plans.find({"id": {"$in": plan_ids}}, {"_id": 0})}
-    for t in tenants:
-        t["plan"] = plans.get(t.get("plan_id"))
-    return tenants
+class SenhaNova(BaseModel):
+    password: str = Field(min_length=SENHA_MIN, max_length=128)
 
 
 @router.get("/tenants")
 async def list_tenants(_=Depends(require_super_admin)):
     """Lista as empresas com a saúde de cada uma (ver `plataforma.saude`):
-    quem administra, WhatsApp no ar, movimento da semana e o que precisa de
-    atenção. Tudo em agregações agrupadas, nenhuma consulta por empresa."""
+    quem administra, WhatsApp no ar, movimento, leads, vendas, IA e o que
+    precisa de atenção. Tudo em agregações agrupadas, nenhuma consulta por
+    empresa."""
     db = get_db()
     tenants = await db.tenants.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    await _enrich_plan(db, tenants)
     por_id = await plataforma.saude(db, tenants)
     return [{**t, "saude": por_id.get(t["id"])} for t in tenants]
 
 
+async def _resumo(db, tenant_id: str) -> dict:
+    """Os números da operação de uma empresa, para a aba Resumo da ficha.
+    Contagens simples por `tenant_id`, em paralelo: é uma empresa só."""
+    q = {"tenant_id": tenant_id}
+    (contatos, abertos, veiculos, disponiveis, agentes, robos, campanhas_n,
+     disparos, conversas_abertas) = await asyncio.gather(
+        db.contacts.count_documents(q),
+        db.deals.count_documents({**q, "status": "aberto"}),
+        db.veiculos.count_documents(q),
+        db.veiculos.count_documents({**q, "status": "disponivel"}),
+        db.ai_agents.count_documents({**q, "ativo": {"$ne": False}, "modo": {"$ne": "desligado"}}),
+        db.bots.count_documents(q),
+        db.campaigns.count_documents(q),
+        campanhas.disparos_no_mes(db, tenant_id),
+        db.conversation_sessions.count_documents(
+            {**q, "status_atendimento": {"$in": ["aguardando", "em_atendimento"]}}),
+    )
+    return {
+        "contatos": contatos,
+        "negocios_abertos": abertos,
+        "veiculos": veiculos,
+        "veiculos_disponiveis": disponiveis,
+        "agentes_ativos": agentes,
+        "robos": robos,
+        "campanhas": campanhas_n,
+        "disparos_mes": disparos,
+        "conversas_abertas": conversas_abertas,
+    }
+
+
 @router.get("/tenants/{tenant_id}")
 async def tenant_detalhe(tenant_id: str, _=Depends(require_super_admin)):
-    """A ficha de uma empresa para o super admin: equipe com email, conexões e
-    uso do plano. O uso sai de `plan_limits.uso_do_plano`, o mesmo que o
-    cliente vê em Ajustes e o mesmo que barra: as duas telas não podem
-    divergir."""
+    """A ficha de uma empresa para o super admin: resumo da operação, série de
+    conversas, equipe com último acesso, conexões, consumo de IA contra o teto
+    e o histórico de ações (auditoria + modo suporte)."""
     db = get_db()
     tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
     if not tenant:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
-    await _enrich_plan(db, [tenant])
-    usuarios, conexoes, por_id, uso = await asyncio.gather(
+    usuarios, conexoes, por_id, resumo, serie, ia_mes, historico = await asyncio.gather(
         db.users.find({"tenant_id": tenant_id},
                       {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1,
-                       "status": 1, "created_at": 1}).sort("created_at", 1).to_list(500),
+                       "status": 1, "created_at": 1, "ultimo_acesso": 1})
+        .sort("created_at", 1).to_list(500),
         db.whatsapp_connections.find(
             {"tenant_id": tenant_id},
             {"_id": 0, "id": 1, "nome": 1, "status": 1, "numero_exibicao": 1, "numero": 1,
              "canal": 1, "ultimo_erro": 1}).to_list(100),
         plataforma.saude(db, [tenant]),
-        uso_do_plano(db, tenant_id, tenant.get("plan")),
+        _resumo(db, tenant_id),
+        plataforma.serie(db, [tenant_id]),
+        ai_runtime.consumo_do_mes(db, tenant_id),
+        plataforma.atividade(db, {tenant_id: tenant["name"]}, tenant_id=tenant_id, limite=40),
     )
     return {**tenant, "usuarios": usuarios, "conexoes": conexoes,
-            "saude": por_id.get(tenant_id), "uso": uso}
+            "saude": por_id.get(tenant_id), "resumo": resumo, "serie": serie,
+            "ia_mes": ia_mes, "historico": historico}
 
 
 @router.post("/tenants")
-async def create_tenant(body: TenantCreate, _=Depends(require_super_admin)):
+async def create_tenant(body: TenantCreate, admin=Depends(require_super_admin)):
     db = get_db()
     email = body.admin_email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email já cadastrado")
-    if body.plan_id and not await db.plans.find_one({"id": body.plan_id}):
-        raise HTTPException(status_code=400, detail="Plano inválido")
     tenant_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     tenant = {
         "id": tenant_id,
         "name": body.name,
-        "plan_id": body.plan_id,
         "marca": body.marca,
         "status": "active",
+        "limite_tokens_ia_mes": None,
         "created_at": now,
     }
     await db.tenants.insert_one(tenant)
@@ -132,35 +168,55 @@ async def create_tenant(body: TenantCreate, _=Depends(require_super_admin)):
         await db.tenants.delete_one({"id": tenant_id})
         raise HTTPException(status_code=400, detail="Email já cadastrado")
     tenant.pop("_id", None)
-    (await _enrich_plan(db, [tenant]))
+    await audit.registrar(db, ator=admin, acao="tenant.create", tenant_id=tenant_id,
+                          alvo=body.name, meta={"admin_email": email, "marca": body.marca})
     return tenant
 
 
 @router.patch("/tenants/{tenant_id}")
 async def update_tenant(tenant_id: str, body: TenantUpdate, admin=Depends(require_super_admin)):
     db = get_db()
-    update = {k: v for k, v in body.model_dump().items() if v is not None}
+    update = body.model_dump(exclude_unset=True)
+    # Nome, status e marca não aceitam nulo: só os dois campos de teto usam o
+    # nulo como valor ("sem teto" / "padrão do servidor").
+    for campo in ("name", "status", "marca"):
+        if campo in update and update[campo] is None:
+            update.pop(campo)
     if not update:
         return {"ok": True}
-    novo_plano = None
-    if "plan_id" in update:
-        novo_plano = await db.plans.find_one({"id": update["plan_id"]}, {"_id": 0})
-        if not novo_plano:
-            raise HTTPException(status_code=400, detail="Plano inválido")
     res = await db.tenants.update_one({"id": tenant_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
-    (await _enrich_plan(db, [tenant]))
-    if novo_plano:
-        # Downgrade não remove nada retroativamente — só avisa quem trocou.
-        tenant["plan_warnings"] = await plan_excess(db, tenant_id, novo_plano)
-    # Suspender/reativar uma empresa e trocar o plano são decisões do Super
-    # Admin que precisam de rastro (ZZ-21).
-    if update.keys() & {"status", "plan_id", "marca"}:
-        await audit.registrar(db, ator=admin, acao="tenant.update",
-                              tenant_id=tenant_id, meta=update)
+    # Toda decisão do super admin sobre a empresa deixa rastro (ZZ-21).
+    await audit.registrar(db, ator=admin, acao="tenant.update",
+                          tenant_id=tenant_id, meta=update)
     return tenant
+
+
+@router.post("/tenants/{tenant_id}/users/{user_id}/senha")
+async def redefinir_senha(tenant_id: str, user_id: str, body: SenhaNova,
+                          admin=Depends(require_super_admin)):
+    """O super admin define uma senha nova para alguém da empresa.
+
+    Era o que mais obrigava a entrar em modo suporte: o cliente esqueceu a
+    senha, e o banco só guarda o hash. A senha nova aparece uma vez na tela,
+    para ser passada adiante, e derruba as sessões abertas daquela pessoa
+    (bump de `token_version`, igual à troca feita pelo admin da empresa).
+    """
+    db = get_db()
+    alvo = await db.users.find_one({"id": user_id, "tenant_id": tenant_id},
+                                   {"_id": 0, "id": 1, "email": 1})
+    if not alvo:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado nesta empresa")
+    await db.users.update_one(
+        {"id": user_id, "tenant_id": tenant_id},
+        {"$set": {"password_hash": hash_password(body.password)},
+         "$inc": {"token_version": 1}},
+    )
+    await audit.registrar(db, ator=admin, acao="user.senha_redefinida", tenant_id=tenant_id,
+                          alvo=alvo.get("email"), meta={"user_id": user_id})
+    return {"ok": True}
 
 
 # Tudo que morre com a empresa, numa lista só. Estava escrito como uma
@@ -295,12 +351,16 @@ async def impersonate(tenant_id: str, response: Response, super_admin=Depends(re
 
 @router.get("/visao")
 async def visao_geral(_=Depends(require_super_admin)):
-    """A visão geral da plataforma: o que precisa de atenção, receita, volume
-    contra a semana anterior e quem mais usa (ver `plataforma`)."""
+    """A visão geral da plataforma: o que precisa de atenção, volume e
+    resultado contra a semana anterior, consumo de IA, quem mais usa e as
+    últimas ações (ver `plataforma`)."""
     db = get_db()
     tenants = await db.tenants.find({}, {"_id": 0}).to_list(5000)
-    await _enrich_plan(db, tenants)
     ids = [t["id"] for t in tenants]
-    por_id, serie = await asyncio.gather(plataforma.saude(db, tenants),
-                                         plataforma.serie(db, ids))
-    return plataforma.visao(tenants, por_id, serie)
+    nomes = {t["id"]: t["name"] for t in tenants}
+    por_id, serie, linha_do_tempo = await asyncio.gather(
+        plataforma.saude(db, tenants),
+        plataforma.serie(db, ids),
+        plataforma.atividade(db, nomes),
+    )
+    return plataforma.visao(tenants, por_id, serie, linha_do_tempo)

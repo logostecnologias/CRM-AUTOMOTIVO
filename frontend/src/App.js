@@ -25,7 +25,6 @@ import DepartamentosPage from "@/pages/tenant/DepartamentosPage";
 import UsersPage from "@/pages/tenant/UsersPage";
 import SuperAdminDashboard from "@/pages/superadmin/SuperAdminDashboard";
 import TenantsPage from "@/pages/superadmin/TenantsPage";
-import PlansPage from "@/pages/superadmin/PlansPage";
 import "@/App.css";
 
 // O editor de fluxos carrega o React Flow, de longe a dependência mais pesada
@@ -105,7 +104,6 @@ function App() {
           >
             <Route index element={<SuperAdminDashboard />} />
             <Route path="tenants" element={<TenantsPage />} />
-            <Route path="plans" element={<PlansPage />} />
           </Route>
 
           <Route path="/" element={<Navigate to="/login" replace />} />

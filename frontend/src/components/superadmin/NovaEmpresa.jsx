@@ -1,80 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
 import { useAcao } from "@/hooks/useAcao";
-import { formatBRL } from "@/lib/currency";
+import { SENHA_MIN, copiar, gerarSenha } from "@/components/superadmin/comum";
 import { MARCAS, PADRAO as MARCA_PADRAO, valida as validaMarca } from "@/lib/marca";
 import { toast } from "sonner";
 import {
   ArrowsClockwise, Buildings, CheckCircle, Copy, Eye, EyeSlash,
   SignIn, Warning, WhatsappLogo, X,
 } from "@phosphor-icons/react";
-
-// Espelha o `SENHA_MIN` de `backend/routes/tenants.py`. O piso de verdade é o
-// do servidor; este aqui existe para o super admin saber do limite enquanto
-// digita, em vez de descobrir por um 422 em inglês depois de preencher tudo.
-const SENHA_MIN = 8;
-
-// Sem `l`, `I`, `1`, `O` e `0`: a senha vai ser lida em voz alta ou copiada de
-// um WhatsApp e digitada à mão pelo cliente, e é nesses cinco caracteres que
-// isso falha.
-const ALFABETO = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-function gerarSenha(tamanho = 14) {
-  const sorteio = new Uint32Array(tamanho);
-  crypto.getRandomValues(sorteio);
-  return Array.from(sorteio, (n) => ALFABETO[n % ALFABETO.length]).join("");
-}
-
-async function copiar(texto, aviso) {
-  try {
-    await navigator.clipboard.writeText(texto);
-    toast.success(aviso);
-  } catch {
-    // `navigator.clipboard` não existe fora de HTTPS (e o painel roda em
-    // localhost sem TLS em desenvolvimento). Sem este aviso o clique não faz
-    // nada e parece que copiou.
-    toast.error("Não foi possível copiar. Selecione o texto e copie à mão.");
-  }
-}
-
-// --- Leitura dos limites do plano -------------------------------------------
-// As três regras abaixo são diferentes entre si, e é de propósito. Quem lê a
-// tela precisa das três certas, porque é o que a empresa vai receber.
-
-// max_bots / max_conexoes / max_usuarios: `null` é ilimitado, e 0 barra tudo
-// (`enforce_plan_limit` recusa quando a contagem chega ao teto, então com teto
-// zero nada pode ser criado).
-function porContagem(valor) {
-  if (valor === null || valor === undefined) return { texto: "ilimitado" };
-  if (Number(valor) === 0) return { texto: "nenhum", alerta: true };
-  return { texto: Number(valor).toLocaleString("pt-BR") };
-}
-
-// max_disparos_mes / max_tokens_ia_mes: aqui vazio e 0 querem dizer a mesma
-// coisa (ilimitado), ao contrário dos de cima.
-function porJanela(valor) {
-  if (valor === null || valor === undefined || Number(valor) === 0) return { texto: "ilimitado" };
-  return { texto: Number(valor).toLocaleString("pt-BR") };
-}
-
-// retencao_midia_dias: vazio herda o default do servidor e 0 nunca apaga.
-function porRetencao(dias) {
-  if (dias === null || dias === undefined || dias === "") return { texto: "padrão do servidor" };
-  if (Number(dias) === 0) return { texto: "sem expiração" };
-  return { texto: `${dias} dias` };
-}
-
-function limitesDoPlano(plano) {
-  if (!plano) return [];
-  return [
-    { rotulo: "Robôs", ...porContagem(plano.max_bots) },
-    { rotulo: "Conexões WhatsApp", ...porContagem(plano.max_conexoes) },
-    { rotulo: "Usuários", ...porContagem(plano.max_usuarios) },
-    { rotulo: "Disparos/mês", ...porJanela(plano.max_disparos_mes) },
-    { rotulo: "Tokens de IA/mês", ...porJanela(plano.max_tokens_ia_mes) },
-    { rotulo: "Mídia guardada", ...porRetencao(plano.retencao_midia_dias) },
-  ];
-}
 
 /**
  * Criação de empresa em duas partes: o formulário e a entrega do acesso.
@@ -85,20 +18,15 @@ function limitesDoPlano(plano) {
  * agora. Fechar direto no toast, como era, empurrava esse repasse para a
  * memória de quem criou.
  */
-export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
+export default function NovaEmpresa({ onFechar, onCriada, onEntrar }) {
   const [form, setForm] = useState({
-    name: "", plan_id: "", admin_name: "", admin_email: "", admin_password: "",
+    name: "", admin_name: "", admin_email: "", admin_password: "",
     marca: MARCA_PADRAO,
   });
   const [verSenha, setVerSenha] = useState(false);
   const [erroEmail, setErroEmail] = useState("");
   const [criada, setCriada] = useState(null);
   const emailRef = useRef(null);
-
-  const plano = useMemo(
-    () => plans.find((p) => p.id === form.plan_id) || null,
-    [plans, form.plan_id],
-  );
 
   // Esc fecha só enquanto é formulário. Na tela de acesso ele fica desligado de
   // propósito: um Esc distraído ali leva embora a única cópia da senha.
@@ -113,9 +41,7 @@ export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
     e.preventDefault();
     setErroEmail("");
     try {
-      // `plan_id` vazio vira null: string vazia seria gravada como plano da
-      // empresa e a lista mostraria "sem plano" sem que nada explicasse por quê.
-      const { data } = await api.post("/admin/tenants", { ...form, plan_id: form.plan_id || null });
+      const { data } = await api.post("/admin/tenants", form);
       setCriada({ tenant: data, ...form });
       onCriada();
     } catch (ex) {
@@ -144,39 +70,17 @@ export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
     <Moldura titulo="Nova empresa" icone={Buildings} onFechar={onFechar}>
       <form onSubmit={criar} className="flex flex-col min-h-0 flex-1" data-testid="tenant-form">
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Campo label="Nome da empresa">
-              <input required autoFocus data-testid="tenant-name" className="zz-input"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </Campo>
-            <Campo label="Plano">
-              {plans.length === 0 ? (
-                <div className="zz-input flex items-center text-ink-3 italic">
-                  Nenhum plano cadastrado
-                </div>
-              ) : (
-                <select required data-testid="tenant-plan" className="zz-input" value={form.plan_id}
-                  onChange={(e) => setForm({ ...form, plan_id: e.target.value })}>
-                  <option value="" disabled>Selecione um plano</option>
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>{p.nome} · {formatBRL(p.preco_mensal)}/mês</option>
-                  ))}
-                </select>
-              )}
-            </Campo>
-          </div>
-
-          {plans.length === 0
-            ? <Aviso>Crie um plano em <b>Planos</b> antes: sem plano vinculado a empresa fica sem
-                nenhum limite aplicado, e o cliente não vê teto nenhum em Ajustes.</Aviso>
-            : <ResumoPlano plano={plano} />}
+          <Campo label="Nome da empresa">
+            <input required autoFocus data-testid="tenant-name" className="zz-input"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Campo>
 
           <div>
             <Titulo>Marca do painel</Titulo>
             <p className="text-xs text-ink-3 mb-3">
               É o que o cliente vê ao entrar: cores, logo e nome na aba do navegador. Dá para
-              trocar depois, na lista de empresas.
+              trocar depois, na ficha da empresa.
             </p>
             <SeletorMarca valor={form.marca} onChange={(marca) => setForm({ ...form, marca })} />
           </div>
@@ -185,7 +89,7 @@ export default function NovaEmpresa({ plans, onFechar, onCriada, onEntrar }) {
             <Titulo>Admin da empresa</Titulo>
             <p className="text-xs text-ink-3 mb-3">
               É esta pessoa que entra no painel e configura o resto. Ela pode criar os outros
-              usuários depois, dentro do limite do plano.
+              usuários (vendedores, atendentes) depois.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Campo label="Nome">
@@ -273,37 +177,6 @@ function SeletorMarca({ valor, onChange }) {
   );
 }
 
-function ResumoPlano({ plano }) {
-  if (!plano) {
-    return (
-      <div className="border border-dashed border-line rounded-lg px-4 py-6 text-center text-sm text-ink-3">
-        Escolha um plano para ver o que a empresa vai receber.
-      </div>
-    );
-  }
-  return (
-    <div className="border border-line rounded-lg bg-surface-2 overflow-hidden" data-testid="resumo-plano">
-      <div className="flex items-baseline justify-between px-4 py-3 border-b border-line">
-        <span className="font-heading font-black tracking-tighter">{plano.nome}</span>
-        <span className="text-sm font-mono text-ink-2">{formatBRL(plano.preco_mensal)}/mês</span>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 px-4 py-4">
-        {limitesDoPlano(plano).map((l) => (
-          <div key={l.rotulo}>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-ink-3">{l.rotulo}</div>
-            <div className={`text-sm font-semibold ${l.alerta ? "text-danger" : ""}`}>{l.texto}</div>
-          </div>
-        ))}
-      </div>
-      {plano.status !== "active" && (
-        <div className="px-4 pb-4 -mt-1 text-xs text-warning">
-          Este plano está inativo. A empresa funciona, mas o plano não deveria estar em uso.
-        </div>
-      )}
-    </div>
-  );
-}
-
 /**
  * O acesso do cliente, uma vez só. Daqui não se volta para o formulário: a
  * empresa já existe, e o que resta é entregar a credencial e abrir o caminho do
@@ -326,16 +199,13 @@ function Acesso({ dados, onFechar, onEntrar }) {
           <Warning size={18} weight="fill" className="text-warning shrink-0 mt-0.5" />
           <div className="text-sm text-ink-2">
             <b className="text-ink">Copie a senha agora.</b> O sistema guarda só o hash dela, então
-            esta é a última vez que ela aparece. Se sair sem copiar, o caminho é definir outra em
-            Usuários, dentro da empresa.
+            esta é a última vez que ela aparece. Se sair sem copiar, dá para definir outra na
+            ficha da empresa, aba Equipe.
           </div>
         </div>
 
         <div className="border border-line rounded-lg divide-y divide-line" data-testid="acesso-criado">
           <Linha rotulo="Empresa" valor={tenant.name} />
-          <Linha rotulo="Plano" valor={tenant.plan
-            ? `${tenant.plan.nome} · ${formatBRL(tenant.plan.preco_mensal)}/mês`
-            : "sem plano vinculado"} />
           <Linha rotulo="Marca" valor={MARCAS[validaMarca(tenant.marca)].nome} />
           <Linha rotulo="Endereço" valor={endereco} />
           <Linha rotulo="E-mail" valor={dados.admin_email} mono />
@@ -437,14 +307,5 @@ function Campo({ label, erro, children }) {
 function Titulo({ children }) {
   return (
     <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-ink-3 mb-2">{children}</div>
-  );
-}
-
-function Aviso({ children }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-warning bg-warning-soft px-4 py-3 text-sm text-ink-2">
-      <Warning size={18} weight="fill" className="text-warning shrink-0 mt-0.5" />
-      <div>{children}</div>
-    </div>
   );
 }

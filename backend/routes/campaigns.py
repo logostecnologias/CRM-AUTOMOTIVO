@@ -124,31 +124,6 @@ async def _validar_vinculos(db, tenant_id: str, body: CampaignIn):
             raise HTTPException(status_code=400, detail="Arquivo da campanha não encontrado")
 
 
-async def _enforce_cota_mensal(db, tenant_id: str, a_enviar: int):
-    """Teto de disparos por mês do plano.
-
-    Contado sobre o que já saiu no mês (`enviado`), não sobre campanhas
-    criadas: o que custa — e o que a agência vende — é mensagem entregue.
-    Plano sem o campo é ilimitado, igual aos outros limites.
-    """
-    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "plan_id": 1})
-    if not tenant or not tenant.get("plan_id"):
-        return
-    plan = await db.plans.find_one({"id": tenant["plan_id"]}, {"_id": 0, "nome": 1, "max_disparos_mes": 1})
-    if not plan or plan.get("max_disparos_mes") is None:
-        return
-    teto = int(plan["max_disparos_mes"])
-    if teto <= 0:
-        return
-    usado = await campanhas.disparos_no_mes(db, tenant_id)
-    if usado + a_enviar > teto:
-        raise HTTPException(
-            status_code=403,
-            detail=(f"Limite do plano \"{plan['nome']}\": {teto} disparos/mês. "
-                    f"Já enviados {usado}, esta campanha precisa de {a_enviar}."),
-        )
-
-
 @router.get("")
 async def list_campaigns(user=Depends(require_tenant_admin)):
     db = get_db()
@@ -287,7 +262,6 @@ async def start_campaign(campaign_id: str, user=Depends(require_tenant_admin)):
     )
     if not pendentes:
         raise HTTPException(status_code=400, detail="Nenhum destinatário pendente nesta campanha")
-    await _enforce_cota_mensal(db, user["tenant_id"], pendentes)
 
     agendada = doc.get("agendada_para")
     # Agendamento no passado (ou já vencido enquanto a campanha era rascunho)
@@ -329,7 +303,6 @@ async def resume_campaign(campaign_id: str, user=Depends(require_tenant_admin)):
             {"id": campaign_id}, {"$set": {"status": "concluida", "concluida_em": _now()}}
         )
         return {"ok": True, "status": "concluida"}
-    await _enforce_cota_mensal(db, user["tenant_id"], pendentes)
     await db.campaigns.update_one(
         {"id": campaign_id, "tenant_id": user["tenant_id"]},
         {"$set": {"status": "enviando", "motivo_pausa": None, "updated_at": _now()}},

@@ -134,9 +134,47 @@ async def desmarcar_chaves_de_ia(db) -> int:
     return res.modified_count
 
 
+async def planos_para_empresa(db) -> int:
+    """Os planos saíram em 18/11/2026. Dois campos deles continuam valendo,
+    agora na própria empresa: o teto de tokens de IA (protege o custo da chave
+    da plataforma) e a janela de retenção de mídia.
+
+    Copia o valor do plano em que a empresa estava, para nada mudar de um dia
+    para o outro: sem isto o teto de IA sumiria (custo sem freio) e a mídia de
+    quem tinha retenção maior que o default começaria a ser apagada.
+
+    Só acrescenta. `plan_id` e a coleção `plans` ficam onde estão: ninguém mais
+    os lê, e apagar dado de produção por arrumação não compensa o risco.
+    Idempotente: a marca é a presença de `limite_tokens_ia_mes`.
+    """
+    alvo = {"plan_id": {"$nin": [None, ""]}, "limite_tokens_ia_mes": {"$exists": False}}
+    tenants = await db.tenants.find(alvo, {"_id": 0, "id": 1, "plan_id": 1}).to_list(5000)
+    if not tenants:
+        return 0
+    planos = {
+        p["id"]: p async for p in db.plans.find(
+            {"id": {"$in": list({t["plan_id"] for t in tenants})}},
+            {"_id": 0, "id": 1, "max_tokens_ia_mes": 1, "retencao_midia_dias": 1})
+    }
+    n = 0
+    for t in tenants:
+        plano = planos.get(t["plan_id"]) or {}
+        campos = {"limite_tokens_ia_mes": plano.get("max_tokens_ia_mes") or None}
+        if plano.get("retencao_midia_dias") is not None:
+            campos["retencao_midia_dias"] = plano["retencao_midia_dias"]
+        await db.tenants.update_one({"id": t["id"]}, {"$set": campos})
+        n += 1
+    return n
+
+
 async def _run():
     await asyncio.sleep(STARTUP_DELAY)
     db = get_db()
+    # Primeiro de propósito: a varredura de mídia começa aos 60s e lê a janela
+    # de retenção que esta cópia grava. Uma falha nas outras não pode pular esta.
+    copiadas = await planos_para_empresa(db)
+    if copiadas:
+        logger.info("Teto de IA e retenção copiados do plano para a empresa: %d", copiadas)
     filled = await backfill_last_message(db)
     if filled:
         logger.info("Backfill de last_message: %d conversas atualizadas", filled)

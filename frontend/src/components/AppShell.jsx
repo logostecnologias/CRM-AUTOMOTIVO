@@ -9,7 +9,7 @@ import { t } from "@/lib/textos";
 import {
   House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
   Buildings, ChartLine, SignOut, Users, StackSimple, Headset,
-  ArrowUUpLeft, Sparkle, CreditCard, Megaphone, Funnel, CheckSquareOffset, ChartBar,
+  ArrowUUpLeft, Sparkle, Megaphone, Funnel, CheckSquareOffset, ChartBar,
   CalendarCheck, Phone, ClipboardText, Car, LinkSimple, Globe, CaretRight,
 } from "@phosphor-icons/react";
 
@@ -29,7 +29,6 @@ const adminNav = [
     itens: [
       { to: "/admin", icon: ChartLine, label: "Visão geral", end: true },
       { to: "/admin/tenants", icon: Buildings, label: "Empresas" },
-      { to: "/admin/plans", icon: CreditCard, label: "Planos" },
     ],
   },
 ];

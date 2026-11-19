@@ -38,7 +38,6 @@ import whatsapp_client as whatsapp
 import wuzapi_client as wuzapi
 from auth import require_tenant_admin, get_current_user, accessible_connection_ids
 from db import get_db
-from plan_limits import enforce_plan_limit
 
 logger = logging.getLogger("zappzen.whatsapp")
 
@@ -163,7 +162,6 @@ async def list_connections(user: dict = Depends(get_current_user)):
 @router.post("/connections")
 async def create_connection(body: ConnectionIn, user=Depends(require_tenant_admin)):
     db = get_db()
-    await enforce_plan_limit(db, user["tenant_id"], "whatsapp_connections", "max_conexoes", "conexões WhatsApp")
     canal = (body.canal if body.canal in (whatsapp.CANAL_CLOUD, whatsapp.CANAL_WUZAPI)
              else whatsapp.CANAL_CLOUD)
 

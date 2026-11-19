@@ -690,9 +690,9 @@ export default function AgenteWizard({
                           ? "border-info bg-info-soft ring-1 ring-info"
                           : "border-line hover:border-line-strong"
                       }`}>
-                      <div className="font-bold text-sm">Usar a IA inclusa no plano</div>
+                      <div className="font-bold text-sm">Usar a IA inclusa</div>
                       <div className="text-xs text-ink-2 mt-0.5">
-                        Sem chave própria. Vale o limite mensal de tokens do seu plano.
+                        Sem chave própria. Pode haver um limite mensal de uso definido pelo suporte.
                       </div>
                     </button>
                   )}

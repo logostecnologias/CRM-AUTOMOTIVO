@@ -4,10 +4,11 @@ Mídia é o único dado do ZappZen que cresce sem teto: cada foto que um cliente
 manda fica em disco pra sempre, e nada nunca apagava. Esta varredura aplica
 uma janela de retenção e limpa o que passou dela.
 
-A janela vem do plano da empresa (`retencao_midia_dias`), o que permite vender
-"guardamos 1 ano" num plano e 30 dias em outro. Plano sem o campo — ou empresa
-sem plano — cai no default do servidor (MEDIA_RETENTION_DAYS). `0` em qualquer
-um dos dois significa a mesma coisa: nunca apagar.
+A janela vem da própria empresa (`tenants.retencao_midia_dias`, definida pelo
+super admin na ficha; até 18/11/2026 vinha do plano, e a migração
+`planos_para_empresa` copiou o valor). Empresa sem o campo cai no default do
+servidor (MEDIA_RETENTION_DAYS). `0` em qualquer um dos dois significa a mesma
+coisa: nunca apagar.
 
 O documento em `media_files` **não** é apagado junto com o arquivo — só ganha
 `purged_at`. É o que permite a bolha antiga continuar mostrando "nome do
@@ -49,37 +50,30 @@ def retention_days() -> int:
 
 
 async def _tenant_windows(db, tenant_ids: list[str]) -> dict[int, list[str]]:
-    """Agrupa as empresas pela janela de retenção do plano de cada uma.
+    """Agrupa as empresas pela janela de retenção de cada uma.
 
-    Agrupado — e não um laço por empresa — de propósito: planos são poucos, e
-    empresas do mesmo plano compartilham a mesma janela. Mil empresas em três
-    planos viram três consultas de purga, não mil.
+    Agrupado — e não um laço por empresa — de propósito: quase todas usam o
+    default, então mil empresas viram poucas consultas de purga, não mil.
     """
     default = retention_days()
-    tenants = {
-        t["id"]: t.get("plan_id")
-        async for t in db.tenants.find({"id": {"$in": tenant_ids}}, {"_id": 0, "id": 1, "plan_id": 1})
-    }
-    plan_ids = [p for p in set(tenants.values()) if p]
-    plans = {
-        p["id"]: p.get("retencao_midia_dias")
-        async for p in db.plans.find(
-            {"id": {"$in": plan_ids}}, {"_id": 0, "id": 1, "retencao_midia_dias": 1}
-        )
+    janelas = {
+        t["id"]: t.get("retencao_midia_dias")
+        async for t in db.tenants.find({"id": {"$in": tenant_ids}},
+                                       {"_id": 0, "id": 1, "retencao_midia_dias": 1})
     }
 
     groups: dict[int, list[str]] = {}
     for tid in tenant_ids:
-        days = plans.get(tenants.get(tid))
-        # Cai no default global quando a empresa não tem plano, o plano não
-        # define a janela, ou a empresa já foi excluída e a mídia ficou órfã.
+        days = janelas.get(tid)
+        # Cai no default global quando a empresa não define a janela, ou já
+        # foi excluída e a mídia ficou órfã.
         window = default if days is None else max(0, int(days))
         groups.setdefault(window, []).append(tid)
     return groups
 
 
 async def _purge_expired(db) -> int:
-    """Purga respeitando a janela do plano de cada empresa."""
+    """Purga respeitando a janela de cada empresa."""
     tenant_ids = await db.media_files.distinct("tenant_id", {"purged_at": None})
     if not tenant_ids:
         return 0
@@ -200,7 +194,7 @@ async def sweep() -> dict:
 async def _loop():
     days = retention_days()
     logger.info(
-        "Media retention started (janela padrão=%s, sobrescrita pelo plano de cada empresa, intervalo=%dh)",
+        "Media retention started (janela padrão=%s, sobrescrita pela de cada empresa, intervalo=%dh)",
         f"{days}d" if days else "nunca apaga", SWEEP_INTERVAL // 3600,
     )
     await asyncio.sleep(STARTUP_DELAY)

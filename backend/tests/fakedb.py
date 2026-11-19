@@ -111,7 +111,9 @@ def _expr(doc, e):
             return (str(texto) if texto is not None else "")[inicio:inicio + tamanho]
         if op == "$cond":
             cond, entao, senao = args
-            return entao if _expr(doc, cond) else senao
+            # Como no Mongo, o ramo escolhido também é expressão: pode ser
+            # referência de campo ("$tokens"), não só literal.
+            return _expr(doc, entao) if _expr(doc, cond) else _expr(doc, senao)
         raise NotImplementedError(op)
     return None
 

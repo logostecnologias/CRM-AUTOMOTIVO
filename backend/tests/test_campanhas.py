@@ -100,8 +100,7 @@ def check(nome, cond, extra=""):
 
 async def semear():
     DB._cols.clear()
-    await DB.tenants.insert_one({"id": TENANT, "plan_id": "p1"})
-    await DB.plans.insert_one({"id": "p1", "nome": "Pro", "max_disparos_mes": 100})
+    await DB.tenants.insert_one({"id": TENANT})
     await DB.whatsapp_connections.insert_one({
         "id": CONN, "tenant_id": TENANT, "nome": "Comercial",
         "status": "conectado", "phone_number_id": "pn-abc", "waba_id": "waba-1",

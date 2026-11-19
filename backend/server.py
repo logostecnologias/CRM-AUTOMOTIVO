@@ -23,7 +23,6 @@ from routes.webhooks_wuzapi import router as webhooks_wuzapi_router
 from routes.departments import router as departments_router
 from routes.users import router as users_router
 from routes.atendimento import router as atendimento_router
-from routes.plans import router as plans_router
 from routes.media import router as media_router
 from routes.campaigns import router as campaigns_router
 from routes.deals import router as deals_router
@@ -156,7 +155,6 @@ app.include_router(webhooks_wuzapi_router)
 app.include_router(departments_router)
 app.include_router(users_router)
 app.include_router(atendimento_router)
-app.include_router(plans_router)
 app.include_router(media_router)
 app.include_router(campaigns_router)
 app.include_router(deals_router)
@@ -209,7 +207,6 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("users", [("tenant_id", 1)], {}),
 
     ("tenants", [("id", 1)], {"unique": True}),
-    ("plans", [("id", 1)], {}),
 
     ("bots", [("tenant_id", 1), ("id", 1)], {}),
     # Escolha do bot que atende cada conversa nova (_pick_bot_for_new_session).
@@ -287,7 +284,7 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("campaign_recipients", [("id", 1)], {}),
     # Marcação de resposta e listagem por contato.
     ("campaign_recipients", [("campaign_id", 1), ("contact_id", 1)], {}),
-    # Cota mensal de disparos do plano.
+    # Disparos entregues no mês (ficha da empresa no super admin).
     ("campaign_recipients", [("tenant_id", 1), ("status", 1), ("sent_at", 1)], {}),
     # "Quais campanhas este contato já recebeu?" — bloco da ficha.
     ("campaign_recipients", [("tenant_id", 1), ("contact_id", 1)], {}),
@@ -364,7 +361,7 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # nenhum índice cobre: este é o que a restringe às linhas de um agente só.
     ("ai_estoque", [("tenant_id", 1), ("agente_id", 1), ("versao", 1), ("ordem", 1)], {}),
 
-    # Consumo agregado do mês (cota do plano e o número que a tela mostra).
+    # Consumo agregado do mês (teto de IA da empresa e o número que a tela mostra).
     ("ai_usage", [("tenant_id", 1), ("mes", 1)], {}),
     # A chave do upsert que soma cada resposta no acumulado do dia.
     ("ai_usage", [("tenant_id", 1), ("dia", 1), ("provedor", 1), ("modelo", 1),
@@ -375,6 +372,14 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     ("veiculos", [("tenant_id", 1), ("id", 1)], {}),
 
     ("impersonation_log", [("id", 1)], {}),
+    # Linha do tempo do super admin: a plataforma inteira e a aba Histórico
+    # da ficha de uma empresa, da entrada mais recente para a mais antiga.
+    ("impersonation_log", [("iniciado_em", -1)], {}),
+    ("impersonation_log", [("tenant_id", 1), ("iniciado_em", -1)], {}),
+    ("audit_log", [("em", -1)], {}),
+    # Leads da semana e vendas do mês por empresa (painel do super admin).
+    ("contacts", [("tenant_id", 1), ("created_at", 1)], {}),
+    ("deals", [("tenant_id", 1), ("status", 1), ("fechado_em", 1)], {}),
 
     # Trilha de auditoria (ZZ-21): consultada por empresa e por tipo de ação,
     # sempre da mais recente para a mais antiga.

@@ -1,4 +1,4 @@
-"""Teste da tela de Configuracoes: troca de senha, nome, e o resumo de uso.
+"""Teste da tela de Configuracoes: troca de senha, nome e dados da empresa.
 
 Onde estao os riscos deste modulo, e por isso o que se testa aqui:
 
@@ -6,10 +6,8 @@ Onde estao os riscos deste modulo, e por isso o que se testa aqui:
   usuario. Errar a conferencia da senha atual, deixar o hash antigo valendo, ou
   permitir que o modo suporte troque a senha do Super Admin achando que troca a
   do cliente, sao falhas que nao dao erro nenhum — dao acesso.
-- **O resumo de uso** so vale se disser o mesmo que o 403. Um painel que mostra
-  "3 de 5" enquanto a criacao e recusada e pior que painel nenhum, porque o
-  cliente para de acreditar nos dois. Por isso a etapa de coerencia compara o
-  numero da tela com o comportamento do enforcer, em vez de so conferir a conta.
+- **A empresa** devolve so os dados dela, isolada por tenant. Os planos sairam
+  em 18/11/2026: nada de plano, preco ou limite pode voltar a aparecer aqui.
 """
 import asyncio
 import inspect
@@ -30,7 +28,6 @@ DB = FakeDB()
 db_mod.get_db = lambda: DB
 
 import auth
-import plan_limits
 import routes.settings as rset
 import routes.campaigns as rcamp
 
@@ -46,7 +43,6 @@ def _conectar_fake():
 
 
 TENANT_A, TENANT_B = "t-a", "t-b"
-PLANO_A = "p-basico"
 SENHA_A = "senha-original-1"
 
 ADMIN_A = {"id": "u-a", "tenant_id": TENANT_A, "role": "tenant_admin",
@@ -79,18 +75,11 @@ async def erro(coro):
 
 async def etapa_semear():
     print("\n[semear]")
-    await DB.plans.insert_one({
-        "id": PLANO_A, "nome": "Basico", "preco_mensal": 97.0,
-        "max_bots": 2, "max_conexoes": 1, "max_usuarios": 3,
-        "max_disparos_mes": 100, "max_tokens_ia_mes": 50_000,
-        "retencao_midia_dias": 30, "status": "active",
-    })
     await DB.tenants.insert_one({"id": TENANT_A, "name": "Logos Tecnologias",
-                                 "plan_id": PLANO_A, "status": "active",
+                                 "status": "active",
                                  "created_at": "2026-03-12T10:00:00+00:00"})
-    # Empresa sem plano: o caso "tudo ilimitado".
-    await DB.tenants.insert_one({"id": TENANT_B, "name": "Sem Plano ME",
-                                 "plan_id": None, "status": "active",
+    await DB.tenants.insert_one({"id": TENANT_B, "name": "Revenda B",
+                                 "status": "active",
                                  "created_at": "2026-05-01T10:00:00+00:00"})
     for u, senha in ((ADMIN_A, SENHA_A), (AGENTE_A, "outra-senha-9"), (ADMIN_B, "b-senha-77")):
         await DB.users.insert_one({**u, "status": "active",
@@ -174,109 +163,11 @@ async def etapa_empresa():
     r = await rset.empresa(ADMIN_A)
     check("devolve o nome da empresa, nao o id",
           r["empresa"]["nome"] == "Logos Tecnologias", r["empresa"])
-    check("e o plano com preco", r["plano"]["nome"] == "Basico"
-          and r["plano"]["preco_mensal"] == 97.0, r["plano"])
-    check("retencao do plano vem junto", r["plano"]["retencao_midia_dias"] == 30, r["plano"])
+    check("sem plano nem uso de limites", set(r) == {"empresa"}, set(r))
 
     # Isolamento: cada admin so ve a propria empresa.
     rb = await rset.empresa(ADMIN_B)
-    check("admin de B ve a empresa de B", rb["empresa"]["nome"] == "Sem Plano ME", rb["empresa"])
-    check("empresa sem plano devolve plano nulo", rb["plano"] is None, rb["plano"])
-    check("e todos os limites dela ficam ilimitados",
-          all(l["limite"] is None for l in rb["uso"]), rb["uso"])
-
-
-async def etapa_uso():
-    print("\n[uso do plano]")
-    await DB.bots.insert_one({"id": "b1", "tenant_id": TENANT_A})
-    await DB.bots.insert_one({"id": "b2", "tenant_id": TENANT_A})
-    await DB.bots.insert_one({"id": "b-de-outra", "tenant_id": TENANT_B})
-    await DB.whatsapp_connections.insert_one({"id": "c1", "tenant_id": TENANT_A})
-
-    linhas = {l["chave"]: l for l in (await rset.empresa(ADMIN_A))["uso"]}
-    check("as cinco linhas aparecem", set(linhas) == {
-        "max_bots", "max_conexoes", "max_usuarios",
-        "max_disparos_mes", "max_tokens_ia_mes"}, set(linhas))
-    check("robos: 2 de 2", (linhas["max_bots"]["usado"], linhas["max_bots"]["limite"]) == (2, 2),
-          linhas["max_bots"])
-    check("o bot da outra empresa nao entra na conta", linhas["max_bots"]["usado"] == 2)
-    check("usuarios: 2 de 3 (A tem admin e atendente)",
-          (linhas["max_usuarios"]["usado"], linhas["max_usuarios"]["limite"]) == (2, 3),
-          linhas["max_usuarios"])
-    check("disparos e tokens sao por janela de tempo",
-          linhas["max_disparos_mes"]["janela"] == "mês"
-          and linhas["max_tokens_ia_mes"]["janela"] == "mês", linhas)
-    check("sem consumo, disparos ficam em zero", linhas["max_disparos_mes"]["usado"] == 0)
-
-
-async def etapa_coerencia_com_o_enforcer():
-    print("\n[coerencia painel x 403]")
-    # O painel diz "2 de 2" para robos. O enforcer tem que recusar o proximo —
-    # se um dos dois estiver errado, e aqui que aparece.
-    st, det = await erro(plan_limits.enforce_plan_limit(
-        DB, TENANT_A, "bots", "max_bots", "robôs"))
-    check("com o painel no teto, criar robo e recusado", st == 403, (st, det))
-
-    # Conexoes: painel diz 1 de 1, enforcer recusa.
-    st, _ = await erro(plan_limits.enforce_plan_limit(
-        DB, TENANT_A, "whatsapp_connections", "max_conexoes", "conexões WhatsApp"))
-    check("com o painel no teto, criar conexao e recusada", st == 403, st)
-
-    # Usuarios: painel diz 2 de 3, enforcer deixa passar.
-    st, _ = await erro(plan_limits.enforce_plan_limit(
-        DB, TENANT_A, "users", "max_usuarios", "usuários"))
-    check("abaixo do teto, o enforcer deixa passar", st is None, st)
-
-    # Disparos: o painel e o teto mensal leem da MESMA funcao. Um enviado no
-    # mes tem que aparecer nos dois lados.
-    import campaigns as campanhas
-    from datetime import datetime, timezone
-    agora = datetime.now(timezone.utc).isoformat()
-    await DB.campaign_recipients.insert_many([
-        {"id": f"r{i}", "tenant_id": TENANT_A, "status": "enviado", "sent_at": agora}
-        for i in range(98)
-    ])
-    # Um pendente e um de outra empresa: nenhum dos dois pode ser contado.
-    await DB.campaign_recipients.insert_one(
-        {"id": "r-pend", "tenant_id": TENANT_A, "status": "pendente", "sent_at": agora})
-    await DB.campaign_recipients.insert_one(
-        {"id": "r-outra", "tenant_id": TENANT_B, "status": "enviado", "sent_at": agora})
-
-    contado = await campanhas.disparos_no_mes(DB, TENANT_A)
-    check("a contagem ignora pendente e outra empresa", contado == 98, contado)
-
-    linha = {l["chave"]: l for l in (await rset.empresa(ADMIN_A))["uso"]}["max_disparos_mes"]
-    check("o painel mostra o mesmo numero da contagem", linha["usado"] == contado, linha)
-
-    st, det = await erro(rcamp._enforce_cota_mensal(DB, TENANT_A, 2))
-    check("cabendo no teto (98+2=100), a campanha passa", st is None, (st, det))
-    st, det = await erro(rcamp._enforce_cota_mensal(DB, TENANT_A, 3))
-    check("estourando (98+3>100), e recusada", st == 403, (st, det))
-    check("e o 403 cita o mesmo usado do painel", str(contado) in (det or ""), det)
-
-
-async def etapa_conta_propria_de_ia():
-    print("\n[ia: conta da empresa nao tem teto nosso]")
-    linhas = {l["chave"]: l for l in (await rset.empresa(ADMIN_A))["uso"]}
-    check("sem conexao propria, o teto do plano vale",
-          linhas["max_tokens_ia_mes"]["limite"] == 50_000, linhas["max_tokens_ia_mes"])
-
-    await DB.ai_connections.insert_one(
-        {"id": "conn-1", "tenant_id": TENANT_A, "status": "conectada",
-         "provedor": "anthropic", "modelo": "claude-haiku-4-5-20251001"})
-    linhas = {l["chave"]: l for l in (await rset.empresa(ADMIN_A))["uso"]}
-    check("com a conta da empresa conectada, some o teto",
-          linhas["max_tokens_ia_mes"]["limite"] is None, linhas["max_tokens_ia_mes"])
-    check("e a tela diz de quem e a conta",
-          linhas["max_tokens_ia_mes"]["nota"] == "conta da empresa",
-          linhas["max_tokens_ia_mes"])
-
-    # Conexao em erro nao conta como conta propria: `resolver_credencial` cai na
-    # plataforma, entao o teto do plano volta a valer.
-    await DB.ai_connections.update_one({"id": "conn-1"}, {"$set": {"status": "erro"}})
-    linhas = {l["chave"]: l for l in (await rset.empresa(ADMIN_A))["uso"]}
-    check("conexao em erro nao remove o teto",
-          linhas["max_tokens_ia_mes"]["limite"] == 50_000, linhas["max_tokens_ia_mes"])
+    check("admin de B ve a empresa de B", rb["empresa"]["nome"] == "Revenda B", rb["empresa"])
 
 
 async def etapa_barreira_de_permissao():
@@ -311,9 +202,6 @@ def test_suite():
         await etapa_modo_suporte()
         await etapa_nome()
         await etapa_empresa()
-        await etapa_uso()
-        await etapa_coerencia_com_o_enforcer()
-        await etapa_conta_propria_de_ia()
         await etapa_barreira_de_permissao()
         print(f"\n=== {ok} verificacoes passaram ===")
     asyncio.run(_tudo())

@@ -67,8 +67,8 @@ export default function AIAgentsPage() {
         <div className="zz-panel bg-surface-2 p-4 flex gap-3" data-testid="ai-fallback-note">
           <Sparkle size={18} weight="bold" className="text-ink-3 shrink-0 mt-0.5" />
           <p className="text-xs text-ink-2">
-            {t("Agente")} sem chave própria usa a IA inclusa no seu plano, dentro do limite mensal
-            contratado. Informar a chave da {t("empresa")} na configuração do {t("agente")} remove esse limite e
+            {t("Agente")} sem chave própria usa a IA inclusa, que pode ter um limite mensal de uso.
+            Informar a chave da {t("empresa")} na configuração do {t("agente")} remove esse limite e
             passa o custo direto para a conta dela no provedor.
           </p>
         </div>

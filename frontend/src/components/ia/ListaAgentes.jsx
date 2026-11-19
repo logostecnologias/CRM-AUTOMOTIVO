@@ -24,7 +24,7 @@ const modoRotulo = () => ({
  *
  * Mesma ideia do "Testar" do editor de fluxos: ver o agente responder antes de
  * apontá-lo para clientes de verdade. Bate no motor real, então também
- * exercita a credencial e o teto do plano — um teste que passasse por fora
+ * exercita a credencial e o teto de IA da empresa — um teste que passasse por fora
  * desses dois não provaria nada sobre produção. */
 function ChatTeste({ agente, onFechar }) {
   const [mensagens, setMensagens] = useState([]);
@@ -397,7 +397,7 @@ export default function ListaAgentes({ plataformaDisponivel }) {
   const rotuloTipo = (a) => catalogo?.tipos.find((t) => t.id === a.tipo)?.rotulo || a.tipo;
 
   const rotuloModelo = (a) => {
-    if (!a.provedor) return plataformaDisponivel ? "IA do plano" : null;
+    if (!a.provedor) return plataformaDisponivel ? "IA inclusa" : null;
     const p = provedores.find((x) => x.id === a.provedor);
     return p?.modelos.find((m) => m.id === a.modelo)?.rotulo || a.modelo;
   };
