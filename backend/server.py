@@ -36,6 +36,7 @@ from routes.formularios import router as formularios_router
 from routes.meta_conversoes import router as meta_conversoes_router
 from routes.estoque import router as estoque_router
 import agenda_worker
+import exclusao_empresas
 import campaign_runner
 import health_monitor
 import media_retention
@@ -484,6 +485,7 @@ async def on_startup():
     media_retention.start()
     campaign_runner.start()
     agenda_worker.start()
+    exclusao_empresas.start()
     faltando = [v for v in ("META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN")
                 if not os.environ.get(v)]
     if faltando:
@@ -502,5 +504,6 @@ async def on_shutdown():
     media_retention.stop()
     campaign_runner.stop()
     agenda_worker.stop()
+    exclusao_empresas.stop()
     await whatsapp_client.close_client()
     close_db()

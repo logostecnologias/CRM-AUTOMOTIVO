@@ -131,10 +131,37 @@ Sintomas e causa provável:
 
 ## Backup
 
-Ainda não existe, e é a lacuna mais séria deste ambiente. Precisa de
-`mongodump` diário no `bancos-db`, cópia de `/var/lib/zappzen/media` e uma
-cópia **fora da Oracle** da `AI_CREDENTIALS_KEY`: sem ela, as credenciais de IA
-gravadas no banco são irrecuperáveis.
+Existe desde 19/11/2026, depois de a empresa R3 COMPANY (em uso) ser excluída
+por engano no painel em 18/11. Sem backup e sem replica set, o que voltou veio
+de recuperação forense dos arquivos do WiredTiger: contatos, funil e agenda;
+negócios, agendamentos e o formulário se perderam.
+
+| Onde | Quando (UTC) | O quê | Guarda |
+|---|---|---|---|
+| `bancos-db` | 06:00 | `mongodump` do banco | 14 dias |
+| `WuzAPI` | 06:30 | `mongodump` pelo túnel + `/var/lib/zappzen/media` | 7 dias |
+
+Os arquivos ficam em `/var/backups/zappzen/` nas duas máquinas. Script e units
+em `deploy/backup/` (o timer de cada máquina é o `.banco`/`.app`, instalado como
+`zappzen-backup.timer`). A configuração fica em `/etc/zappzen-backup/`: `env`
+(`DESTINO`, `DIAS`, `MIDIA`) e `mongo.yaml` com a `uri`, que o `mongodump` lê
+por `--config` para a senha não aparecer no `ps`. No `WuzAPI` o `mongodump` é o
+binário copiado do `bancos-db` para `/usr/local/bin`.
+
+```bash
+ssh bancos-db "systemctl list-timers zappzen-backup.timer; ls -la /var/backups/zappzen"
+ssh bancos-db "sudo systemctl start zappzen-backup"     # roda agora
+# Restaurar (sobrescreve o banco: pare o serviço `zappzen` antes)
+ssh bancos-db "sudo mongorestore --config=/etc/zappzen-backup/mongo.yaml --gzip --archive=/var/backups/zappzen/<arquivo> --drop"
+```
+
+O que ainda falta: uma cópia **fora da Oracle** (as duas máquinas estão na
+mesma conta) e da `AI_CREDENTIALS_KEY`: sem ela, as credenciais de IA gravadas
+no banco são irrecuperáveis.
+
+Excluir empresa no painel também deixou de apagar na hora: ela fica 30 dias
+suspensa em "Excluídas", restaurável com um clique, e só então o worker
+`exclusao_empresas` apaga de vez.
 
 Vale também subir a conta da Oracle para Pay As You Go. Instância Always Free
 ociosa pode ser recuperada, e esta agora tem produção em cima.

@@ -7,7 +7,7 @@ import { haQuanto, plural } from "@/components/painel/Indicadores";
 import NovaEmpresa from "@/components/superadmin/NovaEmpresa";
 import EmpresaDetalhe from "@/components/superadmin/EmpresaDetalhe";
 import {
-  BarraIA, EmDia, PontoSaude, SeloMarca, SeloProblema, nivelDaEmpresa, numero, useEntrar,
+  BarraIA, EmDia, PontoSaude, SeloMarca, SeloProblema, apagaEm, nivelDaEmpresa, numero, useEntrar,
 } from "@/components/superadmin/comum";
 import {
   ArrowDown, ArrowUp, CaretRight, DownloadSimple, MagnifyingGlass, Plus, SignIn, WhatsappLogo,
@@ -30,6 +30,7 @@ const FILTROS = [
   { id: "graves", rotulo: "Graves" },
   { id: "em_dia", rotulo: "Em dia" },
   { id: "suspensas", rotulo: "Suspensas" },
+  { id: "excluidas", rotulo: "Excluídas" },
 ];
 
 const ORDENS = [
@@ -46,6 +47,10 @@ const ORDENS = [
 const PESO_SAUDE = { alto: 0, medio: 1, ok: 2, suspensa: 3 };
 
 function filtrar(t, filtro) {
+  // Excluída (na carência) só aparece no filtro próprio: nas outras visões ela
+  // contaria como suspensa e poluiria "Todas".
+  if (filtro === "excluidas") return !!t.excluida_em;
+  if (t.excluida_em) return false;
   const n = nivelDaEmpresa(t);
   switch (filtro) {
     case "atencao": return n === "alto" || n === "medio";
@@ -113,7 +118,7 @@ function exportarCSV(linhas) {
   const corpo = linhas.map((t) => {
     const s = t.saude || {};
     return [
-      t.name, MARCAS[validaMarca(t.marca)].nome, t.status === "active" ? "ativa" : "suspensa",
+      t.name, MARCAS[validaMarca(t.marca)].nome, t.excluida_em ? "excluída" : t.status === "active" ? "ativa" : "suspensa",
       s.admins?.[0]?.email, `${s.conexoes?.no_ar || 0}/${s.conexoes?.total || 0}`,
       s.mensagens_7d, s.leads_7d, s.vendas_30d, s.vendas_30d_valor, s.usuarios,
       s.ultimo_acesso ? new Date(s.ultimo_acesso).toLocaleString("pt-BR") : "",
@@ -293,7 +298,7 @@ export default function TenantsPage() {
                       <span className="font-semibold text-sm">{t.name}</span>
                       {nivel === "suspensa" && (
                         <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-danger-soft border border-danger text-danger">
-                          suspensa
+                          {t.excluida_em ? `excluída · apaga em ${apagaEm(t).toLocaleDateString("pt-BR")}` : "suspensa"}
                         </span>
                       )}
                     </div>

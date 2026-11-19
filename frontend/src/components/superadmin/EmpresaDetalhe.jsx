@@ -10,12 +10,12 @@ import SerieDiaria from "@/components/reports/SerieDiaria";
 import { haQuanto, plural } from "@/components/painel/Indicadores";
 import {
   BarraIA, EmDia, IconeNivel, SENHA_MIN, SeloMarca, compacto, copiar, dataHora,
-  descreverAtividade, detalheDaEmpresa, dolar, gerarSenha, nivelDaEmpresa, numero,
+  CARENCIA_DIAS, apagaEm, descreverAtividade, detalheDaEmpresa, dolar, gerarSenha, nivelDaEmpresa, numero,
   porQue, rotuloDoProblema,
 } from "@/components/superadmin/comum";
 import {
   ArrowsClockwise, Copy, Eye, EyeSlash, Key, PauseCircle, PlayCircle, SignIn, Trash,
-  Warning, WhatsappLogo,
+  ArrowCounterClockwise, Warning, WhatsappLogo,
 } from "@phosphor-icons/react";
 
 /**
@@ -425,7 +425,9 @@ function Config({ e, mudar, mudando, excluir, excluindo }) {
             <Warning size={15} weight="fill" /> Excluir a empresa e todos os dados
           </div>
           <div className="text-xs text-ink-3 mt-0.5 mb-2">
-            Conversas, contatos, funil, estoque, agenda, agentes e usuários. Não há como desfazer.
+            A equipe perde o acesso na hora e a empresa vai para <b className="text-ink">Excluídas</b>, onde
+            pode ser restaurada por {CARENCIA_DIAS} dias. Depois disso, conversas, contatos, funil, estoque,
+            agenda, agentes e usuários são apagados de vez.
             Para confirmar, digite o nome exato: <b className="text-ink">{e.name}</b>
           </div>
           <div className="flex gap-2">
@@ -491,13 +493,25 @@ export default function EmpresaDetalhe({ id, aba = "resumo", onAba, onFechar, on
   const [excluir, excluindo] = useAcao(async () => {
     try {
       const { data } = await api.delete(`/admin/tenants/${id}`);
-      // A exclusão não deixa rastro depois de rodar: o total é a única conferência.
-      const n = Object.values(data?.apagados || {}).reduce((a, b) => a + b, 0);
-      toast.success(n ? `Empresa excluída, ${n} registros removidos` : "Empresa excluída");
+      const quando = data?.apagar_em ? new Date(data.apagar_em).toLocaleDateString("pt-BR") : null;
+      toast.success(quando
+        ? `Empresa excluída. Dá para restaurar em Empresas → Excluídas até ${quando}.`
+        : "Empresa excluída");
       onMudou();
       onFechar();
     } catch (ex) {
       toast.error(ex.response?.data?.detail || "Não foi possível excluir");
+    }
+  });
+
+  const [restaurar, restaurando] = useAcao(async () => {
+    try {
+      await api.post(`/admin/tenants/${id}/restaurar`);
+      toast.success("Empresa restaurada, com todos os dados");
+      await carregar();
+      onMudou();
+    } catch (ex) {
+      toast.error(ex.response?.data?.detail || "Não foi possível restaurar");
     }
   });
 
@@ -521,7 +535,7 @@ export default function EmpresaDetalhe({ id, aba = "resumo", onAba, onFechar, on
     <Modal
       titulo={e.name}
       descricao={[
-        nivel === "suspensa" ? "Suspensa" : "Ativa",
+        e.excluida_em ? "Excluída" : nivel === "suspensa" ? "Suspensa" : "Ativa",
         `cliente desde ${new Date(e.created_at).toLocaleDateString("pt-BR")}`,
         admin?.email,
       ].filter(Boolean).join(" · ")}
@@ -541,6 +555,26 @@ export default function EmpresaDetalhe({ id, aba = "resumo", onAba, onFechar, on
         </div>
       }
     >
+      {e.excluida_em && (
+        <div className="border border-danger bg-danger-soft rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap"
+          data-testid="empresa-excluida">
+          <div className="text-sm">
+            <div className="font-medium text-danger flex items-center gap-1.5">
+              <Warning size={15} weight="fill" /> Empresa excluída
+            </div>
+            <div className="text-xs text-ink-2 mt-0.5">
+              Excluída em {new Date(e.excluida_em).toLocaleDateString("pt-BR")}
+              {e.excluida_por ? ` por ${e.excluida_por}` : ""}. Todos os dados continuam guardados e
+              serão apagados de vez em <b>{apagaEm(e).toLocaleDateString("pt-BR")}</b>.
+            </div>
+          </div>
+          <button onClick={restaurar} disabled={restaurando} className="zz-btn text-xs shrink-0"
+            data-testid="empresa-restaurar">
+            <ArrowCounterClockwise size={14} weight="bold" /> Restaurar empresa
+          </button>
+        </div>
+      )}
+
       <div className="flex gap-1 border-b border-line -mt-1 overflow-x-auto" role="tablist">
         {ABAS.map((a) => (
           <button key={a.id} role="tab" aria-selected={atual === a.id} onClick={() => onAba?.(a.id)}
@@ -559,7 +593,11 @@ export default function EmpresaDetalhe({ id, aba = "resumo", onAba, onFechar, on
       {atual === "resumo" && <Resumo e={e} irPara={onAba} />}
       {atual === "equipe" && <Equipe e={e} />}
       {atual === "whatsapp" && <Whatsapp e={e} entrar={entrar} entrando={entrando} />}
-      {atual === "config" && <Config e={e} mudar={mudar} mudando={mudando} excluir={excluir} excluindo={excluindo} />}
+      {atual === "config" && (e.excluida_em
+        ? <div className="text-sm text-ink-3 border border-line rounded-lg px-3 py-6 text-center">
+            Restaure a empresa para mudar as configurações.
+          </div>
+        : <Config e={e} mudar={mudar} mudando={mudando} excluir={excluir} excluindo={excluindo} />)}
       {atual === "historico" && <Historico itens={e.historico} />}
     </Modal>
   );

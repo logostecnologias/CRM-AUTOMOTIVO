@@ -1,0 +1,18 @@
+#!/bin/bash
+# Backup diário do banco do CRM (e das mídias, se MIDIA estiver definido).
+# Configuração em /etc/zappzen-backup/env; credencial em /etc/zappzen-backup/mongo.yaml.
+set -euo pipefail
+. /etc/zappzen-backup/env          # DESTINO, DIAS, MIDIA (opcional)
+mkdir -p "$DESTINO"
+quando=$(date -u +%Y%m%d-%H%M)
+arq="$DESTINO/zappzen-$quando.archive.gz"
+# --config em vez de --uri: a senha não aparece no `ps`.
+mongodump --config=/etc/zappzen-backup/mongo.yaml --archive="$arq.tmp" --gzip --quiet
+gzip -t "$arq.tmp"
+mv "$arq.tmp" "$arq"
+if [ -n "${MIDIA:-}" ] && [ -d "$MIDIA" ]; then
+  tar -C "$(dirname "$MIDIA")" -czf "$DESTINO/media-$quando.tar.gz.tmp" "$(basename "$MIDIA")"
+  mv "$DESTINO/media-$quando.tar.gz.tmp" "$DESTINO/media-$quando.tar.gz"
+fi
+find "$DESTINO" -maxdepth 1 \( -name 'zappzen-*.archive.gz' -o -name 'media-*.tar.gz' -o -name '*.tmp' \) -mtime +"$DIAS" -delete
+echo "backup ok: $(du -h "$arq" | cut -f1) $arq"

@@ -177,6 +177,15 @@ export function SeloProblema({ p, pequeno }) {
  * atenção, verde em dia, cinza suspensa. Acompanha sempre um texto (o selo ou
  * "em dia"), nunca só a cor.
  */
+// Exclusão com carência: espelha `CARENCIA_DIAS` de routes/tenants.py.
+export const CARENCIA_DIAS = 30;
+
+/** Data em que a empresa excluída será apagada de vez, ou null se não está excluída. */
+export function apagaEm(t) {
+  if (!t?.excluida_em) return null;
+  return new Date(new Date(t.excluida_em).getTime() + CARENCIA_DIAS * 864e5);
+}
+
 export function nivelDaEmpresa(t) {
   if (t.status !== "active") return "suspensa";
   const niveis = new Set((t.saude?.problemas || []).map((p) => p.nivel));
@@ -252,7 +261,14 @@ export function descreverAtividade(a) {
     case "tenant.create": return "criou a empresa";
     case "tenant.delete": {
       const n = Object.values(m.apagados || {}).reduce((x, y) => x + y, 0);
-      return `excluiu a empresa${n ? ` (${numero(n)} registros)` : ""}`;
+      // Antes de 19/11/2026 a exclusão apagava na hora e gravava o que saiu.
+      if (n) return `excluiu a empresa (${numero(n)} registros)`;
+      return `excluiu a empresa (restaurável até ${m.apagar_em ? new Date(m.apagar_em).toLocaleDateString("pt-BR") : "o fim da carência"})`;
+    }
+    case "tenant.restore": return "restaurou a empresa";
+    case "tenant.purge": {
+      const n = Object.values(m.apagados || {}).reduce((x, y) => x + y, 0);
+      return `apagou a empresa de vez, após a carência${n ? ` (${numero(n)} registros)` : ""}`;
     }
     case "tenant.update": {
       if (m.status === "suspended") return "suspendeu a empresa";

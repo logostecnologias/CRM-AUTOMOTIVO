@@ -309,7 +309,7 @@ async def atividade(db, nomes: dict[str, str], tenant_id: str | None = None,
         "tenant_id": a.get("tenant_id"),
         # Empresa excluída já não está em `nomes`: a auditoria guardou o nome.
         "empresa": nomes.get(a.get("tenant_id")) or (
-            a.get("alvo") if a.get("acao") == "tenant.delete" else None),
+            a.get("alvo") if a.get("acao") in ("tenant.delete", "tenant.purge") else None),
         "meta": a.get("meta") or {},
     } for a in auditoria]
     linhas += [{

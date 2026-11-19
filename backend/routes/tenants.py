@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
@@ -184,6 +184,11 @@ async def update_tenant(tenant_id: str, body: TenantUpdate, admin=Depends(requir
             update.pop(campo)
     if not update:
         return {"ok": True}
+    atual = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "excluida_em": 1})
+    if atual and atual.get("excluida_em"):
+        # Reativar por aqui deixaria a marca de exclusão de pé e o worker
+        # apagaria uma empresa "ativa" no fim da carência.
+        raise HTTPException(status_code=409, detail="Empresa excluída: restaure antes de alterar")
     res = await db.tenants.update_one({"id": tenant_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
@@ -284,9 +289,65 @@ COLECOES_DA_EMPRESA = (
 )
 
 
+# Exclusão com carência (19/11/2026). Até aqui "Excluir" apagava tudo na hora,
+# sem volta, e uma empresa em uso (R3 COMPANY, 18/11) foi apagada por engano:
+# sem backup, o que voltou veio de recuperação forense dos arquivos do banco, e
+# negócios, agenda e formulário se perderam. Agora excluir só suspende e marca a
+# data; dá para restaurar com um clique durante a carência, e o worker
+# `exclusao_empresas` apaga de verdade depois dela.
+CARENCIA_DIAS = 30
+
+
+def apagar_em(excluida_em: str) -> str:
+    return (datetime.fromisoformat(excluida_em) + timedelta(days=CARENCIA_DIAS)).isoformat()
+
+
 @router.delete("/tenants/{tenant_id}")
 async def delete_tenant(tenant_id: str, admin=Depends(require_super_admin)):
+    """Marca a empresa como excluída. Não apaga nada: suspende (login e sessões
+    abertas param na hora, como na suspensão) e some da lista normal."""
     db = get_db()
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    if tenant.get("excluida_em"):
+        return {"ok": True, "apagar_em": apagar_em(tenant["excluida_em"])}
+    agora = datetime.now(timezone.utc).isoformat()
+    await db.tenants.update_one({"id": tenant_id}, {"$set": {
+        "status": "suspended",
+        "excluida_em": agora,
+        "excluida_por": admin.get("email"),
+        # Para a restauração devolver a empresa como estava, inclusive se ela
+        # já estava suspensa antes de ser excluída.
+        "status_antes_da_exclusao": tenant.get("status") or "active",
+    }})
+    await audit.registrar(db, ator=admin, acao="tenant.delete", tenant_id=tenant_id,
+                          alvo=tenant.get("name"),
+                          meta={"carencia_dias": CARENCIA_DIAS, "apagar_em": apagar_em(agora)})
+    return {"ok": True, "apagar_em": apagar_em(agora)}
+
+
+@router.post("/tenants/{tenant_id}/restaurar")
+async def restaurar_tenant(tenant_id: str, admin=Depends(require_super_admin)):
+    db = get_db()
+    tenant = await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada: a carência já passou")
+    if not tenant.get("excluida_em"):
+        raise HTTPException(status_code=409, detail="Esta empresa não está excluída")
+    status = tenant.get("status_antes_da_exclusao") or "active"
+    await db.tenants.update_one({"id": tenant_id}, {
+        "$set": {"status": status},
+        "$unset": {"excluida_em": "", "excluida_por": "", "status_antes_da_exclusao": ""},
+    })
+    await audit.registrar(db, ator=admin, acao="tenant.restore", tenant_id=tenant_id,
+                          alvo=tenant.get("name"), meta={"status": status})
+    return await db.tenants.find_one({"id": tenant_id}, {"_id": 0})
+
+
+async def apagar_empresa(db, tenant_id: str, ator: dict | None = None) -> dict:
+    """Apaga a empresa e tudo dela, de verdade. Só o worker de exclusão chama,
+    depois da carência. Devolve o que saiu, por coleção."""
     alvo = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "name": 1})
     # Best-effort: cancela a assinatura do nosso app nas contas da Meta antes
     # de apagar as conexões (ZZ-14). Sem isto a Meta continua entregando o
@@ -309,11 +370,11 @@ async def delete_tenant(tenant_id: str, admin=Depends(require_super_admin)):
         if res.deleted_count:
             apagados[colecao] = res.deleted_count
     await audit.registrar(
-        db, ator=admin, acao="tenant.delete", tenant_id=tenant_id,
+        db, ator=ator, acao="tenant.purge", tenant_id=tenant_id,
         alvo=(alvo or {}).get("name"), meta={"apagados": apagados},
     )
-    # O que saiu, por coleção: também vai para a auditoria, junto de quem apagou.
-    return {"ok": True, "apagados": apagados}
+    # O que saiu, por coleção: também vai para a auditoria.
+    return apagados
 
 
 @router.post("/tenants/{tenant_id}/impersonate")
@@ -355,9 +416,13 @@ async def visao_geral(_=Depends(require_super_admin)):
     resultado contra a semana anterior, consumo de IA, quem mais usa e as
     últimas ações (ver `plataforma`)."""
     db = get_db()
-    tenants = await db.tenants.find({}, {"_id": 0}).to_list(5000)
+    # Empresa excluída (na carência) não entra nos números da plataforma.
+    todas = await db.tenants.find({}, {"_id": 0}).to_list(5000)
+    tenants = [t for t in todas if not t.get("excluida_em")]
     ids = [t["id"] for t in tenants]
-    nomes = {t["id"]: t["name"] for t in tenants}
+    # Os nomes vêm de todas: a linha do tempo mostra também o que se fez numa
+    # empresa que depois foi excluída.
+    nomes = {t["id"]: t["name"] for t in todas}
     por_id, serie, linha_do_tempo = await asyncio.gather(
         plataforma.saude(db, tenants),
         plataforma.serie(db, ids),
