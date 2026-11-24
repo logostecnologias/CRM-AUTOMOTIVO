@@ -41,7 +41,11 @@ PORT = int(os.environ.get("PROXY_PORT", "8099"))
 
 # O único caminho público. Prefixo, não igualdade: as rotas de webhook
 # carregam tenant_id/connection_id no caminho.
-ALLOW_PREFIXES = ("/api/webhooks/",)
+#
+# `/c/` é o catálogo público das lojas (ver `catalogo.py`): já é público por
+# definição, só serve carro à venda de catálogo ligado e não lê nada com login.
+# Liberado para dar para testar o link (e a prévia dele no WhatsApp) pelo túnel.
+ALLOW_PREFIXES = ("/api/webhooks/", "/c/")
 # Exato: o checador do túnel bate aqui para confirmar que subiu.
 ALLOW_EXACT = ("/api/health",)
 
@@ -55,6 +59,10 @@ _HOP = {
 
 def _permitido(path: str) -> bool:
     caminho = path.split("?", 1)[0]
+    # `/c/../api/admin` começa com um prefixo liberado e sairia dele no
+    # backend. Segmento de ponto (cru ou codificado) não tem uso legítimo aqui.
+    if ".." in caminho or "%2e" in caminho.lower():
+        return False
     return caminho in ALLOW_EXACT or any(caminho.startswith(p) for p in ALLOW_PREFIXES)
 
 

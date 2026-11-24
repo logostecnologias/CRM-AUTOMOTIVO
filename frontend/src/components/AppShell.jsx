@@ -67,7 +67,8 @@ function tenantNav(role) {
   if (role !== "tenant_admin") {
     return [
       { itens: atendimento.itens },
-      { titulo: "Pátio", itens: [{ to: "/app/estoque", icon: Car, label: "Estoque" }] },
+      { titulo: "Pátio", itens: [{ to: "/app/estoque", icon: Car, label: "Estoque" },
+        { to: "/app/catalogo", icon: LinkSimple, label: "Catálogo" }] },
     ];
   }
 
@@ -78,7 +79,7 @@ function tenantNav(role) {
       titulo: "Pátio",
       itens: [
         { to: "/app/estoque", icon: Car, label: "Estoque" },
-        { to: "/app/catalogo", icon: LinkSimple, label: "Catálogo", emBreve: true },
+        { to: "/app/catalogo", icon: LinkSimple, label: "Catálogo" },
       ],
     },
     {

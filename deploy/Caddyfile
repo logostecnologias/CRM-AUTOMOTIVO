@@ -9,11 +9,22 @@
 # de máquina depois custa uma troca de DNS e nada mais: não há certificado para
 # carregar junto.
 
-zappzen.atendimentoautomatizado.com.br {
+# Dois endereços para o mesmo sistema. O `crmauto.logostecnologias.com` é o
+# novo (24/11/2026); o antigo continua respondendo porque é a URL cadastrada
+# nos webhooks (Meta, WuzAPI, Twilio) e nos links de catálogo já enviados.
+# Cada um ganha certificado próprio, emitido pelo Caddy.
+zappzen.atendimentoautomatizado.com.br, crmauto.logostecnologias.com {
 	encode zstd gzip
 
 	# A API vem primeiro: o handle_path do estático abaixo casaria /api também.
 	handle /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# Catálogo público das lojas: a página é montada pelo backend, e não pelo
+	# app React, para o WhatsApp mostrar a prévia (foto, nome e preço) de cada
+	# carro. Ver backend/catalogo.py.
+	handle /c/* {
 		reverse_proxy 127.0.0.1:8000
 	}
 

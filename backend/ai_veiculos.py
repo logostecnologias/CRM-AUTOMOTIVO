@@ -197,12 +197,27 @@ INSTRUCOES = (
     "disser 'sem foto', diga que ainda não tem foto daquele carro. Mande fotos quando o "
     "cliente pedir ou quando mostrar for o passo natural, não a cada mensagem. Nunca "
     "explique o código ao cliente.\n"
+    "Link: quando a consulta trouxer 'link:', é a página do carro no catálogo da loja, "
+    "com todas as fotos e a ficha. Mande o link quando o cliente quiser ver mais detalhes "
+    "ou mais fotos, copiado exatamente como veio; nunca invente um link.\n"
     "Tabela FIPE: a consulta do estoque traz a FIPE dos carros que a loja ligou a ela; use "
     "para mostrar vantagem (ex.: abaixo da FIPE), com o valor exatamente como veio. Para o "
     "carro que o cliente quer dar na troca, use consultar_fipe. A FIPE é só referência de "
     "mercado: NUNCA diga que a loja paga esse valor nem faça proposta pelo carro do "
     "cliente; diga que a avaliação é feita pela equipe, ao ver o carro."
 )
+
+
+async def _link_catalogo(db, tenant_id: str) -> str | None:
+    """O endereço do catálogo público, quando ligado (ver `catalogo.py`). Sem
+    `PUBLIC_BASE_URL` no servidor não há como montar um link absoluto, e um
+    link relativo no WhatsApp não abre."""
+    import os
+    publica = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if not publica:
+        return None
+    cfg = await db.catalogos.find_one({"tenant_id": tenant_id, "ativo": True}, {"_id": 0, "slug": 1})
+    return f"{publica}/c/{cfg['slug']}" if cfg and cfg.get("slug") else None
 
 
 def executor(db, tenant_id: str):
@@ -216,7 +231,9 @@ def executor(db, tenant_id: str):
         if not veiculos:
             return ("Nenhum carro à venda corresponde a essa busca. Tente outras palavras "
                     "ou pergunte ao cliente o que exatamente ele procura.")
-        texto = "\n".join(f"- {descreve(v)}" for v in veiculos)
+        base = await _link_catalogo(db, tenant_id)
+        texto = "\n".join(f"- {descreve(v)}" + (f"; link: {base}/{v['id']}" if base else "")
+                          for v in veiculos)
         if total > len(veiculos):
             texto += (f"\n(Mostrando {len(veiculos)} de {total}. Se precisar, peça ao cliente "
                       "mais detalhes para refinar a busca.)")

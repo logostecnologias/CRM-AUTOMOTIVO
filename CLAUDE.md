@@ -189,6 +189,15 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - **FIPE é referência, não proposta**: o prompt proíbe dizer que a loja paga esse valor. Os valores FIPE que vieram de consulta (do carro do estoque ou de `consultar_fipe`) entram nos `permitidos` de `ai_veiculos.conferir`; qualquer outro valor de carro continua segurado
 - A tabela muda todo mês e o valor gravado **não se atualiza sozinho**: a ficha mostra o mês de referência e o botão de atualizar
 
+### Catálogo público (24/11/2026)
+- O estoque num link para mandar ao cliente: `/c/{slug}` (lista com busca, categoria e ordem) e `/c/{slug}/{id}` (ficha com galeria e botão "Tenho interesse" que abre o WhatsApp da loja com a mensagem pronta). `catalogo.py` monta o HTML, `routes/catalogo.py` serve as páginas e a configuração (`/api/catalogo`, coleção `catalogos`, uma por empresa), tela em Pátio → **Catálogo** e "Copiar link" na ficha do veículo
+- **A página é montada no servidor, não no React**, e o Caddy manda `/c/*` para o backend: a prévia do link no WhatsApp sai das tags `og:` do HTML, e o WhatsApp não executa JavaScript. Sem script nenhum (busca é `<form method=get>`, galeria é `scroll-snap`), com CSP que proíbe script, e todo texto da loja passa por `html.escape`
+- **Só o que é do anúncio**: vendido não aparece, e o link antigo de um vendido abre "já foi vendido" (410) com o caminho para os outros; reservado aparece marcado; placa, localização e quem cadastrou são tirados já na consulta
+- **A foto pública passa por `/c/{slug}/foto/{id}`**, que só serve foto de carro à venda de catálogo ligado. `/api/media` exige login e continua assim
+- O `slug` é único entre empresas (409), com palavras reservadas (`api`, `app`...). O endereço absoluto vem de `PUBLIC_BASE_URL` ou, sem ela, do `Host`/`X-Forwarded-Proto` que o Caddy repassa
+- A IA recebe `link:` de cada carro na consulta do estoque quando o catálogo está ligado **e** `PUBLIC_BASE_URL` existe no servidor (sem ela não há como montar link absoluto fora de uma requisição)
+- O domínio é o do sistema. Domínio próprio da loja exigiria DNS e certificado por cliente
+
 ### Atividades e follow-up
 - Ficha e funil guardam o que **já** aconteceu; atividade guarda o que ainda precisa acontecer. Sem isso o próximo passo mora na cabeça do vendedor, e o CRM vira cadastro morto
 - **"Atrasada" não é campo, é comparação.** O estado gravado é só `concluida_em` (nulo = pendente); atrasada é `pendente e vence_em < agora`, calculado na leitura (`atividades.com_atraso`). Gravar um status exigiria varredura periódica para virar a chave de cada atividade na hora certa — trabalho de fundo para produzir o que uma comparação de data já responde

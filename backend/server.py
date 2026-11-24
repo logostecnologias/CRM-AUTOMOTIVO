@@ -37,6 +37,7 @@ from routes.meta_conversoes import router as meta_conversoes_router
 from routes.aviso_grupo import router as aviso_grupo_router
 from routes.estoque import router as estoque_router
 from routes.fipe import router as fipe_router
+from routes.catalogo import router as catalogo_router
 import agenda_worker
 import exclusao_empresas
 import campaign_runner
@@ -165,6 +166,7 @@ app.include_router(meta_conversoes_router)
 app.include_router(aviso_grupo_router)
 app.include_router(estoque_router)
 app.include_router(fipe_router)
+app.include_router(catalogo_router)
 app.include_router(activities_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
@@ -262,6 +264,8 @@ INDEXES: list[tuple[str, list[tuple[str, int]], dict]] = [
     # é consultado a cada mudança de etapa ("este evento já saiu?").
     ("meta_conversoes", [("tenant_id", 1)], {"unique": True}),
     ("avisos_grupo", [("tenant_id", 1)], {"unique": True}),
+    ("catalogos", [("tenant_id", 1)], {"unique": True}),
+    ("catalogos", [("slug", 1)], {"unique": True, "sparse": True}),
     ("meta_eventos", [("tenant_id", 1), ("deal_id", 1), ("evento", 1), ("status", 1)], {}),
     ("meta_eventos", [("tenant_id", 1), ("created_at", -1)], {}),
 

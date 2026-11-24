@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { CaretLeft, CaretRight, PencilSimple, Trash, X, MapPin, CalendarBlank } from "@phosphor-icons/react";
+import { CaretLeft, CaretRight, PencilSimple, Trash, X, MapPin, CalendarBlank, LinkSimple, WhatsappLogo } from "@phosphor-icons/react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { confirmToast } from "@/lib/confirm-toast";
 import { FotoCarro, Placa } from "./Visual";
 import FipeVeiculo from "./FipeVeiculo";
+import { copiar } from "@/pages/tenant/CatalogoPage";
 import { diasNoPatio, formatAno, formatKm, formatPreco, nomeVeiculo, rotulo, temPromocao } from "./estoque";
 
 /**
@@ -16,6 +17,13 @@ import { diasNoPatio, formatAno, formatKm, formatPreco, nomeVeiculo, rotulo, tem
 export default function FichaVeiculo({ veiculo: v, opcoes, podeEditar, onFechar, onEditar, onMudou, onExcluido }) {
   const [i, setI] = useState(0);
   const [mudando, setMudando] = useState(false);
+  // O link do carro no catálogo público, quando ele está no ar. Carro vendido
+  // não tem página (o link abriria "já foi vendido").
+  const [catalogo, setCatalogo] = useState(null);
+  useEffect(() => {
+    api.get("/catalogo").then((r) => setCatalogo(r.data)).catch(() => {});
+  }, []);
+  const linkCarro = catalogo?.ativo && catalogo?.link && v.status !== "vendido" ? `${catalogo.link}/${v.id}` : null;
   const fotos = v.fotos || [];
   const atual = fotos[Math.min(i, Math.max(0, fotos.length - 1))];
 
@@ -107,6 +115,19 @@ export default function FichaVeiculo({ veiculo: v, opcoes, podeEditar, onFechar,
             {v.localizacao && <span className="inline-flex items-center gap-1 text-xs text-ink-3"><MapPin size={13} /> {v.localizacao}</span>}
             <span className="inline-flex items-center gap-1 text-xs text-ink-3"><CalendarBlank size={13} /> {diasNoPatio(v.dias_no_patio)}</span>
           </div>
+
+          {linkCarro && (
+            <div className="flex gap-2 mt-4">
+              <button type="button" className="zz-btn zz-btn-secondary h-9" onClick={() => copiar(linkCarro, "Link do carro copiado")}
+                data-testid="ficha-copiar-link">
+                <LinkSimple size={14} /> Copiar link
+              </button>
+              <a className="zz-btn zz-btn-secondary h-9" target="_blank" rel="noopener noreferrer"
+                href={`https://wa.me/?text=${encodeURIComponent(`${nomeVeiculo(v)} ${formatAno(v)}: ${linkCarro}`)}`}>
+                <WhatsappLogo size={14} /> Mandar no WhatsApp
+              </a>
+            </div>
+          )}
 
           {temPromocao(v) && (
             <div className="text-sm text-ink-3 mt-5 num">de <span className="line-through">{formatPreco(v.preco_anterior)}</span> por</div>

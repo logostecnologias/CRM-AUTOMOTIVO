@@ -13,6 +13,7 @@ import CampanhasPage from "@/pages/tenant/CampanhasPage";
 import FunilPage from "@/pages/tenant/FunilPage";
 import AtividadesPage from "@/pages/tenant/AtividadesPage";
 import EstoquePage from "@/pages/tenant/EstoquePage";
+import CatalogoPage from "@/pages/tenant/CatalogoPage";
 import AgendaPage from "@/pages/tenant/AgendaPage";
 import RelatoriosPage from "@/pages/tenant/RelatoriosPage";
 import InboxPage from "@/pages/tenant/InboxPage";
@@ -78,6 +79,7 @@ function App() {
             {/* Leitura para toda a equipe (o vendedor acha o carro e manda ao
                 cliente); escrever é do admin, decidido na própria tela e na API. */}
             <Route path="estoque" element={<EstoquePage />} />
+            <Route path="catalogo" element={<CatalogoPage />} />
             <Route path="agenda" element={<AgendaPage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="settings" element={<SettingsPage />} />
