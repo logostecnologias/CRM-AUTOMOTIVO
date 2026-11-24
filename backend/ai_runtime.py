@@ -222,7 +222,8 @@ async def consumo_do_mes(db, tenant_id: str, mes: str | None = None,
 
 async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str,
                                historico: list[dict], ferramentas: list = None,
-                               executar=None, propria: bool = False) -> ai_client.Resposta:
+                               executar=None, propria: bool = False,
+                               forcar: str | None = None) -> ai_client.Resposta:
     """Resolve a credencial do agente, chama o provedor e mede — nesta ordem.
 
     É por aqui que o atendimento, o chat de teste e (futuramente) o nó de fluxo
@@ -237,6 +238,7 @@ async def responder_por_agente(db, tenant_id: str, agente: dict, instrucoes: str
     resposta = await ai_client.responder(
         cred["provedor"], cred["chave"], cred["modelo"], instrucoes, historico,
         ferramentas=ferramentas, executar=executar, base_url=cred.get("base_url"),
+        forcar=forcar,
     )
     await registrar_uso(db, tenant_id, cred["origem"], cred["provedor"],
                         cred["modelo"], resposta, agente.get("id"))

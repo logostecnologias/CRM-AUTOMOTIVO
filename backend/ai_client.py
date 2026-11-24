@@ -490,6 +490,7 @@ async def responder(
     ferramentas: list | None = None,
     executar=None,
     base_url: str | None = None,
+    forcar: str | None = None,
 ) -> Resposta:
     """Uma resposta do agente.
 
@@ -516,16 +517,16 @@ async def responder(
     protocolo = (PROVEDORES.get(provedor) or {}).get("protocolo")
     if protocolo == "anthropic":
         return await _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
-                                          ferramentas, executar)
+                                          ferramentas, executar, forcar=forcar)
     if protocolo == "responses":
         return await _responder_openai(chave_api, modelo_id, instrucoes, historico,
-                                       ferramentas, executar)
+                                       ferramentas, executar, forcar=forcar)
     if protocolo == "chat":
         url = base_url_de(provedor, base_url)
         if PROVEDORES[provedor].get("url_livre"):
             url = await validar_base_url(url)
         return await _responder_chat(url, chave_api, modelo_id, instrucoes, historico,
-                                     ferramentas, executar)
+                                     ferramentas, executar, forcar=forcar)
     raise IAError(f"Provedor desconhecido: {provedor}")
 
 
@@ -562,7 +563,7 @@ def _bloco_anthropic(b) -> dict | None:
 
 
 async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
-                               ferramentas=None, executar=None) -> Resposta:
+                               ferramentas=None, executar=None, forcar=None) -> Resposta:
     try:
         from anthropic import AsyncAnthropic
     except ImportError:
@@ -574,6 +575,10 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
     if ferramentas:
         extra["tools"] = [{"name": f.nome, "description": f.descricao,
                            "input_schema": f.parametros} for f in ferramentas]
+        if forcar:
+            # Só na primeira volta: depois do resultado o modelo tem de poder
+            # escrever, senão chamaria a ferramenta para sempre.
+            extra["tool_choice"] = {"type": "tool", "name": forcar}
 
     async with AsyncAnthropic(api_key=chave_api, max_retries=2) as client:
         vazias = 0
@@ -635,6 +640,7 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
             # fazia a resposta sair vazia.
             parcial = "".join(
                 b.text for b in r.content if getattr(b, "type", None) == "text").strip() or parcial
+            extra.pop("tool_choice", None)
             mensagens.append({"role": "assistant",
                               "content": [b for b in (_bloco_anthropic(x) for x in r.content)
                                           if b]})
@@ -651,7 +657,7 @@ async def _responder_anthropic(chave_api, modelo_id, instrucoes, historico,
 
 
 async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
-                            ferramentas=None, executar=None) -> Resposta:
+                            ferramentas=None, executar=None, forcar=None) -> Resposta:
     try:
         from openai import AsyncOpenAI
     except ImportError:
@@ -664,6 +670,8 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
         extra["tools"] = [{"type": "function", "name": f.nome,
                            "description": f.descricao, "parameters": f.parametros}
                           for f in ferramentas]
+        if forcar:
+            extra["tool_choice"] = {"type": "function", "name": forcar}
 
     async with AsyncOpenAI(api_key=chave_api, max_retries=2) as client:
         vazias = 0
@@ -725,6 +733,7 @@ async def _responder_openai(chave_api, modelo_id, instrucoes, historico,
             # mantém, e de quebra não reenvia nada já enviado.
             parcial = (getattr(r, "output_text", "") or "").strip() or parcial
             extra["previous_response_id"] = r.id
+            extra.pop("tool_choice", None)
             entrada = [
                 {"type": "function_call_output", "call_id": c.call_id,
                  "output": await _rodar_ferramenta(
@@ -743,7 +752,7 @@ _PENSAMENTO = re.compile(r"<think>.*?</think>", re.S | re.I)
 
 
 async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
-                          ferramentas=None, executar=None) -> Resposta:
+                          ferramentas=None, executar=None, forcar=None) -> Resposta:
     """Chat Completions compatível com OpenAI: Groq, Gemini, OpenRouter,
     DeepSeek, Mistral, xAI e qualquer endpoint que imite a OpenAI.
 
@@ -765,6 +774,8 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
         extra["tools"] = [{"type": "function", "function": {
             "name": f.nome, "description": f.descricao, "parameters": f.parametros}}
             for f in ferramentas]
+        if forcar:
+            extra["tool_choice"] = {"type": "function", "function": {"name": forcar}}
 
     if "gpt-oss" in modelo_id.lower() and "groq.com" in (base_url or ""):
         # O GPT-OSS raciocina em "medium" por padrão na Groq. Para atendimento
@@ -819,6 +830,8 @@ async def _responder_chat(base_url, chave_api, modelo_id, instrucoes, historico,
                 break
 
             parcial = _PENSAMENTO.sub("", getattr(msg, "content", None) or "").strip() or parcial
+            if isinstance(extra.get("tool_choice"), dict):
+                extra.pop("tool_choice")
             mensagens.append({
                 "role": "assistant",
                 "content": getattr(msg, "content", None),

@@ -958,11 +958,35 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
             historico[0]["content"] = f"{linha}\n{historico[0]['content']}".strip()
     await anexar_contexto_agenda(db, tenant_id, blocos, contato, historico)
 
+    vistos = []
+    if usa_veiculos:
+        executar, vistos = ai_veiculos.registrar_consultas(executar)
+    instrucoes = montar_instrucoes(agente, **blocos)
     try:
         resposta = await ai_runtime.responder_por_agente(
-            db, tenant_id, agente, montar_instrucoes(agente, **blocos), historico,
+            db, tenant_id, agente, instrucoes, historico,
             ferramentas=ferramentas, executar=executar,
         )
+        texto_resposta = (resposta.texto or "").strip()
+        # Trava de estoque: preço ou foto de carro que não saiu da consulta de
+        # agora. Uma segunda chance, obrigando o modelo a consultar; se ainda
+        # vier errado, a resposta não sai. Ver `ai_veiculos.conferir`.
+        problema = None
+        if usa_veiculos and SENTINELA.lower() not in texto_resposta.lower():
+            problema = await ai_veiculos.conferir(db, tenant_id, texto_resposta, vistos)
+            if problema:
+                logger.info("Agente %s: %s; refazendo com consulta obrigatória",
+                            agente.get("id"), problema)
+                vistos.clear()
+                resposta = await ai_runtime.responder_por_agente(
+                    db, tenant_id, agente, instrucoes, historico,
+                    ferramentas=ferramentas, executar=executar,
+                    forcar=ai_veiculos.NOME_FERRAMENTA,
+                )
+                texto_resposta = (resposta.texto or "").strip()
+                problema = None
+                if SENTINELA.lower() not in texto_resposta.lower():
+                    problema = await ai_veiculos.conferir(db, tenant_id, texto_resposta, vistos)
     except HTTPException as e:
         # Teto do plano ou nenhuma conta conectada. O detalhe já é texto para
         # leitura humana — é o que explica ao admin por que o agente parou.
@@ -971,7 +995,11 @@ async def tentar_responder(db, agente: dict, session: dict, contato: dict,
         logger.warning("Falha do agente de IA no tenant %s: %s", tenant_id, e)
         return await escalar(f"Agente de IA falhou ({e}) — encaminhado para atendimento humano")
 
-    texto_resposta = (resposta.texto or "").strip()
+    if problema:
+        outputs.append({"type": "text", "content": ai_veiculos.AVISO_PRECO})
+        return await escalar(
+            f"O agente de IA {problema}, e a mensagem foi segurada. Confira com o "
+            f"contato. O que ele ia dizer: \"{texto_resposta[:500]}\"")
 
     # Sentinela conferida por conteúdo, não por igualdade: o modelo às vezes
     # acrescenta pontuação ou uma linha em volta, e tratar isso como resposta

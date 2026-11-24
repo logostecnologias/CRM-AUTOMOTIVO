@@ -75,6 +75,9 @@ class _IAFalsa:
         # (nome, argumentos): a ferramenta que o "modelo" chama antes de
         # responder. Exercita o executor de verdade, como o laço do ai_client faria.
         self.chamar = None
+        # Respostas seguintes, uma por chamada: (texto, chamar). Usado pela
+        # trava de estoque, que pede uma segunda resposta.
+        self.fila = []
 
     async def __call__(self, db, tenant_id, agente, instrucoes, historico,
                        ferramentas=None, executar=None, **kw):
@@ -85,15 +88,17 @@ class _IAFalsa:
         self.chamadas.append({"tenant_id": tenant_id, "agente": agente,
                               "instrucoes": instrucoes, "historico": historico,
                               "ferramentas": ferramentas})
+        self.chamadas[-1]["forcar"] = kw.get("forcar")
         if self.erro:
             raise self.erro
+        texto, chamar = (self.fila.pop(0) if self.fila else (self.proxima, self.chamar))
         usadas = []
-        if self.chamar and ferramentas and executar:
-            nome, args = self.chamar
+        if chamar and ferramentas and executar:
+            nome, args = chamar
             if nome in {f.nome for f in ferramentas}:
                 self.chamadas[-1]["resultado_ferramenta"] = await executar(nome, args)
                 usadas.append(nome)
-        return ai_client.Resposta(texto=self.proxima, modelo="claude-haiku-4-5",
+        return ai_client.Resposta(texto=texto, modelo="claude-haiku-4-5",
                                   tokens_entrada=100, tokens_saida=20,
                                   ferramentas_usadas=usadas)
 
@@ -1106,9 +1111,48 @@ async def etapa_estoque_veiculos():
     antes = len(MIDIAS_ENVIADAS)
     IA.chamar = None
     IA.proxima = f"Olha o Pulse [CARRO:{cod['pulse']}] e esse [CARRO:XXXXXX]"
-    await receber("e o pulse?")
+    await receber("e o pulse?", numero="5511900000003")
     check("foto de carro vendido ou codigo inventado nao sai", len(MIDIAS_ENVIADAS) == antes, MIDIAS_ENVIADAS[antes:])
     check("e as etiquetas somem do texto", "CARRO" not in ENVIADOS[-1][1], ENVIADOS[-1])
+    check("codigo inventado duas vezes: resposta segurada e conversa na fila",
+          ENVIADOS[-1][1] == ai_veiculos.AVISO_PRECO
+          and (await sessao("5511900000003"))["status_atendimento"] == "aguardando")
+
+    # --- trava de preco (caso Atalaia, 24/11/2026) ---
+    check("valores citados", ai_veiculos.valores_citados(
+        "R$ 71.990, ou R$ 79,9 mil, 80 mil e parcela de R$ 1.500,00")
+        == [71990, 79900, 80000, 1500])
+
+    # Sem consultar, com preco de planilha: refaz obrigando a consulta, e a
+    # segunda resposta (com o preco certo) e a que sai.
+    IA.fila = [("A Strada sai por R$ 89.900! [CARRO:STRADA_FREEDOM]", None),
+               (f"O Argo branco sai por R$ 71.990 [CARRO:{cod['argo1']}]",
+                ("consultar_estoque", {"busca": "argo branco"}))]
+    antes = len(MIDIAS_ENVIADAS)
+    await receber("quanto o argo?", numero="5511900000004")
+    check("refez com a consulta obrigatoria", IA.chamadas[-1]["forcar"] == "consultar_estoque")
+    check("saiu a resposta com o preco do estoque",
+          ENVIADOS[-1][1] == "O Argo branco sai por R$ 71.990", ENVIADOS[-1])
+    check("com as fotos do carro certo", len(MIDIAS_ENVIADAS) - antes == 2)
+
+    # Consultou, mas citou outro preco: segunda chance ainda errada -> segura.
+    IA.fila = [("O Argo branco sai por R$ 65.000", ("consultar_estoque", {"busca": "argo"})),
+               ("O Argo branco sai por R$ 65.000", ("consultar_estoque", {"busca": "argo"}))]
+    await receber("quanto o argo?", numero="5511900000005")
+    check("preco que nao e do estoque nao sai", ENVIADOS[-1][1] == ai_veiculos.AVISO_PRECO, ENVIADOS[-1])
+    s5 = await sessao("5511900000005")
+    check("e a conversa vai para uma pessoa", s5["status_atendimento"] == "aguardando")
+    log = await DB.messages_log.find({"session_id": s5["id"], "direction": "sistema"}).to_list(10)
+    check("com o motivo e o texto segurado no historico",
+          any("R$ 65.000" in (m.get("content") or "") for m in log), log)
+
+    # O "de/por" e parcela pequena passam; preco de carro de outra consulta nao.
+    IA.fila = [("Esse Argo era R$ 74.990 e agora sai por 71,99 mil, parcelas de R$ 1.200",
+                ("consultar_estoque", {"busca": "argo branco"}))]
+    await receber("e o argo?", numero="5511900000006")
+    check("preco antigo da promocao, arredondado e parcela passam",
+          ENVIADOS[-1][1].startswith("Esse Argo era R$ 74.990"), ENVIADOS[-1])
+    IA.fila = []
 
     IA.proxima = "Mais alguma duvida?"
     await receber("ok")

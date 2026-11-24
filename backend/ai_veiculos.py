@@ -27,7 +27,10 @@ import unicodedata
 
 import ai_client
 
-RE_CARRO = re.compile(r"\[\s*CARRO\s*:\s*([A-Za-z0-9]{4,12})\s*\]", re.IGNORECASE)
+# Aceita qualquer coisa dentro da etiqueta: o modelo que não chamou a consulta
+# inventa o código a partir do nome ("[CARRO:STRADA_FREEDOM]"), e um padrão só
+# de código válido deixava a etiqueta escrita na bolha do contato.
+RE_CARRO = re.compile(r"\[\s*CARRO\s*:\s*([^\]\n]{1,60}?)\s*\]", re.IGNORECASE)
 MAX_FOTOS_POR_RESPOSTA = 5
 LIMITE_BUSCA = 8
 
@@ -162,8 +165,11 @@ INSTRUCOES = (
     "outro. Nunca diga quantos carros existem no estoque nem leia a lista inteira.\n"
     "Fotos: cada carro da consulta começa com um código, como [CARRO:AB12CD]. Para "
     "mandar as fotos de um carro, escreva o código dele exatamente assim dentro da sua "
-    "resposta; o sistema troca o código pelas fotos DESSE carro. Use só códigos que a "
-    "consulta devolveu nesta conversa, do carro de que você está falando. Se a consulta "
+    "resposta; o sistema troca o código pelas fotos DESSE carro. O código são 6 letras e "
+    "números que só a consulta informa: nunca o monte com o nome do carro (como "
+    "[CARRO:STRADA_FREEDOM]). Sem ter chamado consultar_estoque nesta resposta ou antes "
+    "nesta conversa, você não tem código: chame a consulta primeiro. Use só códigos que a "
+    "consulta devolveu, do carro de que você está falando. Se a consulta "
     "disser 'sem foto', diga que ainda não tem foto daquele carro. Mande fotos quando o "
     "cliente pedir ou quando mostrar for o passo natural, não a cada mensagem. Nunca "
     "explique o código ao cliente."
@@ -208,7 +214,7 @@ async def extrair_fotos(db, tenant_id: str, texto: str) -> tuple[str, list[dict]
         return texto, []
     codigos = []
     for achado in RE_CARRO.finditer(texto):
-        c = achado.group(1).upper()
+        c = achado.group(1).strip()
         if c not in codigos:
             codigos.append(c)
     limpo = RE_CARRO.sub("", texto)
@@ -218,8 +224,23 @@ async def extrair_fotos(db, tenant_id: str, texto: str) -> tuple[str, list[dict]
     if not codigos:
         return limpo, []
 
-    por_codigo = {codigo(v): v for v in await _a_venda(db, tenant_id)}
-    carros = [por_codigo[c] for c in codigos if c in por_codigo and por_codigo[c].get("fotos")]
+    a_venda = await _a_venda(db, tenant_id)
+    por_codigo = {codigo(v): v for v in a_venda}
+    carros = []
+    for c in codigos:
+        v = por_codigo.get(c.upper())
+        if v is None:
+            # Código inventado a partir do nome: procura pelo nome, e só aceita
+            # se ele apontar para um carro só. Dois Strada possíveis = nenhuma
+            # foto, que é melhor que a foto do carro errado.
+            achados, total = await buscar(db, tenant_id, re.sub(r"[_\-]+", " ", c), limite=2)
+            termos = [t for t in _sem_acento(c.replace("_", " ")).split() if t]
+            if total == 1 and termos and all(
+                    t in _sem_acento(f"{achados[0].get('modelo')} {achados[0].get('versao')} "
+                                     f"{achados[0].get('marca')}") for t in termos):
+                v = achados[0]
+        if v and v.get("fotos") and v not in carros:
+            carros.append(v)
     if not carros:
         return limpo, []
     cota = max(1, MAX_FOTOS_POR_RESPOSTA // len(carros))
@@ -232,6 +253,114 @@ async def extrair_fotos(db, tenant_id: str, texto: str) -> tuple[str, list[dict]
             if doc and not doc.get("purged_at"):
                 docs.append(doc)
     return limpo, docs
+
+
+# ---------------------------------------------------------------------------
+# Trava de preço: a resposta só sai com preço que a consulta devolveu
+# ---------------------------------------------------------------------------
+#
+# Caso real (Atalaia, 24/11/2026, Haiku): o agente respondeu sem chamar
+# `consultar_estoque`, com preço de uma planilha antiga que estava no treino, e
+# inventou o código da foto. A instrução no prompt já dizia para consultar; o
+# modelo ignorou. Por isso a conferência é no código, como `confirmou_sem_agenda`.
+#
+# Só valores a partir de `PRECO_MINIMO_CARRO` são conferidos: abaixo disso é
+# parcela, documentação, taxa, que não são preço de carro e não estão no
+# estoque. Entrada alta ("entrada de R$ 20 mil") cai na conferência e é
+# segurada: é o erro aceito, porque o outro é prometer um carro por um preço
+# que a loja não pratica.
+
+PRECO_MINIMO_CARRO = 15000
+TOLERANCIA = 0.01  # "79,9 mil" para R$ 79.900; arredondamento, não outro preço
+NOME_FERRAMENTA = "consultar_estoque"
+
+AVISO_PRECO = ("Deixa eu confirmar os valores certinhos com a equipe e já te "
+               "retorno por aqui, tudo bem?")
+
+_RE_VALOR = re.compile(
+    r"R\$\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(?:\s*(mil)\b)?"
+    r"|\b(\d{1,3}(?:[.,]\d{1,3})?)\s*mil\b",
+    re.IGNORECASE)
+
+
+def valores_citados(texto: str) -> list[float]:
+    """Os valores em reais que o texto cita ("R$ 79.900", "R$ 79,9 mil", "80 mil")."""
+    valores = []
+    for m in _RE_VALOR.finditer(texto or ""):
+        try:
+            if m.group(1):
+                inteiro = float(m.group(1).replace(".", ""))
+                decimal = m.group(2)
+                if m.group(3):  # "R$ 79,9 mil"
+                    v = float(f"{m.group(1).replace('.', '')}.{decimal or 0}") * 1000
+                else:
+                    v = inteiro + (float(f"0.{decimal}") if decimal else 0)
+            else:
+                bruto = m.group(4)
+                # "79,9 mil" e "79.9 mil" são decimais; "1.200 mil" não existe aqui.
+                v = float(bruto.replace(",", ".")) * 1000
+        except ValueError:
+            continue
+        valores.append(v)
+    return valores
+
+
+def registrar_consultas(executar):
+    """Embrulha o executor para guardar os códigos que `consultar_estoque`
+    devolveu nesta resposta. Mesmo desenho de `ai_agents.registrar_marcacao`:
+    o laço de ferramentas roda dentro do `ai_client`, então o registro é uma
+    lista mutável."""
+    vistos: list[str] = []
+    if executar is None:
+        return None, vistos
+
+    async def embrulhado(nome: str, argumentos: dict) -> str:
+        resultado = await executar(nome, argumentos)
+        if nome == NOME_FERRAMENTA:
+            vistos.extend(m.group(1).upper() for m in RE_CARRO.finditer(str(resultado)))
+            vistos.append("")  # marca que houve consulta, mesmo sem carro achado
+        return resultado
+
+    return embrulhado, vistos
+
+
+async def conferir(db, tenant_id: str, texto: str, vistos: list[str]) -> str | None:
+    """Por que a resposta não pode sair, ou None se está de acordo com o estoque.
+
+    - preço de carro citado sem consulta nesta resposta;
+    - preço que não é o de nenhum carro devolvido pela consulta;
+    - etiqueta de foto com código que não é de carro nenhum à venda.
+    """
+    consultou = bool(vistos)
+    a_venda = None
+
+    codigos = [m.group(1).strip().upper() for m in RE_CARRO.finditer(texto or "")]
+    if codigos:
+        a_venda = await _a_venda(db, tenant_id)
+        validos = {codigo(v) for v in a_venda}
+        invalidos = [c for c in codigos if c not in validos]
+        if invalidos:
+            return f"etiqueta de foto com código que não existe no estoque ({', '.join(invalidos)})"
+
+    precos = [v for v in valores_citados(texto) if v >= PRECO_MINIMO_CARRO]
+    if not precos:
+        return None
+    if not consultou:
+        return "citou preço de carro sem consultar o estoque"
+    if a_venda is None:
+        a_venda = await _a_venda(db, tenant_id)
+    por_codigo = {codigo(v): v for v in a_venda}
+    permitidos = []
+    for c in vistos:
+        v = por_codigo.get(c)
+        if v:
+            permitidos += [p for p in (v.get("preco"), v.get("preco_anterior")) if p]
+    errados = [p for p in precos
+               if not any(abs(p - q) <= q * TOLERANCIA for q in permitidos)]
+    if errados:
+        return ("citou preço que não é o de nenhum carro consultado ("
+                + ", ".join(_reais(p) for p in errados) + ")")
+    return None
 
 
 async def fotos_por_midia(db, tenant_id: str) -> dict[str, str]:

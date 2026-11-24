@@ -604,13 +604,31 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     blocos, ferramentas, executar = await ai_agents.preparar_ferramentas(
         db, user["tenant_id"], agente, contato_teste, None, simulado=True)
     executar, marcou = ai_agents.registrar_marcacao(executar)
+    usa_veiculos = await ai_veiculos.ativo(db, user["tenant_id"])
+    vistos = []
+    if usa_veiculos:
+        executar, vistos = ai_veiculos.registrar_consultas(executar)
     await ai_agents.anexar_contexto_agenda(db, user["tenant_id"], blocos, contato_teste, historico)
+    instrucoes = ai_agents.montar_instrucoes(agente, **blocos)
+    problema = None
 
     try:
         resposta = await ai_runtime.responder_por_agente(
-            db, user["tenant_id"], agente,
-            ai_agents.montar_instrucoes(agente, **blocos), historico,
+            db, user["tenant_id"], agente, instrucoes, historico,
             ferramentas=ferramentas, executar=executar, propria=True)
+        # Mesma trava de estoque do atendimento real (`tentar_responder`).
+        if usa_veiculos and ai_agents.SENTINELA.lower() not in (resposta.texto or "").lower():
+            problema = await ai_veiculos.conferir(db, user["tenant_id"], resposta.texto or "", vistos)
+            if problema:
+                vistos.clear()
+                resposta = await ai_runtime.responder_por_agente(
+                    db, user["tenant_id"], agente, instrucoes, historico,
+                    ferramentas=ferramentas, executar=executar, propria=True,
+                    forcar=ai_veiculos.NOME_FERRAMENTA)
+                problema = None
+                if ai_agents.SENTINELA.lower() not in (resposta.texto or "").lower():
+                    problema = await ai_veiculos.conferir(
+                        db, user["tenant_id"], resposta.texto or "", vistos)
     except ai_client.IAError as e:
         # A chave pode ter sido revogada no console depois de salva. Marcar aqui
         # é o que faz o cartão mostrar o problema em vez de o agente falhar em
@@ -641,6 +659,10 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
             frase = ai_agents.AVISO_CONFIRMACAO
         return {"transferiu": True, "texto": frase or None,
                 "motivo": "O agente decidiu transferir para um atendente"}
+    if problema:
+        return {"transferiu": True, "texto": ai_veiculos.AVISO_PRECO, "segurada": texto,
+                "motivo": (f"O agente {problema}. A mensagem foi segurada e a conversa "
+                           "iria para uma pessoa conferir")}
     if await ai_agents.confirmou_sem_agenda(db, user["tenant_id"], contato_teste, texto, marcou):
         return {"transferiu": True, "texto": ai_agents.AVISO_CONFIRMACAO, "segurada": texto,
                 "motivo": ("O agente ia confirmar um horário que não está gravado na Agenda. "
@@ -648,7 +670,7 @@ async def testar_agente(agent_id: str, body: TesteIn, user=Depends(require_tenan
     # As etiquetas de foto viram as fotos que o contato receberia: sem isto o
     # teste mostrava "[CARRO:AB12CD]" escrito na bolha, e o admin não tinha como
     # conferir se a foto era do carro certo.
-    if await ai_veiculos.ativo(db, user["tenant_id"]):
+    if usa_veiculos:
         texto, docs = await ai_veiculos.extrair_fotos(db, user["tenant_id"], texto)
         texto, _ = ai_agents.extrair_fotos(texto, [])
         fotos = [d["id"] for d in docs]
