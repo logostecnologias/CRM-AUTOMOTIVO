@@ -123,7 +123,9 @@ def _html(conteudo: str, status: int = 200, cache: int = 60) -> HTMLResponse:
         "X-Content-Type-Options": "nosniff",
         # A página não tem script nenhum; a CSP garante que continue assim
         # mesmo que um texto da loja escape do `html.escape`.
-        "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; "
+        "Content-Security-Policy": "default-src 'none'; img-src 'self'; "
+                                   "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+                                   "font-src https://fonts.gstatic.com; "
                                    "form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     })
 
@@ -131,6 +133,12 @@ def _html(conteudo: str, status: int = 200, cache: int = 60) -> HTMLResponse:
 def _nao_encontrado() -> HTMLResponse:
     return _html(dominio.pagina_aviso(None, None, "Catálogo não encontrado",
                                       "Confira o link com a loja."), status=404, cache=0)
+
+
+async def _marca(db, tenant_id: str) -> str:
+    """A paleta da página: a da marca da empresa (ver `index.css`)."""
+    t = await db.tenants.find_one({"id": tenant_id}, {"_id": 0, "marca": 1}) or {}
+    return "r3" if t.get("marca") == "r3" else "logos"
 
 
 async def _a_venda(db, tenant_id: str) -> list[dict]:
@@ -153,7 +161,8 @@ async def pagina_lista(slug: str, request: Request, q: str = "", categoria: str 
                         if c in dominio.ROTULOS["categoria"] else 99)
     ordem = ordem if ordem in dominio.ORDENS else "recentes"
     lista = dominio.filtrar(list(todos), q[:80], categoria if categoria in categorias else "", ordem)
-    return _html(dominio.pagina_lista(cfg, lista, base, len(todos), q[:80], categoria, ordem, categorias))
+    return _html(dominio.pagina_lista(cfg, lista, base, len(todos), q[:80], categoria, ordem, categorias,
+                                      marca=await _marca(db, cfg["tenant_id"])))
 
 
 @router.get("/c/{slug}/foto/{media_id}", include_in_schema=False)
@@ -192,6 +201,7 @@ async def pagina_veiculo(slug: str, veiculo_id: str, request: Request):
         # O link de um carro vendido continua circulando no WhatsApp: em vez de
         # erro, o caminho para os outros carros.
         titulo = "Esse veículo já foi vendido" if v else "Veículo não encontrado"
-        return _html(dominio.pagina_aviso(cfg, base, titulo, "Mas temos outros esperando por você."),
+        return _html(dominio.pagina_aviso(cfg, base, titulo, "Mas temos outros esperando por você.",
+                                          marca=await _marca(db, cfg["tenant_id"])),
                      status=404 if not v else 410, cache=0)
-    return _html(dominio.pagina_veiculo(cfg, v, base))
+    return _html(dominio.pagina_veiculo(cfg, v, base, marca=await _marca(db, cfg["tenant_id"])))
