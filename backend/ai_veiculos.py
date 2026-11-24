@@ -79,6 +79,10 @@ def descreve(v: dict) -> str:
         partes.append(preco)
     else:
         partes.append("preço: sob consulta (não informe valor; transfira se insistirem)")
+    f = v.get("fipe") or {}
+    if f.get("valor"):
+        partes.append(f"tabela FIPE {_reais(f['valor'])}"
+                      + (f" (referência {f['referencia']})" if f.get("referencia") else ""))
     if v.get("opcionais"):
         partes.append("opcionais: " + ", ".join(v["opcionais"]))
     if v.get("observacoes"):
@@ -149,6 +153,26 @@ FERRAMENTAS = [
             "required": [],
         },
     ),
+    ai_client.Ferramenta(
+        nome="consultar_fipe",
+        descricao=(
+            "Consulta o valor de referência da tabela FIPE de um veículo, normalmente o "
+            "carro que o cliente quer dar na troca. Passe a marca, o modelo (com motor ou "
+            "versão quando souber, ex.: 'onix 1.0 lt') e o ano do modelo. Se voltar uma "
+            "lista de versões, pergunte ao cliente qual é a dele."
+        ),
+        parametros={
+            "type": "object",
+            "properties": {
+                "marca": {"type": "string", "description": "Ex.: 'chevrolet', 'fiat', 'vw'."},
+                "modelo": {"type": "string", "description": "Ex.: 'onix 1.0 lt', 'strada freedom 1.3'."},
+                "ano": {"type": "integer", "description": "Ano do modelo, ex.: 2019. Omita para zero km."},
+                "tipo": {"type": "string", "enum": ["carro", "moto", "caminhao"],
+                         "description": "Padrão: carro."},
+            },
+            "required": ["marca", "modelo"],
+        },
+    ),
 ]
 
 
@@ -172,7 +196,12 @@ INSTRUCOES = (
     "consulta devolveu, do carro de que você está falando. Se a consulta "
     "disser 'sem foto', diga que ainda não tem foto daquele carro. Mande fotos quando o "
     "cliente pedir ou quando mostrar for o passo natural, não a cada mensagem. Nunca "
-    "explique o código ao cliente."
+    "explique o código ao cliente.\n"
+    "Tabela FIPE: a consulta do estoque traz a FIPE dos carros que a loja ligou a ela; use "
+    "para mostrar vantagem (ex.: abaixo da FIPE), com o valor exatamente como veio. Para o "
+    "carro que o cliente quer dar na troca, use consultar_fipe. A FIPE é só referência de "
+    "mercado: NUNCA diga que a loja paga esse valor nem faça proposta pelo carro do "
+    "cliente; diga que a avaliação é feita pela equipe, ao ver o carro."
 )
 
 
@@ -193,10 +222,35 @@ def executor(db, tenant_id: str):
                       "mais detalhes para refinar a busca.)")
         return texto
 
+    async def consultar_tabela(args: dict) -> str:
+        import fipe
+        tipo = args.get("tipo") if args.get("tipo") in fipe.TIPOS else "carro"
+        try:
+            ano = int(args["ano"]) if args.get("ano") not in (None, "") else None
+        except (TypeError, ValueError):
+            ano = None
+        try:
+            r = await fipe.buscar(tipo, args.get("marca") or "", args.get("modelo") or "", ano)
+        except fipe.FipeError as e:
+            return f"A tabela FIPE não respondeu agora ({e}). Diga que a equipe confirma o valor."
+        if not r["marca"]:
+            return "Marca não encontrada na tabela FIPE. Pergunte a marca ao cliente."
+        if r["versoes"]:
+            return (f"Há {r['total']} versões de {r['marca']} que casam com isso. Pergunte ao "
+                    "cliente motor e versão. Algumas: " + "; ".join(r["versoes"]) + ".")
+        if not r["itens"]:
+            return ("Nada na tabela FIPE para esse modelo" + (f" no ano {ano}" if ano else "")
+                    + ". Confirme com o cliente o modelo, a versão e o ano.")
+        linhas = [f"- {i['marca']} {i['modelo']} {i['ano']} ({i['combustivel']}): "
+                  f"FIPE {_reais(i['valor'])}, referência {i['referencia']}" for i in r["itens"]]
+        return "\n".join(linhas)
+
     async def executar(nome: str, argumentos: dict) -> str:
-        if nome != "consultar_estoque":
-            return f"ERRO: ferramenta desconhecida ({nome})."
-        return await consultar(argumentos or {})
+        if nome == "consultar_estoque":
+            return await consultar(argumentos or {})
+        if nome == "consultar_fipe":
+            return await consultar_tabela(argumentos or {})
+        return f"ERRO: ferramenta desconhecida ({nome})."
 
     return executar
 
@@ -319,6 +373,9 @@ def registrar_consultas(executar):
         if nome == NOME_FERRAMENTA:
             vistos.extend(m.group(1).upper() for m in RE_CARRO.finditer(str(resultado)))
             vistos.append("")  # marca que houve consulta, mesmo sem carro achado
+        elif nome == "consultar_fipe":
+            # Os valores FIPE que a consulta devolveu também podem ser citados.
+            vistos.extend(f"R$:{v}" for v in valores_citados(str(resultado)))
         return resultado
 
     return embrulhado, vistos
@@ -350,11 +407,12 @@ async def conferir(db, tenant_id: str, texto: str, vistos: list[str]) -> str | N
     if a_venda is None:
         a_venda = await _a_venda(db, tenant_id)
     por_codigo = {codigo(v): v for v in a_venda}
-    permitidos = []
+    permitidos = [float(c[3:]) for c in vistos if c.startswith("R$:")]
     for c in vistos:
         v = por_codigo.get(c)
         if v:
-            permitidos += [p for p in (v.get("preco"), v.get("preco_anterior")) if p]
+            permitidos += [p for p in (v.get("preco"), v.get("preco_anterior"),
+                                       (v.get("fipe") or {}).get("valor")) if p]
     errados = [p for p in precos
                if not any(abs(p - q) <= q * TOLERANCIA for q in permitidos)]
     if errados:

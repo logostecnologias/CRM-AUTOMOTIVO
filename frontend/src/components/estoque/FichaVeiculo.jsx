@@ -5,6 +5,7 @@ import { CaretLeft, CaretRight, PencilSimple, Trash, X, MapPin, CalendarBlank } 
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { confirmToast } from "@/lib/confirm-toast";
 import { FotoCarro, Placa } from "./Visual";
+import FipeVeiculo from "./FipeVeiculo";
 import { diasNoPatio, formatAno, formatKm, formatPreco, nomeVeiculo, rotulo, temPromocao } from "./estoque";
 
 /**
@@ -111,6 +112,8 @@ export default function FichaVeiculo({ veiculo: v, opcoes, podeEditar, onFechar,
             <div className="text-sm text-ink-3 mt-5 num">de <span className="line-through">{formatPreco(v.preco_anterior)}</span> por</div>
           )}
           <div className={`font-heading text-[2.2rem] font-semibold tracking-tight num leading-none ${temPromocao(v) ? "mt-1.5" : "mt-5"}`}>{formatPreco(v.preco)}</div>
+
+          <FipeVeiculo veiculo={v} podeEditar={podeEditar} onMudou={onMudou} />
 
           {specs.length > 0 && (
             <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-4 py-5 mt-5 border-y border-line">

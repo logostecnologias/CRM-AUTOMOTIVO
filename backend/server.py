@@ -36,6 +36,7 @@ from routes.formularios import router as formularios_router
 from routes.meta_conversoes import router as meta_conversoes_router
 from routes.aviso_grupo import router as aviso_grupo_router
 from routes.estoque import router as estoque_router
+from routes.fipe import router as fipe_router
 import agenda_worker
 import exclusao_empresas
 import campaign_runner
@@ -163,6 +164,7 @@ app.include_router(deals_router)
 app.include_router(meta_conversoes_router)
 app.include_router(aviso_grupo_router)
 app.include_router(estoque_router)
+app.include_router(fipe_router)
 app.include_router(activities_router)
 app.include_router(reports_router)
 app.include_router(ai_router)
@@ -509,4 +511,6 @@ async def on_shutdown():
     agenda_worker.stop()
     exclusao_empresas.stop()
     await whatsapp_client.close_client()
+    import fipe
+    await fipe.close_client()
     close_db()

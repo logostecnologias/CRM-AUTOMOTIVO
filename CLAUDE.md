@@ -182,6 +182,13 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - **Só WuzAPI**: a Cloud API não envia para grupo comum. O número precisa estar no grupo; a tela entra pelo link de convite (`/group/join`) ou lista os grupos do número (`/group/list`), e o envio é o `send_text` normal para o JID `…@g.us`. Os formatos da resposta da ponte são lidos com tolerância (`_grupo`) porque **não foram conferidos contra a ponte instalada**
 - Uma vez por (negócio, etapa), com claim atômico em `avisos_grupo.avisados`; falha da ponte grava `ultimo_erro` (a tela mostra) e libera o par para a próxima tentativa. Nunca levanta
 
+### Tabela FIPE (24/11/2026)
+- Pedido do Atalaia. `fipe.py` (cliente), `routes/fipe.py` (seletores e vínculo), `components/estoque/FipeVeiculo.jsx` (bloco na ficha do veículo). Dois usos: **o carro do estoque ligado ao modelo FIPE** (marca → modelo → ano, gravado em `veiculos.fipe` com valor, mês de referência e os ids para "Atualizar"), com a diferença para o preço na ficha; e a **ferramenta de IA `consultar_fipe`** para o carro do cliente na troca
+- **Não há API oficial**: é a da Parallelum (`fipe.parallelum.com.br/api/v2`). Sem token são **500 consultas por dia para o servidor inteiro**; `FIPE_TOKEN` (fipe.online) sobe o teto. Por isso cache em memória: listas por 7 dias, preço por 1 dia. O ano `32000` é zero km
+- **A busca por texto não varre versões**: com mais de `MAX_VERSOES` (8) modelos casando ("onix" casa 38), devolve os nomes e a IA pergunta motor/versão, em vez de gastar duas consultas por versão
+- **FIPE é referência, não proposta**: o prompt proíbe dizer que a loja paga esse valor. Os valores FIPE que vieram de consulta (do carro do estoque ou de `consultar_fipe`) entram nos `permitidos` de `ai_veiculos.conferir`; qualquer outro valor de carro continua segurado
+- A tabela muda todo mês e o valor gravado **não se atualiza sozinho**: a ficha mostra o mês de referência e o botão de atualizar
+
 ### Atividades e follow-up
 - Ficha e funil guardam o que **já** aconteceu; atividade guarda o que ainda precisa acontecer. Sem isso o próximo passo mora na cabeça do vendedor, e o CRM vira cadastro morto
 - **"Atrasada" não é campo, é comparação.** O estado gravado é só `concluida_em` (nulo = pendente); atrasada é `pendente e vence_em < agora`, calculado na leitura (`atividades.com_atraso`). Gravar um status exigiria varredura periódica para virar a chave de cada atividade na hora certa — trabalho de fundo para produzir o que uma comparação de data já responde
