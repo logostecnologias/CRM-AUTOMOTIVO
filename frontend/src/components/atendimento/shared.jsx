@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Robot, Timer, Headset, CheckCircle, Paperclip, PaperPlaneRight, X, FileArrowDown, Prohibit } from "@phosphor-icons/react";
+import { Robot, Timer, Headset, CheckCircle, Paperclip, PaperPlaneRight, X, FileArrowDown, Prohibit, NotePencil } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import api, { API, formatApiErrorDetail } from "@/lib/api";
 import { t } from "@/lib/textos";
@@ -315,8 +315,32 @@ export function Transcricao({ texto }) {
 }
 
 export function MessageBubble({ m }) {
+  const hora = new Date(m.timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (m.direction === "nota" || m.type === "nota") {
+    // Nota interna: amarela e centralizada, para nunca ser lida como algo
+    // que o contato recebeu.
+    return (
+      <div className="flex justify-center" data-testid="nota-interna">
+        <div className="zz-nota max-w-[85%] px-3 py-2 text-sm rounded-xl">
+          <div className="text-[11px] font-semibold mb-0.5 flex items-center gap-1.5">
+            <NotePencil size={13} weight="bold" />
+            Nota interna{m.meta?.autor_nome ? ` · ${m.meta.autor_nome}` : ""}
+            <span className="font-normal opacity-70 ml-1">{hora}</span>
+          </div>
+          <div className="whitespace-pre-wrap">{m.content}</div>
+        </div>
+      </div>
+    );
+  }
   if (m.direction === "sistema" || m.type === "system") {
-    return <div className="text-[11px] text-ink-3 italic text-center py-1">— {m.content} —</div>;
+    return (
+      <div className="flex justify-center py-0.5" data-testid="evento-conversa">
+        <div className="zz-evento max-w-[85%] text-[11.5px] px-3 py-1 rounded-full flex items-center gap-2">
+          <span className="truncate whitespace-normal">{m.content}</span>
+          <span className="opacity-60 shrink-0">{hora}</span>
+        </div>
+      </div>
+    );
   }
   const isOut = m.direction === "enviada";
   const media = m.meta?.media;
@@ -384,6 +408,9 @@ export function ChatComposer({ sessionId, canSend, onSent }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [sending, setSending] = useState(false);
+  // Nota interna: o mesmo campo, mas o texto fica só para a equipe. Vale
+  // mesmo sem ter assumido a conversa, porque anotar não é responder.
+  const [nota, setNota] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -393,7 +420,8 @@ export function ChatComposer({ sessionId, canSend, onSent }) {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  useEffect(() => { setFile(null); setInput(""); }, [sessionId]);
+  useEffect(() => { setFile(null); setInput(""); setNota(false); }, [sessionId]);
+  const podeEscrever = nota || canSend;
 
   const pick = (f) => {
     if (!f) return;
@@ -406,11 +434,13 @@ export function ChatComposer({ sessionId, canSend, onSent }) {
   };
 
   const send = async () => {
-    if (!canSend || sending) return;
+    if (!podeEscrever || sending) return;
     if (!file && !input.trim()) return;
     setSending(true);
     try {
-      if (file) {
+      if (nota) {
+        await api.post(`/atendimento/sessions/${sessionId}/nota`, { content: input });
+      } else if (file) {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("caption", input);
@@ -451,10 +481,16 @@ export function ChatComposer({ sessionId, canSend, onSent }) {
           </button>
         </div>
       )}
-      <div className="p-2 flex gap-2">
+      <div className={`p-2 flex gap-2 ${nota ? "zz-nota-composer" : ""}`}>
+        <button type="button" onClick={() => { setNota((n) => !n); setFile(null); }}
+          className={`zz-btn ${nota ? "zz-btn-nota" : "zz-btn-secondary"}`}
+          title={nota ? "Voltar a responder o contato" : "Nota interna: só a equipe vê"}
+          aria-pressed={nota} data-testid="chat-nota-toggle">
+          <NotePencil size={14} weight="bold" />
+        </button>
         <input ref={fileRef} type="file" className="hidden" data-testid="chat-file-input"
           onChange={(e) => pick(e.target.files?.[0])} />
-        <button onClick={() => fileRef.current?.click()} disabled={!canSend || sending}
+        <button onClick={() => fileRef.current?.click()} disabled={!canSend || sending || nota}
           className="zz-btn zz-btn-secondary" title="Anexar arquivo" data-testid="chat-attach">
           <Paperclip size={14} weight="bold" />
         </button>
@@ -462,9 +498,9 @@ export function ChatComposer({ sessionId, canSend, onSent }) {
           onKeyDown={(e) => e.key === "Enter" && send()}
           onPaste={onPaste}
           className="zz-input"
-          placeholder={!canSend ? "Assuma a conversa para responder" : file ? "Legenda (opcional)..." : "Digite uma mensagem..."}
-          disabled={!canSend || sending} data-testid="chat-input" />
-        <button onClick={send} disabled={!canSend || sending || (!file && !input.trim())}
+          placeholder={nota ? "Nota interna (o contato não vê)..." : !canSend ? "Assuma a conversa para responder" : file ? "Legenda (opcional)..." : "Digite uma mensagem..."}
+          disabled={!podeEscrever || sending} data-testid="chat-input" />
+        <button onClick={send} disabled={!podeEscrever || sending || (!file && !input.trim())}
           className="zz-btn" data-testid="chat-send">
           <PaperPlaneRight size={14} weight="bold" />
         </button>

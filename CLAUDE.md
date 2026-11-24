@@ -198,6 +198,12 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - A IA recebe `link:` de cada carro na consulta do estoque quando o catálogo está ligado **e** `PUBLIC_BASE_URL` existe no servidor (sem ela não há como montar link absoluto fora de uma requisição)
 - O domínio é o do sistema. Domínio próprio da loja exigiria DNS e certificado por cliente
 
+### Visual inspirado no Carmillion (24/11/2026)
+- **Conversa**: evento do sistema é pílula cinza centralizada (`.zz-evento`); **nota interna** é amarela (`.zz-nota`), escrita pelo botão de nota do `ChatComposer` (`POST /atendimento/sessions/{id}/nota`, `direction = "nota"`). A nota não sai para o contato, não assume a conversa, não muda a prévia da lista (`log_message(..., previa=False)`) e o agente de IA não a lê (o histórico dele só pega `recebida`/`enviada`)
+- **Negócio ganhou `temperatura`** (quente/morno/frio), **`pagamento`** (lista: a_vista, financiamento, troca, consorcio, gravada na ordem fixa) e **`veiculo_id`** (carro do estoque da mesma empresa). Vazio limpa. Editados no `DealPanel` (`components/deals/etiquetas.jsx`), mostrados em pílula (`.zz-pilula`)
+- **Cartão do funil**: avatar de iniciais, contato e telefone, "há X dias" desde a última mudança, temperatura e origem em pílula, carro com placa e forma de pagamento. O carro vem numa consulta só para o quadro inteiro (`board` → `veiculo`)
+- **Menu recolhível** (trilho de 72px, escolha guardada no navegador em `zz-menu-recolhido`) e **barra do topo** (`components/BarraTopo.jsx`): busca geral de contato e carro (Ctrl+K, pelas mesmas rotas das telas, abre `/app/contacts?contato=` ou `/app/estoque?veiculo=`) e sino com fila aguardando e atividades atrasadas
+
 ### Atividades e follow-up
 - Ficha e funil guardam o que **já** aconteceu; atividade guarda o que ainda precisa acontecer. Sem isso o próximo passo mora na cabeça do vendedor, e o CRM vira cadastro morto
 - **"Atrasada" não é campo, é comparação.** O estado gravado é só `concluida_em` (nulo = pendente); atrasada é `pendente e vence_em < agora`, calculado na leitura (`atividades.com_atraso`). Gravar um status exigiria varredura periódica para virar a chave de cada atividade na hora certa — trabalho de fundo para produzir o que uma comparação de data já responde

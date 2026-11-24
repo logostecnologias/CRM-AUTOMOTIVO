@@ -312,6 +312,34 @@ async def send(session_id: str, body: SendIn, user: dict = Depends(get_current_u
     return {"ok": True}
 
 
+class NotaIn(BaseModel):
+    content: str
+
+
+@router.post("/sessions/{session_id}/nota")
+async def nota_interna(session_id: str, body: NotaIn, user: dict = Depends(get_current_user)):
+    """Nota interna: fica no histórico da conversa para a equipe e nunca sai
+    para o contato. Não assume a conversa (anotar não é atender), e o agente
+    de IA não a lê, porque o histórico dele só pega `recebida`/`enviada`."""
+    texto = (body.content or "").strip()
+    if not texto:
+        raise HTTPException(status_code=422, detail="Escreva a nota")
+    if len(texto) > 4000:
+        raise HTTPException(status_code=422, detail="Nota acima de 4.000 caracteres")
+    db = get_db()
+    s = await db.conversation_sessions.find_one({"id": session_id, "tenant_id": user["tenant_id"]},
+                                                {"_id": 0, "whatsapp_connection_id": 1})
+    if not s:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    accessible = await _accessible_connection_ids(db, user)
+    if accessible is not None and s.get("whatsapp_connection_id") not in accessible:
+        raise HTTPException(status_code=403, detail="Sem acesso a esta conversa")
+    doc = await log_message(db, session_id, user["tenant_id"], "nota", texto, mtype="nota",
+                            meta={"autor_id": user["id"], "autor_nome": user.get("name") or user.get("email")},
+                            previa=False)
+    return doc
+
+
 @router.post("/sessions/{session_id}/send-media")
 async def send_media(
     session_id: str,

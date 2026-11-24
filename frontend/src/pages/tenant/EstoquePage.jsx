@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
 import { MagnifyingGlass, Plus, SquaresFour, Rows } from "@phosphor-icons/react";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -153,6 +154,15 @@ export default function EstoquePage() {
   }, []);
 
   useEffect(() => { carregar(); }, [carregar]);
+  // Link direto (busca do topo): `?veiculo=<id>` abre a ficha daquele carro.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const id = params.get("veiculo");
+    if (!id || !veiculos) return;
+    const v = veiculos.find((x) => x.id === id);
+    if (v) setFicha(v);
+    setParams({}, { replace: true });
+  }, [params, veiculos, setParams]);
   useEffect(() => {
     api.get("/estoque/opcoes").then((r) => setOpcoes(deApi(r.data))).catch(() => {});
   }, []);

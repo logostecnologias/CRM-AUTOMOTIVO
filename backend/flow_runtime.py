@@ -109,7 +109,8 @@ def last_message_preview(doc: dict) -> dict:
     }
 
 
-async def log_message(db, session_id, tenant_id, direction, content, mtype="text", meta=None) -> dict:
+async def log_message(db, session_id, tenant_id, direction, content, mtype="text", meta=None,
+                      previa: bool = True) -> dict:
     """Grava a mensagem e atualiza a prévia na sessão, sempre juntas.
 
     Todo caminho que escreve em `messages_log` passa por aqui justamente para
@@ -129,6 +130,10 @@ async def log_message(db, session_id, tenant_id, direction, content, mtype="text
     }
     await db.messages_log.insert_one(doc)
     doc.pop("_id", None)
+    if not previa:
+        # Nota interna: a lista de conversas mostra o que o contato viu, e uma
+        # anotação da equipe ali pareceria mensagem trocada com ele.
+        return doc
     await db.conversation_sessions.update_one(
         {"id": session_id, "tenant_id": tenant_id},
         {"$set": {"last_message": last_message_preview(doc)}},

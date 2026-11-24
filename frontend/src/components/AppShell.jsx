@@ -5,6 +5,7 @@ import { useUnreadNotifier } from "@/hooks/useUnreadNotifier";
 import { useAtividadesAtrasadas } from "@/hooks/useAtividadesAtrasadas";
 import BotaoTema from "@/components/BotaoTema";
 import LogoMarca from "@/components/LogoMarca";
+import BarraTopo from "@/components/BarraTopo";
 import { t } from "@/lib/textos";
 import {
   House, Robot, WhatsappLogo, UsersThree, Kanban, Gear,
@@ -136,6 +137,7 @@ function ItemMenu({ item, atrasadas, aguardando }) {
       to={item.to}
       end={item.end}
       data-testid={`nav-${testId(item.label)}`}
+      title={t(item.label)}
       className={({ isActive }) => `zz-nav-item ${isActive ? "active" : ""}`}
     >
       <Icone size={18} />
@@ -187,7 +189,16 @@ function GrupoRecolhivel({ grupo, children }) {
   );
 }
 
+// O menu recolhido é escolha de quem usa, guardada no navegador como o tema.
+const CHAVE_RECOLHIDA = "zz-menu-recolhido";
+const lerRecolhida = () => { try { return localStorage.getItem(CHAVE_RECOLHIDA) === "1"; } catch { return false; } };
+
 export default function AppShell({ variant = "tenant" }) {
+  const [recolhida, setRecolhida] = useState(lerRecolhida);
+  const alternar = () => setRecolhida((r) => {
+    try { localStorage.setItem(CHAVE_RECOLHIDA, r ? "0" : "1"); } catch { /* conveniência */ }
+    return !r;
+  });
   const { user, logout, impersonatedFrom, exitImpersonation, marca } = useAuth();
   const navigate = useNavigate();
   const nav = variant === "admin" ? adminNav : tenantNav(user?.role);
@@ -219,17 +230,24 @@ export default function AppShell({ variant = "tenant" }) {
       )}
 
       <div className="flex flex-1 min-h-0">
-        <aside className="zz-sidebar w-[248px] shrink-0 flex flex-col" data-testid="sidebar">
-          <div className="px-6 pt-7 pb-4">
-            <LogoMarca marca={marca} legenda={papel} />
-          </div>
+        <aside className={`zz-sidebar ${recolhida ? "recolhida w-[72px]" : "w-[248px]"} shrink-0 flex flex-col`}
+          data-testid="sidebar">
+          {recolhida ? (
+            <div className="pt-5 pb-3 flex justify-center">
+              <div className="zz-nav-avatar" title={papel} aria-hidden>{iniciais(user?.name || user?.email)}</div>
+            </div>
+          ) : (
+            <div className="px-6 pt-7 pb-4">
+              <LogoMarca marca={marca} legenda={papel} />
+            </div>
+          )}
 
           <nav className="flex-1 pb-4 overflow-y-auto">
             {nav.map((grupo, i) => {
               const itens = grupo.itens.map((item) => (
                 <ItemMenu key={item.to} item={item} atrasadas={atrasadas} aguardando={aguardando} />
               ));
-              if (grupo.recolhivel) {
+              if (grupo.recolhivel && !recolhida) {
                 return <GrupoRecolhivel key={grupo.titulo} grupo={grupo}>{itens}</GrupoRecolhivel>;
               }
               return (
@@ -245,6 +263,15 @@ export default function AppShell({ variant = "tenant" }) {
             })}
           </nav>
 
+          {recolhida ? (
+            <div className="zz-nav-rodape py-3 flex flex-col items-center gap-2">
+              <BotaoTema />
+              <button type="button" data-testid="logout-btn" onClick={handleLogout}
+                className="zz-btn-icon" title="Sair" aria-label="Sair">
+                <SignOut size={15} />
+              </button>
+            </div>
+          ) : (
           <div className="zz-nav-rodape px-4 py-4">
             <div className="flex items-center gap-3">
               <div className="zz-nav-avatar" aria-hidden>{iniciais(user?.name || user?.email)}</div>
@@ -267,11 +294,16 @@ export default function AppShell({ variant = "tenant" }) {
               </button>
             </div>
           </div>
+          )}
         </aside>
 
-        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
-          <Outlet />
-        </main>
+        <div className="flex-1 min-w-0 flex flex-col">
+          <BarraTopo recolhida={recolhida} onAlternar={alternar} aguardando={aguardando}
+            atrasadas={atrasadas} comBusca={variant === "tenant"} />
+          <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+            <Outlet />
+          </main>
+        </div>
       </div>
     </div>
   );

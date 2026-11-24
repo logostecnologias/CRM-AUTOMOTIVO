@@ -5,6 +5,7 @@ import { confirmToast } from "@/lib/confirm-toast";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import Atividades from "@/components/activities/Atividades";
 import { t } from "@/lib/textos";
+import { EscolhaTemperatura, EscolhaPagamento, EscolhaVeiculo } from "@/components/deals/etiquetas";
 import {
   X, Trash, Megaphone, User, ClockCounterClockwise, ChatCircleDots,
 } from "@phosphor-icons/react";
@@ -44,6 +45,9 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
         previsao_fechamento: (d.previsao_fechamento || "").slice(0, 10),
         origem: d.origem || "",
         motivo_perda: d.motivo_perda || "",
+        temperatura: d.temperatura || "",
+        pagamento: d.pagamento || [],
+        veiculo: r.data.veiculo || null,
       });
     }).catch((ex) => {
       toast.error(formatApiErrorDetail(ex.response?.data?.detail));
@@ -63,6 +67,9 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
         responsavel_id: form.responsavel_id || null,
         previsao_fechamento: form.previsao_fechamento || null,
         origem: form.origem,
+        temperatura: form.temperatura || "",
+        pagamento: form.pagamento,
+        veiculo_id: form.veiculo?.id || "",
       };
       // O motivo só vai quando o negócio está (ou vai ficar) perdido — o
       // backend recusa motivo em negócio ganho, e mandar sempre faria um
@@ -173,6 +180,17 @@ export default function DealPanel({ dealId, pipeline, usuarios, onClose, onChang
                 onChange={(e) => setForm({ ...form, motivo_perda: e.target.value })} />
             </Linha>
           )}
+          <Linha label="Interesse">
+            <EscolhaVeiculo veiculo={form.veiculo} onChange={(v) => setForm({ ...form, veiculo: v })} />
+          </Linha>
+          <Linha label="Temperatura">
+            <EscolhaTemperatura valor={form.temperatura}
+              onChange={(v) => setForm({ ...form, temperatura: v })} />
+          </Linha>
+          <Linha label="Pagamento">
+            <EscolhaPagamento valor={form.pagamento}
+              onChange={(v) => setForm({ ...form, pagamento: v })} />
+          </Linha>
           <Linha label="Responsável">
             <select className="zz-input h-8 py-1 text-sm" data-testid="deal-field-responsavel"
               value={form.responsavel_id}

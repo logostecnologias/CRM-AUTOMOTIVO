@@ -970,3 +970,88 @@ textarea.zz-input { line-height: 1.55; }
     --popover-foreground: 0 10% 94%;
   }
 }
+
+/* ===========================================================================
+   Conversa: eventos e nota interna
+   ---------------------------------------------------------------------------
+   Evento do sistema ("Negociação movida…") é pílula cinza centralizada; nota
+   interna é amarela. Nenhum dos dois pode parecer uma bolha que o contato viu.
+   =========================================================================== */
+.zz-evento { background: var(--surface-3); color: var(--text-2); }
+.zz-nota {
+  background: var(--warning-soft); color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--warning-solid) 55%, transparent);
+}
+.zz-nota > div:first-child { color: var(--warning); }
+.zz-nota-composer { background: var(--warning-soft); }
+.zz-btn-nota { background: var(--warning-solid); color: var(--warning-fg); border-color: var(--warning-solid); }
+
+/* ===========================================================================
+   Etiquetas em pílula (temperatura, pagamento, origem)
+   ---------------------------------------------------------------------------
+   A cor ajuda, mas a palavra é que informa: toda pílula tem texto.
+   =========================================================================== */
+.zz-pilula {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  font-size: 0.68rem; font-weight: 600; line-height: 1;
+  padding: 0.28rem 0.55rem; border-radius: 9999px;
+  background: var(--surface-3); color: var(--text-2);
+  white-space: nowrap;
+}
+.zz-pilula.quente { background: var(--danger-soft); color: var(--danger); }
+.zz-pilula.morno  { background: var(--warning-soft); color: var(--warning); }
+.zz-pilula.frio   { background: var(--surface-3); color: var(--text-2); }
+.zz-pilula.a_vista { background: var(--success-soft); color: var(--success); }
+.zz-pilula.financiamento { background: var(--info-soft); color: var(--info); }
+.zz-pilula.troca, .zz-pilula.consorcio { background: var(--brand-soft); color: var(--text); }
+button.zz-pilula { cursor: pointer; border: 1px solid transparent; }
+button.zz-pilula[aria-pressed="false"] { background: transparent; border-color: var(--line); color: var(--text-3); }
+
+/* Avatar de iniciais do cartão do funil */
+.zz-avatar-ini {
+  width: 2.25rem; height: 2.25rem; border-radius: 9999px; flex: none;
+  display: grid; place-items: center;
+  background: var(--acento); color: var(--acento-fg);
+  font-size: 0.72rem; font-weight: 700;
+}
+
+/* ===========================================================================
+   Barra lateral recolhida e barra do topo
+   ---------------------------------------------------------------------------
+   Recolhida, a barra vira um trilho de ícones; o nome aparece no `title`.
+   A escolha fica no navegador, como o tema.
+   =========================================================================== */
+.zz-sidebar { transition: width .18s ease; }
+.zz-sidebar.recolhida .zz-nav-item { justify-content: center; padding: 0.55rem 0; margin: 2px 0.6rem; }
+.zz-sidebar.recolhida .zz-nav-item > span:not(.zz-queue-badge) { display: none; }
+.zz-sidebar.recolhida .zz-nav-item .zz-queue-badge {
+  position: absolute; top: 0.1rem; right: 0.15rem; margin: 0; height: 1rem;
+  font-size: 0.55rem; padding: 0 0.25rem; min-width: 1rem;
+}
+.zz-sidebar.recolhida .zz-nav-grupo { padding: 0; height: 1px; margin: 0.6rem 1rem; background: var(--nav-linha); font-size: 0; }
+.zz-sidebar.recolhida .zz-nav-item.active::before { left: -0.6rem; }
+.zz-sidebar.recolhida .zz-nav-seta { display: none; }
+
+.zz-topo {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.6rem 1.5rem;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.zz-busca-global { position: relative; flex: 1; max-width: 26rem; }
+.zz-busca-global input { padding-left: 2.1rem; border-radius: 9999px; background: var(--surface-2); }
+.zz-busca-global > svg { position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: var(--text-3); }
+.zz-busca-lista {
+  position: absolute; z-index: 40; top: calc(100% + 0.35rem); left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 12px 32px var(--sombra-2); padding: 0.35rem; max-height: 22rem; overflow-y: auto;
+}
+.zz-busca-item {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left;
+  padding: 0.5rem 0.6rem; border-radius: 10px; font-size: 0.82rem; color: var(--text);
+}
+.zz-busca-item:hover, .zz-busca-item[aria-selected="true"] { background: var(--surface-2); }
+.zz-sino-ponto {
+  position: absolute; top: 0.2rem; right: 0.2rem; min-width: 1rem; height: 1rem; padding: 0 0.2rem;
+  border-radius: 9999px; background: var(--danger-solid); color: var(--danger-fg);
+  font-size: 0.58rem; font-weight: 700; display: grid; place-items: center;
+}

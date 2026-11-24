@@ -53,6 +53,42 @@ class DealIn(BaseModel):
     session_id: str | None = None
     campanha_id: str | None = None
     origem: str | None = None
+    temperatura: str | None = None
+    pagamento: list[str] | None = None
+    veiculo_id: str | None = None
+
+
+# Os três dados que uma revenda olha em todo lead: o quanto ele está quente,
+# como pretende pagar e qual carro quer. Aparecem em pílula no cartão do funil.
+TEMPERATURAS = ("quente", "morno", "frio")
+PAGAMENTOS = ("a_vista", "financiamento", "troca", "consorcio")
+
+
+def _temperatura(v: str | None) -> str | None:
+    v = (v or "").strip().lower()
+    if v and v not in TEMPERATURAS:
+        raise HTTPException(status_code=422, detail="Temperatura deve ser quente, morno ou frio")
+    return v or None
+
+
+def _pagamento(v: list[str] | None) -> list[str]:
+    itens = [x.strip().lower() for x in (v or []) if x and x.strip()]
+    if any(x not in PAGAMENTOS for x in itens):
+        raise HTTPException(status_code=422, detail="Forma de pagamento inválida")
+    return [x for x in PAGAMENTOS if x in itens]  # ordem fixa, sem repetição
+
+
+async def _veiculo(db, tenant_id: str, veiculo_id: str | None) -> str | None:
+    if not veiculo_id:
+        return None
+    if not await db.veiculos.find_one({"id": veiculo_id, "tenant_id": tenant_id}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Veículo não encontrado no estoque")
+    return veiculo_id
+
+
+def nome_veiculo(v: dict) -> str:
+    ano = v.get("ano_modelo")
+    return " ".join(str(x) for x in (v.get("marca"), v.get("modelo"), v.get("versao"), ano) if x)
 
 
 class DealPatch(BaseModel):
@@ -64,6 +100,9 @@ class DealPatch(BaseModel):
     previsao_fechamento: str | None = None
     origem: str | None = None
     ordem: int | None = None
+    temperatura: str | None = None
+    pagamento: list[str] | None = None
+    veiculo_id: str | None = None
 
 
 async def _get_pipeline(db, pipeline_id: str, tenant_id: str) -> dict:
@@ -293,9 +332,23 @@ async def board(pipeline_id: str, responsavel_id: str | None = None, q: str | No
     em_tela = [c["id"] for coluna in colunas for c in coluna["deals"]]
     sem_passo = await atividades.negocios_sem_proximo_passo(db, tenant_id, em_tela)
 
+    # O carro de interesse, para o cartão dizer "Onix 2019 · ABC1D23". Uma
+    # consulta para a tela inteira, pelo mesmo motivo do `sem_passo`.
+    ids_veiculo = list({c.get("veiculo_id") for coluna in colunas for c in coluna["deals"]
+                        if c.get("veiculo_id")})
+    veiculos = {}
+    if ids_veiculo:
+        async for v in db.veiculos.find(
+                {"id": {"$in": ids_veiculo}, "tenant_id": tenant_id},
+                {"_id": 0, "id": 1, "marca": 1, "modelo": 1, "versao": 1, "ano_modelo": 1,
+                 "placa": 1, "status": 1}):
+            veiculos[v["id"]] = {"id": v["id"], "nome": nome_veiculo(v), "placa": v.get("placa"),
+                                 "status": v.get("status")}
+
     for coluna in colunas:
         for c in coluna["deals"]:
             c["contact"] = contatos.get(c.get("contact_id"))
+            c["veiculo"] = veiculos.get(c.get("veiculo_id"))
             # Só cobra próximo passo de negócio aberto: fechado não precisa.
             c["sem_proximo_passo"] = c["id"] in sem_passo and c.get("status") == "aberto"
 
@@ -369,6 +422,9 @@ async def create_deal(body: DealIn, user=Depends(require_tenant_member)):
         "responsavel_id": body.responsavel_id,
         "previsao_fechamento": datas.valida_data(body.previsao_fechamento, "Previsão de fechamento"),
         "origem": (body.origem or "").strip() or None,
+        "temperatura": _temperatura(body.temperatura),
+        "pagamento": _pagamento(body.pagamento),
+        "veiculo_id": await _veiculo(db, tenant_id, body.veiculo_id),
         "campanha_id": origem["campanha_id"],
         "session_id": origem["session_id"],
         "motivo_perda": None,
@@ -410,8 +466,15 @@ async def deal_detail(deal_id: str, user=Depends(require_tenant_member)):
     eventos = await db.deal_events.find(
         {"tenant_id": tenant_id, "deal_id": deal_id}, {"_id": 0}
     ).sort([("created_at", -1), ("_id", -1)]).to_list(200)
+    veiculo = None
+    if deal.get("veiculo_id"):
+        v = await db.veiculos.find_one({"id": deal["veiculo_id"], "tenant_id": tenant_id},
+                                       {"_id": 0, "id": 1, "marca": 1, "modelo": 1, "versao": 1,
+                                        "ano_modelo": 1, "placa": 1, "preco": 1, "status": 1})
+        if v:
+            veiculo = {**v, "nome": nome_veiculo(v)}
     return {"deal": deal, "contact": contact, "responsavel": responsavel,
-            "campanha": campanha, "eventos": eventos}
+            "campanha": campanha, "eventos": eventos, "veiculo": veiculo}
 
 
 @router.patch("/deals/{deal_id}")
@@ -445,6 +508,13 @@ async def update_deal(deal_id: str, body: DealPatch, user=Depends(require_tenant
         campos["origem"] = body.origem.strip() or None
     if body.ordem is not None:
         campos["ordem"] = int(body.ordem)
+    # Vazio limpa: "" em temperatura e veículo, [] em pagamento.
+    if body.temperatura is not None:
+        campos["temperatura"] = _temperatura(body.temperatura)
+    if body.pagamento is not None:
+        campos["pagamento"] = _pagamento(body.pagamento)
+    if body.veiculo_id is not None:
+        campos["veiculo_id"] = await _veiculo(db, tenant_id, body.veiculo_id)
     if body.motivo_perda is not None and body.etapa_id is None:
         # Corrigir o motivo sem mover de etapa. Só vale em negócio perdido —
         # gravar motivo de perda num negócio ganho é ruído no relatório.

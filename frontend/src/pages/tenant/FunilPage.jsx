@@ -5,8 +5,9 @@ import { toast } from "sonner";
 import { formatBRL, parseBRLInput } from "@/lib/currency";
 import {
   Plus, SlidersHorizontal, TrendUp, MagnifyingGlass, X, Megaphone, User, Warning,
-  BellSlash, PencilSimple,
+  BellSlash, PencilSimple, Car, Wallet,
 } from "@phosphor-icons/react";
+import { Pilula, TEMPERATURAS, PAGAMENTOS } from "@/components/deals/etiquetas";
 import Modal from "@/components/ui/Modal";
 import { useAcao } from "@/hooks/useAcao";
 import { t } from "@/lib/textos";
@@ -14,9 +15,25 @@ import DealPanel from "@/components/deals/DealPanel";
 import FunilConfig from "@/components/deals/FunilConfig";
 import FunilMetricas from "@/components/deals/FunilMetricas";
 
+const iniciaisDe = (nome = "") =>
+  nome.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join("").toUpperCase() || "?";
+
+// "Há 3 dias" desde a última mudança: cartão parado há semanas salta aos olhos.
+function haQuanto(iso) {
+  if (!iso) return "";
+  const min = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (min < 60) return min < 2 ? "agora" : `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "há 1 dia" : d < 60 ? `há ${d} dias` : `há ${Math.floor(d / 30)} meses`;
+}
+
 function Cartao({ deal, onAbrir }) {
   const atrasado = deal.previsao_fechamento && deal.status === "aberto" &&
     new Date(deal.previsao_fechamento) < new Date();
+  const nome = deal.contact?.nome || deal.titulo;
+  const pag = (deal.pagamento || []).map((p) => PAGAMENTOS.find((x) => x.valor === p)?.rotulo || p);
   return (
     <div
       draggable
@@ -25,18 +42,47 @@ function Cartao({ deal, onAbrir }) {
         e.dataTransfer.effectAllowed = "move";
       }}
       onClick={() => onAbrir(deal.id)}
-      className="border border-line bg-surface p-3 mb-2 cursor-pointer hover:border-line-strong active:opacity-60 rounded-lg"
+      className="zz-cartao-funil border border-line bg-surface p-3 mb-2 cursor-pointer hover:border-line-strong active:opacity-60 rounded-xl"
       data-testid={`deal-card-${deal.id}`}
     >
-      <div className="text-sm font-semibold leading-tight mb-1 line-clamp-2">{deal.titulo}</div>
-      <div className="font-mono text-sm font-bold mb-1.5">{formatBRL(deal.valor)}</div>
-      {deal.contact && (
-        <div className="flex items-center gap-1 text-[11px] text-ink-2 truncate">
-          <User size={11} weight="bold" className="shrink-0" />
-          <span className="truncate">{deal.contact.nome}</span>
+      <div className="flex items-start gap-2.5">
+        <div className="zz-avatar-ini" aria-hidden>{iniciaisDe(nome)}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <div className="text-sm font-semibold leading-tight truncate flex-1">{nome}</div>
+            <span className="text-[10px] text-ink-3 shrink-0">{haQuanto(deal.updated_at || deal.created_at)}</span>
+          </div>
+          {deal.contact?.numero_whatsapp && (
+            <div className="text-[11px] font-mono text-ink-3 truncate">{deal.contact.numero_whatsapp}</div>
+          )}
+        </div>
+      </div>
+
+      {(deal.temperatura || deal.origem) && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {deal.temperatura && (
+            <Pilula classe={deal.temperatura}>
+              {TEMPERATURAS.find((x) => x.valor === deal.temperatura)?.rotulo}
+            </Pilula>
+          )}
+          {deal.origem && <Pilula title="Origem">{deal.origem}</Pilula>}
         </div>
       )}
-      <div className="flex items-center gap-2 mt-1.5">
+
+      <div className="mt-2 space-y-1 text-[11.5px] text-ink-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Car size={13} className="shrink-0 text-ink-3" />
+          <span className="truncate flex-1">{deal.veiculo?.nome || "Sem interesse"}</span>
+          {deal.veiculo?.placa && <span className="font-mono text-[10px] text-ink-3 shrink-0">{deal.veiculo.placa}</span>}
+        </div>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Wallet size={13} className="shrink-0 text-ink-3" />
+          <span className="truncate">{pag.length ? pag.join(" + ") : "Sem forma de pagamento"}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 mt-2 pt-2 border-t border-line">
+        <span className="font-mono text-[12px] font-bold">{deal.valor ? formatBRL(deal.valor) : ""}</span>
         {deal.sem_proximo_passo && (
           <span title="Sem próximo passo agendado — abra e agende" className="text-warning">
             <BellSlash size={12} weight="bold" />
@@ -48,7 +94,7 @@ function Cartao({ deal, onAbrir }) {
           </span>
         )}
         {deal.previsao_fechamento && (
-          <span className={`text-[10px] font-mono ${atrasado ? "text-danger font-bold" : "text-ink-3"}`}>
+          <span className={`ml-auto text-[10px] font-mono ${atrasado ? "text-danger font-bold" : "text-ink-3"}`}>
             {new Date(deal.previsao_fechamento).toLocaleDateString("pt-BR")}
           </span>
         )}
@@ -377,7 +423,7 @@ export default function FunilPage() {
                   {formatBRL(coluna.valor)}{coluna.valor_parcial ? "+" : ""}
                 </div>
               </div>
-              <div className="p-2 min-h-[120px] max-h-[calc(100vh-380px)] overflow-y-auto">
+              <div className="p-2 min-h-[120px] max-h-[calc(100vh-436px)] overflow-y-auto">
                 {coluna.deals.length === 0 && (
                   <div className="text-[11px] text-ink-4 text-center py-6">Arraste um cartão para cá</div>
                 )}
