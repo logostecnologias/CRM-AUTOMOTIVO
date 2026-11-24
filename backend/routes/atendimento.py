@@ -1,9 +1,12 @@
 """Central de Atendimento — lista de conversas + ações."""
 import asyncio
+import unicodedata
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+import deals
 import media_store
 from db import get_db
 from auth import accessible_connection_ids, get_current_user
@@ -372,3 +375,147 @@ async def summary(user: dict = Depends(get_current_user)):
         if linha["_id"] in counts:
             counts[linha["_id"]] = linha["n"]
     return counts
+
+
+# ---------------------------------------------------------------------------
+# Atalhos do funil na conversa: "Visita realizada" e "Venda"
+# ---------------------------------------------------------------------------
+#
+# Pedido do Atalaia (24/11/2026): o vendedor está na conversa quando o cliente
+# chega à loja ou fecha, e abrir o funil para achar o cartão era o passo que
+# ninguém dava. Os dois botões movem o negócio do contato pelo mesmo
+# `deals.aplicar_etapa` + `registrar_evento` da tela do funil, então a venda
+# vai para o Meta (Purchase) e o aviso de grupo dispara como em qualquer outro
+# movimento.
+
+def _sem_acento(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s or "")
+                   if unicodedata.category(c) != "Mn").lower()
+
+
+def _etapas_atalho(funil: dict) -> dict:
+    """Qual etapa é a "visita realizada" e qual é a venda, neste funil.
+
+    A visita é achada pelo nome, porque cada empresa nomeia o próprio funil: é
+    a etapa aberta com "visita" e "realiz" no nome, e sem ela o botão não
+    aparece. A venda é a primeira etapa de Ganho, que é o que o sistema
+    entende por venda (relatórios e Meta).
+    """
+    etapas = deals.etapas_em_ordem(funil)
+    visita = next((e for e in etapas if e.get("tipo", "aberta") == "aberta"
+                   and "visita" in _sem_acento(e["nome"])
+                   and "realiz" in _sem_acento(e["nome"])), None)
+    venda = next((e for e in etapas if e.get("tipo") == "ganho"), None)
+
+    def curto(e):
+        return {"id": e["id"], "nome": e["nome"]} if e else None
+
+    return {"visita": curto(visita), "venda": curto(venda)}
+
+
+async def _sessao_e_negocio(db, session_id: str, user: dict):
+    s = await db.conversation_sessions.find_one(
+        {"id": session_id, "tenant_id": user["tenant_id"]}, {"_id": 0})
+    if not s:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    accessible = await _accessible_connection_ids(db, user)
+    if accessible is not None and s.get("whatsapp_connection_id") not in accessible:
+        raise HTTPException(status_code=403, detail="Sem acesso a esta conexão")
+    funis = await deals.funis_da_empresa(db, user["tenant_id"])
+    negocio = None
+    if s.get("contact_id"):
+        abertos = await db.deals.find(
+            {"tenant_id": user["tenant_id"], "contact_id": s["contact_id"], "status": "aberto"},
+            {"_id": 0}).sort("updated_at", -1).limit(1).to_list(1)
+        negocio = abertos[0] if abertos else None
+    funil = next((f for f in funis if negocio and f["id"] == negocio.get("pipeline_id")), funis[0])
+    return s, funil, negocio
+
+
+@router.get("/sessions/{session_id}/funil")
+async def funil_da_conversa(session_id: str, user: dict = Depends(get_current_user)):
+    db = get_db()
+    s, funil, negocio = await _sessao_e_negocio(db, session_id, user)
+    resumo = None
+    if negocio:
+        etapa = deals.achar_etapa(funil, negocio.get("etapa_id")) or {}
+        resumo = {"id": negocio["id"], "titulo": negocio.get("titulo"),
+                  "valor": negocio.get("valor") or 0, "etapa": etapa.get("nome"),
+                  "etapa_id": negocio.get("etapa_id")}
+    return {**_etapas_atalho(funil), "negocio": resumo, "tem_contato": bool(s.get("contact_id"))}
+
+
+class FunilAcaoIn(BaseModel):
+    acao: str  # "visita" | "venda"
+    valor: float | None = None
+
+
+@router.post("/sessions/{session_id}/funil")
+async def funil_acao(session_id: str, body: FunilAcaoIn, user: dict = Depends(get_current_user)):
+    db = get_db()
+    tid = user["tenant_id"]
+    if body.acao not in ("visita", "venda"):
+        raise HTTPException(status_code=422, detail="Ação inválida")
+    if body.valor is not None and body.valor < 0:
+        raise HTTPException(status_code=422, detail="Valor inválido")
+    s, funil, negocio = await _sessao_e_negocio(db, session_id, user)
+    if not s.get("contact_id"):
+        raise HTTPException(status_code=400, detail="Conversa sem contato")
+    alvo_curto = _etapas_atalho(funil)[body.acao]
+    if not alvo_curto:
+        raise HTTPException(status_code=400, detail=(
+            "O funil não tem uma etapa de visita realizada" if body.acao == "visita"
+            else "O funil não tem uma etapa de Ganho"))
+    alvo = deals.achar_etapa(funil, alvo_curto["id"])
+
+    async def ordem_no_fim():
+        ultimo = await db.deals.find(
+            {"tenant_id": tid, "pipeline_id": funil["id"], "etapa_id": alvo["id"]},
+            {"_id": 0, "ordem": 1}).sort([("ordem", -1)]).limit(1).to_list(1)
+        return ((ultimo[0].get("ordem") or 0) + 1) if ultimo else 0
+
+    if not negocio:
+        contato = await db.contacts.find_one({"id": s["contact_id"], "tenant_id": tid},
+                                             {"_id": 0, "nome": 1, "numero_whatsapp": 1}) or {}
+        origem = await deals.atribuir_origem(db, tid, s["contact_id"], session_id, None)
+        nome = contato.get("nome") or contato.get("numero_whatsapp") or ""
+        negocio = {
+            "id": str(uuid.uuid4()), "tenant_id": tid, "pipeline_id": funil["id"],
+            "titulo": f"Negócio — {nome}".strip(), "contact_id": s["contact_id"],
+            "valor": float(body.valor or 0), "responsavel_id": user["id"],
+            "previsao_fechamento": None, "origem": "Conversa",
+            "campanha_id": origem["campanha_id"], "session_id": origem["session_id"],
+            "motivo_perda": None, "fechado_em": None, "ciclo_dias": None,
+            "ordem": await ordem_no_fim(), "criado_por": user["id"],
+            "created_at": _now(), "updated_at": _now(),
+        }
+        deals.aplicar_etapa(negocio, alvo)
+        negocio["ciclo_dias"] = deals.ciclo_dias(negocio)
+        await db.deals.insert_one(dict(negocio))
+        negocio.pop("_id", None)
+        await deals.registrar_evento(db, negocio, "criado", user,
+                                     para=alvo["nome"], valor_para=negocio["valor"])
+    else:
+        campos, eventos = {}, []
+        if body.valor is not None and float(body.valor) != float(negocio.get("valor") or 0):
+            campos["valor"] = float(body.valor)
+            eventos.append(("valor", {"valor_de": negocio.get("valor"), "valor_para": campos["valor"]}))
+        if negocio.get("etapa_id") != alvo["id"]:
+            de = (deals.achar_etapa(funil, negocio.get("etapa_id")) or {}).get("nome")
+            deals.aplicar_etapa(campos, alvo)
+            campos["ciclo_dias"] = deals.ciclo_dias({**negocio, **campos})
+            campos["ordem"] = await ordem_no_fim()
+            eventos.append((campos["status"] if campos["status"] != "aberto" else "etapa",
+                            {"de": de, "para": alvo["nome"]}))
+        if not campos:
+            return {"ok": True, "negocio_id": negocio["id"], "etapa": alvo["nome"], "mudou": False}
+        campos["updated_at"] = _now()
+        await db.deals.update_one({"id": negocio["id"], "tenant_id": tid}, {"$set": campos})
+        for tipo, extra in eventos:
+            await deals.registrar_evento(db, negocio, tipo, user, **extra)
+
+    texto = "registrou a visita realizada" if body.acao == "visita" else "registrou a venda"
+    await log_message(db, session_id, tid, "sistema",
+                      f"{user.get('name') or 'Alguém'} {texto} (funil: {alvo['nome']})",
+                      mtype="system")
+    return {"ok": True, "negocio_id": negocio["id"], "etapa": alvo["nome"], "mudou": True}

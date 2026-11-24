@@ -149,6 +149,10 @@ async def registrar_evento(db, deal: dict, tipo: str, autor: dict, **extra):
     if tipo in ("criado", "etapa", "ganho", "perdido"):
         import meta_conversoes  # tardio: o módulo puxa o cliente do WhatsApp
         meta_conversoes.agendar(db, deal["tenant_id"], deal["id"])
+    if tipo in ("criado", "etapa", "ganho"):
+        # O aviso no grupo da equipe ("Visita agendada"), pelo mesmo motivo.
+        import aviso_grupo  # tardio, como o de cima
+        aviso_grupo.agendar(db, deal, autor)
 
 
 async def atribuir_origem(db, tenant_id: str, contact_id: str,

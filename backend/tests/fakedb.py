@@ -27,7 +27,8 @@ def _set(doc, path, valor):
 def _casa_valor(valor, cond):
     if isinstance(cond, dict) and any(k.startswith("$") for k in cond):
         for op, alvo in cond.items():
-            if op == "$ne" and valor == alvo:
+            if op == "$ne" and (valor == alvo or (isinstance(valor, list) and alvo in valor)):
+                # Como no Mongo: sobre uma lista, `$ne` exige que nenhum item seja igual.
                 return False
             elif op == "$in" and valor not in (alvo or []):
                 if not (isinstance(valor, list) and set(valor) & set(alvo or [])):

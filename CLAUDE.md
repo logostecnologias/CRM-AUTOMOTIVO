@@ -174,6 +174,14 @@ O que muda de estrutura, e é a raiz de quase todas as decisões abaixo:
 - **Verificado só por teste** (`test_meta_conversoes.py`, `_request` espionado). Falta um envio real a um dataset e conferir em "Testar eventos" do Gerenciador de Eventos
 
 
+- **No canal WuzAPI não há clique de anúncio nem token de conexão.** O `ctwa_clid` só chega pelo `referral` da Cloud API, e o formato `business_messaging` exige WABA, que número de QR code não tem: os eventos saem como `system_generated`, casados pelo telefone em SHA-256. E sem token próprio na configuração nada sai, porque o fallback é o token da conexão Cloud API. Cliente em WuzAPI (Atalaia) precisa gerar o token no Gerenciador de Eventos
+
+### Atalhos do funil na conversa e aviso no grupo (24/11/2026)
+- Pedido do Atalaia. **"Visita realizada" e "Venda"** ao lado de Assumir/Finalizar (`components/atendimento/AtalhosFunil.jsx`, `GET/POST /atendimento/sessions/{id}/funil`). Movem o negócio **aberto** do contato (ou criam um, com quem clicou de dono) pelo mesmo `aplicar_etapa` + `registrar_evento` do funil, então a venda chega ao Meta como Purchase. A visita é a etapa aberta com "visita" e "realiz" no nome (cada empresa nomeia o funil; sem ela o botão some); a venda é a primeira etapa de Ganho, com o valor pedido num modal
+- **Aviso no grupo da equipe** (`aviso_grupo.py`, `routes/aviso_grupo.py`, bloco em Ajustes): negócio que entra numa etapa escolhida manda no grupo cliente, telefone, negócio, valor, próximo horário da Agenda, responsável e quem registrou. Gatilho em `deals.registrar_evento` (`criado`/`etapa`/`ganho`), como a Conversions API: todo caminho que move o negócio passa ali. Mensagem montada pelo sistema, não a IA no grupo
+- **Só WuzAPI**: a Cloud API não envia para grupo comum. O número precisa estar no grupo; a tela entra pelo link de convite (`/group/join`) ou lista os grupos do número (`/group/list`), e o envio é o `send_text` normal para o JID `…@g.us`. Os formatos da resposta da ponte são lidos com tolerância (`_grupo`) porque **não foram conferidos contra a ponte instalada**
+- Uma vez por (negócio, etapa), com claim atômico em `avisos_grupo.avisados`; falha da ponte grava `ultimo_erro` (a tela mostra) e libera o par para a próxima tentativa. Nunca levanta
+
 ### Atividades e follow-up
 - Ficha e funil guardam o que **já** aconteceu; atividade guarda o que ainda precisa acontecer. Sem isso o próximo passo mora na cabeça do vendedor, e o CRM vira cadastro morto
 - **"Atrasada" não é campo, é comparação.** O estado gravado é só `concluida_em` (nulo = pendente); atrasada é `pendente e vence_em < agora`, calculado na leitura (`atividades.com_atraso`). Gravar um status exigiria varredura periódica para virar a chave de cada atividade na hora certa — trabalho de fundo para produzir o que uma comparação de data já responde

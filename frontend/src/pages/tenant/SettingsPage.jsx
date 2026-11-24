@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import { formatBRL } from "@/lib/currency";
 import { rotuloPapel } from "@/lib/papeis";
 import { t } from "@/lib/textos";
+import AvisoGrupo from "@/components/whatsapp/AvisoGrupo";
 
 const SENHA_MINIMA = 8;
 
@@ -358,6 +359,7 @@ export default function SettingsPage() {
       <MinhaConta />
       <Empresa />
       {user?.role === "tenant_admin" && <MetaConversoes />}
+      {user?.role === "tenant_admin" && <AvisoGrupo Bloco={Bloco} Campo={Campo} />}
     </div>
   );
 }

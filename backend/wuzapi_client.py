@@ -50,6 +50,7 @@ into one.
 import base64
 import json
 import os
+import re
 import secrets
 import asyncio
 import logging
@@ -715,3 +716,52 @@ async def send_list(token: str, number: str, body: str, texto_botao: str,
     if rodape:
         payload["FooterText"] = rodape
     return await _request("POST", "/chat/send/list", _token_headers(token), payload)
+
+
+# ---------------------------------------------------------------------------
+# Grupos: o aviso de visita no grupo da equipe (`aviso_grupo.py`)
+# ---------------------------------------------------------------------------
+#
+# Só o canal não oficial fala com grupo: a Cloud API não envia para grupo de
+# WhatsApp comum. O número da conexão precisa ser membro do grupo; entrar é
+# pelo link de convite, que é o que o cliente tem na mão.
+
+RE_CONVITE = re.compile(r"(?:chat\.whatsapp\.com/(?:invite/)?)?([A-Za-z0-9]{18,32})")
+
+
+def codigo_do_convite(link: str) -> str | None:
+    """O código de um link `https://chat.whatsapp.com/XXXX?s=…` (ou o código puro)."""
+    m = RE_CONVITE.search((link or "").strip())
+    return m.group(1) if m else None
+
+
+def _dados(resposta: dict) -> Any:
+    return resposta.get("data", resposta) if isinstance(resposta, dict) else resposta
+
+
+def _grupo(item: dict) -> dict | None:
+    jid = item.get("JID") or item.get("jid") or item.get("GroupJID") or item.get("Jid")
+    if not jid:
+        return None
+    # O whatsmeow devolve o nome em `Name`, ou dentro de `GroupName.Name`
+    # conforme a versão da ponte.
+    nome = item.get("Name") or item.get("name")
+    if not nome and isinstance(item.get("GroupName"), dict):
+        nome = item["GroupName"].get("Name")
+    return {"jid": str(jid), "nome": str(nome or jid)}
+
+
+async def list_groups(token: str) -> list[dict]:
+    """Grupos de que o número da instância participa: [{jid, nome}]."""
+    dados = _dados(await _request("GET", "/group/list", _token_headers(token)))
+    itens = (dados.get("Groups") or dados.get("groups") or []) if isinstance(dados, dict) else (dados or [])
+    return [g for g in (_grupo(i) for i in itens if isinstance(i, dict)) if g]
+
+
+async def join_group(token: str, codigo: str) -> str | None:
+    """Entra no grupo pelo código do convite. Devolve o JID, quando a ponte diz."""
+    dados = _dados(await _request("POST", "/group/join", _token_headers(token), {"Code": codigo}))
+    if isinstance(dados, dict):
+        jid = dados.get("JID") or dados.get("GroupJID") or dados.get("jid") or dados.get("GroupID")
+        return str(jid) if jid else None
+    return None

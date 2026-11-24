@@ -7,6 +7,7 @@ import { Hand, HandPalm, CheckCircle, X, Warning } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { STATUS, SessionListItem, MessageBubble, Avatar, ChatComposer, fotoDoContato } from "@/components/atendimento/shared";
 import { t } from "@/lib/textos";
+import AtalhosFunil from "@/components/atendimento/AtalhosFunil";
 
 export default function InboxPage() {
   const { user } = useAuth();
@@ -136,6 +137,7 @@ export default function InboxPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                <AtalhosFunil sessionId={activeId} />
                 {active.status_atendimento === "bot" && (
                   <button onClick={assume} disabled={assumindo}
                     title={`Para o ${t("robô")} ou o ${t("agente de IA")} nesta conversa e passa a resposta para você`}
